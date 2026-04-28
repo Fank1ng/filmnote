@@ -1163,7 +1163,8 @@ function renderList() {
     const main = group.find(e=>e.user_id===currentUser.id) || group[0];
     const others = group.filter(e=>e.user_id!==currentUser.id);
     const isMine = main.user_id===currentUser.id;
-    const merged = group.length > 1;
+    const uniqueUsers = new Set(group.map(e=>e.user_id));
+    const merged = uniqueUsers.size > 1;
     const seasonCount = main.type==='series' ? allSeasonRatings.filter(s=>s.entry_id===main.id&&s.user_id===main.user_id).length : 0;
 
     const dimTags = (entry, colorClass) => Object.entries(entry.ratings||{}).map(([dim,score])=>

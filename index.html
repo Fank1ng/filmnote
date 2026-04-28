@@ -1,0 +1,1347 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FilmNote — 个人电影评价体系</title>
+<style>
+  :root {
+    --bg: #0f0f0f; --surface: #1a1a1a; --border: #2a2a2a;
+    --text: #e0e0e0; --text2: #888; --gold: #d4a853;
+    --gold-dim: #3a3020; --radius: 10px; --t: 0.2s ease;
+    --danger: #a04040; --danger-bg: #2a1515;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh; line-height: 1.6;
+  }
+  .hidden { display: none !important; }
+
+  /* ── Auth ── */
+  #authOverlay {
+    position: fixed; inset: 0; background: var(--bg);
+    display: flex; align-items: center; justify-content: center; z-index: 200;
+  }
+  .auth-box { width: 360px; padding: 32px; }
+  .auth-box h1 { font-size: 1.6rem; margin-bottom: 4px; }
+  .auth-box h1 span { color: var(--gold); }
+  .auth-box .subtitle { color: var(--text2); font-size: 0.85rem; margin-bottom: 24px; }
+  .auth-box input {
+    width: 100%; padding: 12px; margin-bottom: 10px;
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); border-radius: var(--radius); font-size: 0.95rem;
+  }
+  .auth-box input:focus { border-color: var(--gold); outline: none; }
+  .auth-box .btn { width: 100%; margin-bottom: 8px; padding: 12px; }
+  .auth-box .toggle { text-align: center; font-size: 0.85rem; color: var(--text2); }
+  .auth-box .toggle a { color: var(--gold); cursor: pointer; }
+  .auth-error { color: #d44; font-size: 0.85rem; margin-bottom: 8px; }
+
+  /* ── Header ── */
+  header {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 14px 24px; display: flex; align-items: center;
+    justify-content: space-between; position: sticky; top: 0; z-index: 10;
+  }
+  .logo { font-size: 1.3rem; font-weight: 700; }
+  .logo span { color: var(--gold); }
+  .header-right { display: flex; align-items: center; gap: 12px; }
+  .user-badge { font-size: 0.8rem; color: var(--gold); }
+
+  /* ── Tabs ── */
+  nav { display: flex; gap: 4px; padding: 16px 24px 0; }
+  nav button {
+    background: none; border: none; color: var(--text2);
+    padding: 10px 20px; cursor: pointer; font-size: 0.95rem;
+    border-radius: 8px 8px 0 0; transition: var(--t);
+  }
+  nav button:hover { color: var(--text); background: var(--surface); }
+  nav button.active { color: var(--gold); background: var(--surface); }
+
+  /* ── Main ── */
+  main { max-width: 960px; margin: 0 auto; padding: 24px; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+  .section-title { font-size: 1.1rem; font-weight: 600; margin-bottom: 20px; color: var(--gold); }
+
+  /* ── Type Toggle ── */
+  .type-toggle { display: flex; gap: 2px; margin-bottom: 20px; background: var(--surface); border-radius: var(--radius); padding: 3px; }
+  .type-toggle button {
+    flex: 1; padding: 8px 16px; border: none; cursor: pointer;
+    background: transparent; color: var(--text2); border-radius: 8px;
+    font-size: 0.9rem; font-weight: 500; transition: var(--t);
+  }
+  .type-toggle button.active { background: var(--gold-dim); color: var(--gold); }
+
+  /* ── TMDb Search ── */
+  .search-wrap { position: relative; margin-bottom: 16px; }
+  .search-wrap input {
+    width: 100%; padding: 10px 14px; background: var(--surface);
+    border: 1px solid var(--border); color: var(--text);
+    border-radius: var(--radius); font-size: 0.95rem;
+  }
+  .search-wrap input:focus { border-color: var(--gold); outline: none; }
+  .search-results {
+    position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); max-height: 360px; overflow-y: auto;
+    display: none; margin-top: 4px;
+  }
+  .search-results.open { display: block; }
+  .sr-item {
+    display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+    cursor: pointer; transition: var(--t); border-bottom: 1px solid var(--border);
+  }
+  .sr-item:hover { background: rgba(255,255,255,0.04); }
+  .sr-item:last-child { border-bottom: none; }
+  .sr-poster { width: 40px; height: 60px; border-radius: 4px; object-fit: cover; background: var(--border); }
+  .sr-info { flex: 1; }
+  .sr-title { font-size: 0.9rem; font-weight: 500; }
+  .sr-meta { font-size: 0.75rem; color: var(--text2); }
+  .sr-type { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; background: var(--gold-dim); color: var(--gold); }
+
+  /* ── Form ── */
+  .form-group { margin-bottom: 14px; }
+  .form-group label { display: block; font-size: 0.85rem; color: var(--text2); margin-bottom: 4px; }
+  .form-group input, .form-group textarea {
+    width: 100%; padding: 10px 14px; background: var(--surface);
+    border: 1px solid var(--border); color: var(--text);
+    border-radius: var(--radius); font-size: 0.95rem; font-family: inherit;
+  }
+  .form-group input:focus, .form-group textarea:focus { border-color: var(--gold); outline: none; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+
+  /* ── Dimensions ── */
+  .dim-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+  .dim-row { display: flex; align-items: center; gap: 12px; }
+  .dim-info { min-width: 120px; }
+  .dim-name { font-size: 0.9rem; font-weight: 500; }
+  .dim-weight { font-size: 0.72rem; color: var(--text2); }
+  .dim-slider { flex: 1; display: flex; align-items: center; gap: 10px; }
+  .dim-slider input[type="range"] {
+    flex: 1; -webkit-appearance: none; appearance: none;
+    height: 6px; background: var(--border); border-radius: 3px; outline: none;
+  }
+  .dim-slider input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 20px; height: 20px; border-radius: 50%;
+    background: var(--gold); cursor: pointer; border: 2px solid var(--bg);
+  }
+  .dim-score { width: 32px; text-align: center; font-weight: 700; font-size: 1rem; color: var(--gold); }
+  .total-preview {
+    background: var(--gold-dim); border: 1px solid var(--gold);
+    border-radius: var(--radius); padding: 14px 20px;
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;
+  }
+  .total-label { font-size: 0.9rem; color: var(--gold); }
+  .total-value { font-size: 2rem; font-weight: 800; color: var(--gold); }
+
+  /* ── Buttons ── */
+  .btn {
+    padding: 10px 20px; border-radius: var(--radius); cursor: pointer;
+    font-size: 0.9rem; font-weight: 600; border: none; transition: var(--t);
+  }
+  .btn-primary { background: var(--gold); color: #000; }
+  .btn-primary:hover { background: #c49b45; }
+  .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { border-color: var(--gold); color: var(--gold); }
+  .btn-danger { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); }
+  .btn-danger:hover { background: var(--danger); color: #fff; }
+  .btn-sm { padding: 5px 12px; font-size: 0.8rem; }
+  .btn-xs { padding: 3px 8px; font-size: 0.7rem; border-radius: 6px; }
+  .btn-group { display: flex; gap: 10px; margin-top: 20px; }
+
+  /* ── Season Rating Cards ── */
+  .season-section { margin-bottom: 20px; }
+  .season-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); margin-bottom: 8px; overflow: hidden;
+  }
+  .season-header {
+    padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;
+    cursor: pointer; user-select: none;
+  }
+  .season-header:hover { background: rgba(255,255,255,0.02); }
+  .season-title { font-weight: 600; font-size: 0.9rem; }
+  .season-score { color: var(--gold); font-weight: 700; }
+  .season-body { padding: 0 16px 16px; display: none; }
+  .season-body.open { display: block; }
+  .season-body .dim-list { gap: 8px; }
+  .season-body .dim-info { min-width: 100px; }
+  .season-body .dim-name { font-size: 0.8rem; }
+  .season-body .dim-slider input[type="range"]::-webkit-slider-thumb { width: 16px; height: 16px; }
+  .season-body .dim-score { font-size: 0.85rem; }
+
+  /* ── List ── */
+  .list-subtabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .list-subtabs button {
+    background: none; border: 1px solid var(--border); color: var(--text2);
+    padding: 6px 16px; cursor: pointer; font-size: 0.85rem; border-radius: 20px; transition: var(--t);
+  }
+  .list-subtabs button:hover { border-color: var(--gold); color: var(--text); }
+  .list-subtabs button.active { border-color: var(--gold); color: var(--gold); background: var(--gold-dim); }
+  .list-controls { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .list-controls input, .list-controls select {
+    padding: 8px 12px; background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; font-size: 0.85rem;
+  }
+  .list-controls input:focus, .list-controls select:focus { border-color: var(--gold); outline: none; }
+  .search-box { flex: 1; min-width: 180px; }
+
+  .movie-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 16px; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 14px; transition: var(--t); cursor: pointer;
+  }
+  .movie-card:hover { border-color: var(--gold); }
+  .mc-poster { width: 44px; height: 66px; border-radius: 6px; object-fit: cover; background: var(--border); flex-shrink: 0; }
+  .mc-score {
+    width: 52px; height: 52px; border-radius: 10px; flex-shrink: 0;
+    background: var(--gold-dim); border: 2px solid var(--gold);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.2rem; font-weight: 800; color: var(--gold);
+  }
+  .mc-info { flex: 1; min-width: 0; }
+  .mc-title { font-weight: 600; font-size: 0.95rem; }
+  .mc-meta { font-size: 0.78rem; color: var(--text2); margin-top: 2px; display: flex; align-items: center; gap: 8px; }
+  .mc-owner { font-size: 0.7rem; color: var(--gold); background: var(--gold-dim); padding: 1px 6px; border-radius: 4px; }
+  .mc-dim-scores { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+  .mc-dim-scores span { font-size: 0.68rem; color: var(--text2); background: rgba(255,255,255,0.04); padding: 1px 6px; border-radius: 4px; }
+  .mc-comment { font-size: 0.8rem; color: var(--text2); margin-top: 3px; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 350px; }
+  .mc-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .mc-season-badge { font-size: 0.7rem; color: var(--gold); background: var(--gold-dim); padding: 2px 8px; border-radius: 10px; }
+
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
+
+  /* ── Stats ── */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .stat-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px; text-align: center;
+  }
+  .stat-value { font-size: 2rem; font-weight: 800; color: var(--gold); }
+  .stat-label { font-size: 0.8rem; color: var(--text2); margin-top: 2px; }
+  .stat-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .stat-bar-label { width: 110px; font-size: 0.82rem; text-align: right; }
+  .stat-bar-track { flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+  .stat-bar-fill { height: 100%; background: var(--gold); border-radius: 4px; transition: width 0.5s ease; }
+  .stat-bar-value { width: 34px; font-size: 0.82rem; font-weight: 600; }
+  .score-dist { display: flex; gap: 4px; align-items: flex-end; height: 100px; margin-bottom: 20px; }
+  .score-dist-bar { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; }
+  .score-dist-fill { width: 100%; background: var(--gold); border-radius: 3px 3px 0 0; min-height: 2px; transition: height 0.5s ease; }
+  .score-dist-label { font-size: 0.7rem; color: var(--text2); }
+
+  /* ── Modal ── */
+  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 28px; max-width: 600px; width: 92%;
+    max-height: 80vh; overflow-y: auto;
+  }
+  .modal h3 { margin-bottom: 12px; color: var(--gold); }
+  .modal .friend-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .modal .friend-section h4 { font-size: 0.85rem; color: var(--text2); margin-bottom: 8px; }
+  .friend-rating {
+    background: rgba(255,255,255,0.02); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px; margin-bottom: 6px;
+    opacity: 0.8;
+  }
+  .friend-rating .fr-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .friend-rating .fr-name { font-size: 0.8rem; color: var(--gold); }
+  .friend-rating .fr-score { font-weight: 700; color: var(--gold); }
+
+  .settings-section { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
+
+  /* ── Toast ── */
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--surface); border: 1px solid var(--gold);
+    color: var(--text); padding: 12px 24px; border-radius: var(--radius);
+    font-size: 0.9rem; z-index: 300; opacity: 0; transition: opacity 0.3s;
+  }
+  .toast.show { opacity: 1; }
+
+  /* ── Spinner ── */
+  .spinner {
+    display: inline-block; width: 20px; height: 20px;
+    border: 2px solid var(--border); border-top-color: var(--gold);
+    border-radius: 50%; animation: spin 0.6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Responsive ── */
+  @media (max-width: 640px) {
+    .form-row, .form-row-3 { grid-template-columns: 1fr; }
+    .movie-card { flex-wrap: wrap; }
+    .mc-actions { width: 100%; justify-content: flex-end; }
+    .dim-info { min-width: 90px; }
+    header { padding: 10px 14px; }
+    main { padding: 14px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══ Auth Overlay ═══ -->
+<div id="authOverlay">
+  <div class="auth-box">
+    <h1>Film<span>Note</span></h1>
+    <p class="subtitle">登录或注册</p>
+    <div class="auth-error" id="authError"></div>
+    <input type="email" id="authEmail" placeholder="邮箱">
+    <input type="password" id="authPassword" placeholder="密码">
+    <input type="text" id="authName" placeholder="显示名称（注册时填写）">
+    <div style="display:flex;gap:10px">
+      <button class="btn btn-primary" id="loginBtn" style="flex:1">登录</button>
+      <button class="btn btn-secondary" id="signupBtn" style="flex:1">注册</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ Name Setup ═══ -->
+<div id="nameOverlay" class="modal-overlay">
+  <div class="modal" style="max-width:380px">
+    <h3>设置显示名称</h3>
+    <p style="color:var(--text2);font-size:0.85rem;margin-bottom:12px">你的名称将对朋友可见</p>
+    <input type="text" id="nameInput" placeholder="输入名称" style="width:100%;padding:10px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);margin-bottom:12px">
+    <button class="btn btn-primary" id="nameSaveBtn">保存</button>
+  </div>
+</div>
+
+<!-- ═══ Migrate Banner ═══ -->
+<div id="migrateBanner" class="hidden" style="background:var(--gold-dim);border:1px solid var(--gold);padding:12px 20px;text-align:center;font-size:0.85rem;color:var(--gold)">
+  检测到旧版本本地数据，<a id="migrateLink" style="color:var(--gold);text-decoration:underline;cursor:pointer;font-weight:700">点击迁移</a>到云端账号
+  <button id="dismissMigrate" style="background:none;border:none;color:var(--text2);cursor:pointer;margin-left:12px;font-size:1.1rem">&times;</button>
+</div>
+
+<!-- ═══ Main App ═══ -->
+<div id="mainApp" class="hidden">
+  <header>
+    <div class="logo">Film<span>Note</span></div>
+    <div class="header-right">
+      <span class="user-badge" id="headerUser"></span>
+      <span id="headerCount" style="font-size:0.85rem;color:var(--text2)"></span>
+      <button class="btn btn-sm btn-secondary" id="logoutBtn">退出</button>
+    </div>
+  </header>
+
+  <nav>
+    <button class="active" data-tab="rate">添加评价</button>
+    <button data-tab="list">影单</button>
+    <button data-tab="stats">统计分析</button>
+  </nav>
+
+  <main>
+    <!-- ═══ 添加评价 ═══ -->
+    <section class="tab-panel active" id="panel-rate">
+      <h2 class="section-title" id="formTitle">记录一部电影</h2>
+
+      <div class="type-toggle" id="typeToggle">
+        <button class="active" data-type="movie">🎬 电影</button>
+        <button data-type="series">📺 剧集</button>
+      </div>
+
+      <div class="search-wrap">
+        <input type="text" id="tmdbSearch" placeholder="🔍 从 TMDb 搜索电影/剧集信息，自动填入...">
+        <div class="search-results" id="searchResults"></div>
+      </div>
+
+      <form id="movieForm" autocomplete="off">
+        <input type="hidden" id="editId">
+        <input type="hidden" id="tmdbId">
+        <input type="hidden" id="posterPath">
+        <div class="form-row">
+          <div class="form-group">
+            <label>名称 *</label>
+            <input type="text" id="title" placeholder="电影或剧集名称" required>
+          </div>
+          <div class="form-group">
+            <label>上映年份</label>
+            <input type="number" id="year" placeholder="2024" min="1900" max="2100">
+          </div>
+        </div>
+        <div class="form-group">
+          <label>导演 / 主创</label>
+          <input type="text" id="director" placeholder="导演或编剧">
+        </div>
+
+        <div class="dim-list" id="mainDims"></div>
+
+        <div class="total-preview">
+          <span class="total-label">加权总分</span>
+          <span class="total-value" id="totalScorePreview">5.0</span>
+        </div>
+
+        <div class="form-group">
+          <label>短评（可选）</label>
+          <textarea id="comment" rows="2" placeholder="一句话记录感受..."></textarea>
+        </div>
+
+        <!-- Season ratings -->
+        <div class="season-section hidden" id="seasonSection">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <span style="font-weight:600;font-size:0.95rem">📺 分季评分</span>
+            <button type="button" class="btn btn-sm btn-secondary" id="addSeasonBtn">+ 添加新季</button>
+          </div>
+          <div id="seasonList"></div>
+        </div>
+
+        <div class="btn-group">
+          <button type="submit" class="btn btn-primary" id="submitBtn">保存评价</button>
+          <button type="button" class="btn btn-secondary hidden" id="cancelEditBtn">取消编辑</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- ═══ 影单 ═══ -->
+    <section class="tab-panel" id="panel-list">
+      <h2 class="section-title">我的影单</h2>
+      <div class="list-subtabs" id="listSubtabs">
+        <button class="active" data-ltype="movie">电影</button>
+        <button data-ltype="series">剧集</button>
+      </div>
+      <div class="list-controls">
+        <input type="text" class="search-box" id="searchInput" placeholder="搜索名称或导演...">
+        <select id="sortBy">
+          <option value="date-desc">最近添加</option>
+          <option value="date-asc">最早添加</option>
+          <option value="score-desc">评分最高</option>
+          <option value="score-asc">评分最低</option>
+          <option value="title">按片名 A-Z</option>
+        </select>
+        <select id="ownerFilter">
+          <option value="all">所有人</option>
+          <option value="me">仅自己</option>
+        </select>
+      </div>
+      <div id="movieList"></div>
+      <div class="empty-state" id="emptyState">
+        <p style="font-size:2rem">🎬</p>
+        <p>还没有评价记录</p>
+      </div>
+      <div class="empty-state hidden" id="loadingState">
+        <div class="spinner"></div>
+        <p style="margin-top:8px">加载中...</p>
+      </div>
+    </section>
+
+    <!-- ═══ 统计 ═══ -->
+    <section class="tab-panel" id="panel-stats">
+      <h2 class="section-title">统计概览</h2>
+      <div id="statsContent"></div>
+      <div class="settings-section">
+        <h3 style="margin-bottom:12px;color:var(--text2);font-size:0.9rem;">数据管理</h3>
+        <div class="btn-group">
+          <button class="btn btn-secondary" id="exportBtn">导出 JSON</button>
+          <button class="btn btn-secondary" id="importBtn">导入 JSON</button>
+          <input type="file" id="importFile" accept=".json" style="display:none">
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- Detail Modal -->
+<div class="modal-overlay" id="detailModal">
+  <div class="modal" id="modalContent"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+// ===== CONFIG =====
+const SUPABASE_URL = 'https://rkkakwmxzipxmofgrlwa.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJra2Frd214emlweG1vZmdybHdhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNjQ2NjUsImV4cCI6MjA5Mjk0MDY2NX0.r3L82v1z2QBmIkg2KbyD6S_dT0bAomIZ7cU4sS6vdNo';
+const TMDB_KEY = 'bedbd15b921f0127d7d8921337ea5a06';
+const TMDB_IMG = 'https://image.tmdb.org/t/p/w185';
+
+const WEIGHTS = { story:0.25, character:0.20, visual:0.15, editing:0.10, sound:0.10, emotion:0.20 };
+const DIM_LABELS = { story:'故事与剧本', character:'角色与表演', visual:'导演与视觉', editing:'剪辑与节奏', sound:'声音与配乐', emotion:'情感共鸣' };
+
+// ===== SUPABASE =====
+let db;
+try {
+  db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+} catch(e) {
+  console.error('Supabase init error:', e);
+  document.getElementById('authError').textContent = '初始化失败：'+e.message;
+}
+
+// ===== AUTH UI =====
+function showAuthError(msg) {
+  const el = document.getElementById('authError');
+  el.textContent = msg;
+  setTimeout(() => { el.textContent = ''; }, 4000);
+}
+
+// ===== STATE =====
+let currentUser = null;
+let currentProfile = null;
+let entryType = 'movie';
+let editingEntryId = null;
+let allEntries = [];
+let allSeasonRatings = [];
+let allProfiles = {};
+
+const authOverlay = document.getElementById('authOverlay');
+const mainApp = document.getElementById('mainApp');
+const nameOverlay = document.getElementById('nameOverlay');
+
+// ===== HELPERS =====
+function calcTotal(ratings) { let s=0; for(const [k,w] of Object.entries(WEIGHTS)) s+=(ratings[k]||5)*w; return Math.round(s*10)/10; }
+function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+function fmtDate(d){ if(!d) return ''; const dt=new Date(d); return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'); }
+function posterUrl(path) { return path ? TMDB_IMG+path : ''; }
+
+function toast(msg) {
+  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  setTimeout(()=>t.classList.remove('show'), 2500);
+}
+
+// ===== AUTH BUTTONS =====
+document.getElementById('signupBtn').addEventListener('click', async ()=>{
+  const btn = document.getElementById('signupBtn');
+  const origText = btn.textContent;
+  btn.textContent = '注册中...';
+  btn.disabled = true;
+  try {
+    const email = document.getElementById('authEmail').value.trim();
+    const password = document.getElementById('authPassword').value;
+    const name = document.getElementById('authName').value.trim();
+    if (!email || !password) { showAuthError('请填写邮箱和密码'); return; }
+    if (!name) { showAuthError('请填写显示名称'); return; }
+    if (!db) { showAuthError('初始化失败，请刷新页面'); return; }
+
+    const {data, error} = await db.auth.signUp({
+      email, password,
+      options: { data: { display_name: name } }
+    });
+    if (error) {
+      showAuthError(error.message.includes('already registered') ? '该邮箱已注册，请直接登录' : error.message);
+      return;
+    }
+    if (data.user?.identities?.length===0) { showAuthError('该邮箱已注册，请直接登录'); return; }
+    const {data: loginData, error: signInErr} = await db.auth.signInWithPassword({email, password});
+    if (signInErr) { showAuthError('注册成功但登录失败，请尝试手动登录'); return; }
+    await initApp(loginData.user);
+    toast('注册成功！');
+  } catch(e) {
+    showAuthError('错误: ' + (e.message||e));
+    console.error(e);
+  } finally {
+    btn.textContent = origText;
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('loginBtn').addEventListener('click', async ()=>{
+  const btn = document.getElementById('loginBtn');
+  const origText = btn.textContent;
+  btn.textContent = '登录中...';
+  btn.disabled = true;
+  try {
+    const email = document.getElementById('authEmail').value.trim();
+    const password = document.getElementById('authPassword').value;
+    if (!email || !password) { showAuthError('请填写邮箱和密码'); return; }
+    if (!db) { showAuthError('初始化失败，请刷新页面'); return; }
+
+    const {data: loginData, error} = await db.auth.signInWithPassword({email, password});
+    if (error) { showAuthError('登录失败，请检查邮箱和密码'); return; }
+    await initApp(loginData.user);
+  } catch(e) {
+    showAuthError('错误: ' + (e.message||e));
+    console.error(e);
+  } finally {
+    btn.textContent = origText;
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('logoutBtn').addEventListener('click', async ()=>{
+  await db.auth.signOut();
+  doLogout();
+});
+
+// Name setup
+document.getElementById('nameSaveBtn').addEventListener('click', async ()=>{
+  const name = document.getElementById('nameInput').value.trim();
+  if (!name) return;
+  await db.from('user_preferences').upsert({ user_id: currentUser.id, display_name: name });
+  currentProfile = { user_id: currentUser.id, display_name: name };
+  nameOverlay.classList.remove('open');
+  document.getElementById('headerUser').textContent = name;
+  loadAllData();
+});
+
+// ===== APP INIT =====
+async function initApp(user) {
+  currentUser = user;
+  authOverlay.classList.add('hidden');
+  mainApp.classList.remove('hidden');
+
+  const {data:pref} = await db.from('user_preferences').select('*').eq('user_id', user.id).maybeSingle();
+  if (pref) {
+    currentProfile = pref;
+    document.getElementById('headerUser').textContent = pref.display_name;
+    nameOverlay.classList.remove('open');
+    checkMigration();
+    await loadAllData();
+  } else {
+    document.getElementById('nameInput').value = user.user_metadata?.display_name || user.email?.split('@')[0] || '';
+    nameOverlay.classList.add('open');
+    document.getElementById('headerUser').textContent = '...';
+  }
+}
+
+function doLogout() {
+  currentUser = null;
+  currentProfile = null;
+  allEntries = [];
+  allSeasonRatings = [];
+  authOverlay.classList.remove('hidden');
+  mainApp.classList.add('hidden');
+  nameOverlay.classList.remove('open');
+  document.getElementById('migrateBanner').classList.add('hidden');
+}
+
+// ===== MIGRATION =====
+function checkMigration() {
+  const old = localStorage.getItem('filmnote_movies');
+  if (old && JSON.parse(old).length > 0) {
+    document.getElementById('migrateBanner').classList.remove('hidden');
+  }
+}
+document.getElementById('migrateLink').addEventListener('click', async ()=>{
+  const old = JSON.parse(localStorage.getItem('filmnote_movies')||'[]');
+  if (!old.length) return;
+  if (!confirm(`将迁移 ${old.length} 条旧记录到云端账号"${currentProfile?.display_name}"，确认？`)) return;
+
+  let count = 0;
+  for (const m of old) {
+    const entry = {
+      user_id: currentUser.id,
+      type: 'movie',
+      title: m.title,
+      year: m.year || null,
+      director: m.director || '',
+      ratings: m.ratings || {},
+      total_score: m.totalScore || calcTotal(m.ratings||{}),
+      comment: m.comment || '',
+      created_at: m.createdAt || new Date().toISOString(),
+      updated_at: m.updatedAt || new Date().toISOString()
+    };
+    const {error} = await db.from('entries').insert(entry);
+    if (!error) count++;
+  }
+  if (count) { localStorage.removeItem('filmnote_movies'); toast(`已迁移 ${count} 条记录`); }
+  document.getElementById('migrateBanner').classList.add('hidden');
+  loadAllData();
+});
+document.getElementById('dismissMigrate').addEventListener('click', ()=>{
+  document.getElementById('migrateBanner').classList.add('hidden');
+});
+
+// ===== DATA LOADING =====
+async function loadAllData() {
+  if (!currentUser) return;
+  try {
+    const [{data:entries},{data:seasons},{data:prefs}] = await Promise.all([
+      db.from('entries').select('*').order('created_at',{ascending:false}),
+      db.from('season_ratings').select('*').order('season_number',{ascending:true}),
+      db.from('user_preferences').select('*')
+    ]);
+    allEntries = entries || [];
+    allSeasonRatings = seasons || [];
+    allProfiles = {};
+    (prefs||[]).forEach(p=>{ allProfiles[p.user_id]=p; });
+    document.getElementById('headerCount').textContent = `共 ${allEntries.length} 部`;
+    renderList();
+    renderStats();
+  } catch(e) {
+    console.error('loadAllData error:', e);
+    toast('加载数据失败: ' + (e.message||e));
+  }
+}
+
+// ===== DIMENSION SLIDERS =====
+function buildDimSliders(prefix, ratings) {
+  return Object.entries(DIM_LABELS).map(([dim,label])=>`
+    <div class="dim-row">
+      <div class="dim-info"><div class="dim-name">${label}</div><div class="dim-weight">权重 ${WEIGHTS[dim]*100}%</div></div>
+      <div class="dim-slider">
+        <input type="range" min="1" max="10" value="${ratings[dim]||5}" data-prefix="${prefix}" data-dim="${dim}">
+        <span class="dim-score" data-prefix="${prefix}" data-dim="${dim}">${ratings[dim]||5}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function refreshMainDims() {
+  const ratings = {};
+  document.querySelectorAll('#mainDims input[type="range"]').forEach(s=>{
+    ratings[s.dataset.dim]=parseInt(s.value);
+  });
+  document.getElementById('mainDims').innerHTML = buildDimSliders('main', ratings);
+  bindDimSliders();
+  updateTotalPreview();
+}
+
+document.getElementById('mainDims').innerHTML = buildDimSliders('main', {});
+bindDimSliders();
+updateTotalPreview();
+
+function bindDimSliders() {
+  document.querySelectorAll('.dim-slider input[type="range"]').forEach(s=>{
+    s.addEventListener('input', ()=>{
+      const scoreEl = document.querySelector(`.dim-score[data-prefix="${s.dataset.prefix}"][data-dim="${s.dataset.dim}"]`);
+      if (scoreEl) scoreEl.textContent = s.value;
+      if (s.dataset.prefix==='main') updateTotalPreview();
+      else updateSeasonPreview(s.dataset.prefix);
+    });
+  });
+}
+
+function getMainRatings() {
+  const r = {};
+  document.querySelectorAll('#mainDims input[type="range"]').forEach(s=>{ r[s.dataset.dim]=parseInt(s.value); });
+  return r;
+}
+
+function updateTotalPreview() {
+  document.getElementById('totalScorePreview').textContent = calcTotal(getMainRatings()).toFixed(1);
+}
+
+function updateSeasonPreview(prefix) {
+  const r = {};
+  document.querySelectorAll(`.dim-slider input[data-prefix="${prefix}"]`).forEach(s=>{ r[s.dataset.dim]=parseInt(s.value); });
+  const badge = document.getElementById(`seasonTotal-${prefix}`);
+  if (badge) badge.textContent = calcTotal(r).toFixed(1);
+}
+
+// ===== SEASON RATINGS UI =====
+function addSeasonRow(seasonData) {
+  const sidx = seasonData?._idx || Date.now();
+  const snum = seasonData?.season_number || '';
+  const stitle = seasonData?.season_title || '';
+  const ratings = seasonData?.ratings || {};
+  const comment = seasonData?.comment || '';
+  const prefix = `s${sidx}`;
+
+  const card = document.createElement('div');
+  card.className = 'season-card';
+  card.dataset.seasonIdx = sidx;
+  card.innerHTML = `
+    <div class="season-header" data-prefix="${prefix}">
+      <span class="season-title">📺 第 <input type="number" value="${snum}" min="1" max="50" placeholder="?" style="width:50px;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:0.85rem" onclick="event.stopPropagation()"> 季 · <input type="text" value="${esc(stitle)}" placeholder="季标题（可选）" style="width:140px;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:0.85rem" onclick="event.stopPropagation()"></span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="season-score" id="seasonTotal-${prefix}">${calcTotal(ratings).toFixed(1)}</span>
+        <button type="button" class="btn btn-xs btn-danger" onclick="removeSeason('${sidx}')" title="删除此季">✕</button>
+      </div>
+    </div>
+    <div class="season-body">
+      <div class="dim-list">${buildDimSliders(prefix, ratings)}</div>
+      <div class="form-group">
+        <label>短评（可选）</label>
+        <textarea placeholder="对这季的评价..." style="width:100%;padding:8px 12px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);font-size:0.85rem;font-family:inherit" rows="1">${esc(comment)}</textarea>
+      </div>
+    </div>
+  `;
+  document.getElementById('seasonList').appendChild(card);
+
+  // Toggle expand
+  card.querySelector('.season-header').addEventListener('click', function(e) {
+    if (e.target.tagName==='INPUT') return;
+    card.querySelector('.season-body').classList.toggle('open');
+  });
+  // Expand by default for new seasons
+  if (!seasonData?._id) card.querySelector('.season-body').classList.add('open');
+
+  bindDimSliders();
+}
+
+function removeSeason(idx) {
+  const card = document.querySelector(`.season-card[data-season-idx="${idx}"]`);
+  if (card) card.remove();
+}
+
+function collectSeasonData() {
+  const seasons = [];
+  document.querySelectorAll('.season-card').forEach(card=>{
+    const idx = card.dataset.seasonIdx;
+    const prefix = `s${idx}`;
+    const numInput = card.querySelector('.season-header input[type="number"]');
+    const titleInput = card.querySelector('.season-header input[type="text"]');
+    const ratings = {};
+    card.querySelectorAll(`input[type="range"][data-prefix="${prefix}"]`).forEach(s=>{
+      ratings[s.dataset.dim] = parseInt(s.value);
+    });
+    const commentEl = card.querySelector('textarea');
+    seasons.push({
+      _idx: idx,
+      season_number: parseInt(numInput?.value) || 0,
+      season_title: titleInput?.value?.trim() || '',
+      ratings,
+      total_score: calcTotal(ratings),
+      comment: commentEl?.value?.trim() || ''
+    });
+  });
+  return seasons;
+}
+
+document.getElementById('addSeasonBtn').addEventListener('click', ()=>{
+  addSeasonRow(null);
+});
+
+// ===== TYPE TOGGLE =====
+document.querySelectorAll('#typeToggle button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('#typeToggle button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    entryType = btn.dataset.type;
+    const isSeries = entryType==='series';
+    document.getElementById('seasonSection').classList.toggle('hidden', !isSeries);
+    document.getElementById('formTitle').textContent = isSeries ? '记录一部剧集' : '记录一部电影';
+    document.getElementById('tmdbSearch').placeholder = isSeries ? '🔍 从 TMDb 搜索剧集信息，自动填入...' : '🔍 从 TMDb 搜索电影信息，自动填入...';
+  });
+});
+
+// ===== TMDB SEARCH =====
+let tmdbTimer = null;
+document.getElementById('tmdbSearch').addEventListener('input', function(){
+  clearTimeout(tmdbTimer);
+  const q = this.value.trim();
+  if (!q) { document.getElementById('searchResults').classList.remove('open'); return; }
+  tmdbTimer = setTimeout(()=>searchTmdb(q), 350);
+});
+
+async function searchTmdb(query) {
+  const container = document.getElementById('searchResults');
+  try {
+    const type = entryType==='series' ? 'tv' : 'movie';
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const res = await fetch(`https://api.themoviedb.org/3/search/${type}?api_key=${TMDB_KEY}&query=${encodeURIComponent(query)}&language=zh-CN`, { signal: ctrl.signal });
+    clearTimeout(timer);
+    const data = await res.json();
+    if (!data.results?.length) {
+      container.innerHTML = '<div style="padding:12px;color:var(--text2);font-size:0.85rem">无结果</div>';
+      container.classList.add('open');
+      return;
+    }
+    container.innerHTML = data.results.slice(0,8).map(r=>{
+      const title = r.title || r.name;
+      const year = (r.release_date||r.first_air_date||'').slice(0,4);
+      const poster = r.poster_path ? posterUrl(r.poster_path) : '';
+      return `
+        <div class="sr-item" data-tmdb-id="${r.id}" data-title="${esc(title)}" data-year="${year}" data-poster="${r.poster_path||''}">
+          ${poster ? `<img class="sr-poster" src="${poster}" alt="">` : '<div class="sr-poster"></div>'}
+          <div class="sr-info">
+            <div class="sr-title">${esc(title)}</div>
+            <div class="sr-meta">${year||'未知'} ${r.overview ? '· '+esc(r.overview.slice(0,60))+'...' : ''}</div>
+          </div>
+          <span class="sr-type">${entryType==='series'?'剧集':'电影'}</span>
+        </div>
+      `;
+    }).join('');
+    container.classList.add('open');
+
+    // Click handler
+    container.querySelectorAll('.sr-item').forEach(item=>{
+      item.addEventListener('click', async ()=>{
+        const tmdbId = item.dataset.tmdbId;
+        document.getElementById('title').value = item.dataset.title;
+        document.getElementById('year').value = item.dataset.year || '';
+        document.getElementById('tmdbId').value = tmdbId;
+        document.getElementById('posterPath').value = item.dataset.poster;
+        document.getElementById('tmdbSearch').value = '';
+        container.classList.remove('open');
+
+        // Fetch director
+        try {
+          const type = entryType==='series' ? 'tv' : 'movie';
+          const credRes = await fetch(`https://api.themoviedb.org/3/${type}/${tmdbId}/credits?api_key=${TMDB_KEY}&language=zh-CN`);
+          const credData = await credRes.json();
+          let director = '';
+          if (entryType==='series') {
+            const creator = (credData.crew||[]).find(c=>c.job==='Director'||c.job==='Executive Producer');
+            director = creator?.name || '';
+          } else {
+            const dir = (credData.crew||[]).find(c=>c.job==='Director');
+            director = dir?.name || '';
+          }
+          if (director) document.getElementById('director').value = director;
+        } catch(e){}
+        toast('已自动填入信息');
+      });
+    });
+  } catch(e) {
+    container.innerHTML = '<div style="padding:12px;color:var(--text2);font-size:0.85rem">搜索失败</div>';
+    container.classList.add('open');
+  }
+}
+
+// Close search on click outside
+document.addEventListener('click', e=>{
+  if (!e.target.closest('.search-wrap')) document.getElementById('searchResults').classList.remove('open');
+});
+
+// ===== FORM SUBMIT =====
+document.getElementById('movieForm').addEventListener('submit', async e=>{
+  e.preventDefault();
+  const btn = document.getElementById('submitBtn');
+  const origText = btn.textContent;
+  btn.textContent = '保存中...';
+  btn.disabled = true;
+  try {
+    const title = document.getElementById('title').value.trim();
+    if (!title) { toast('请填写电影名称'); return; }
+
+    const ratings = getMainRatings();
+    const entryData = {
+      user_id: currentUser.id,
+      type: entryType,
+      tmdb_id: parseInt(document.getElementById('tmdbId').value) || null,
+      title,
+      year: parseInt(document.getElementById('year').value) || null,
+      director: document.getElementById('director').value.trim(),
+      poster_path: document.getElementById('posterPath').value,
+      ratings,
+      total_score: calcTotal(ratings),
+      comment: document.getElementById('comment').value.trim(),
+      updated_at: new Date().toISOString()
+    };
+
+    let entryId = editingEntryId;
+
+    if (editingEntryId) {
+      const {error: updateErr} = await db.from('entries').update(entryData).eq('id', editingEntryId);
+      if (updateErr) { toast('更新失败: '+updateErr.message); return; }
+      await db.from('season_ratings').delete().eq('entry_id', editingEntryId).eq('user_id', currentUser.id);
+    } else {
+      entryData.created_at = new Date().toISOString();
+      // Verify session before insert
+      const {data:{session}} = await db.auth.getSession();
+      if (!session) { toast('登录已过期，请重新登录'); return; }
+      const {data:inserted, error: insertErr} = await db.from('entries').insert(entryData).select('id').single();
+      if (insertErr) {
+        toast('保存失败: '+insertErr.message+' (code:'+insertErr.code+')');
+        console.error('Insert error:', insertErr);
+        return;
+      }
+      if (!inserted) { toast('保存失败：未返回数据'); return; }
+      entryId = inserted.id;
+    }
+
+    if (entryType==='series') {
+      const seasons = collectSeasonData().filter(s=>s.season_number>0);
+      for (const s of seasons) {
+        await db.from('season_ratings').insert({
+          entry_id: entryId,
+          user_id: currentUser.id,
+          season_number: s.season_number,
+          season_title: s.season_title,
+          ratings: s.ratings,
+          total_score: s.total_score,
+          comment: s.comment,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+      }
+    }
+
+    toast(editingEntryId ? '评价已更新' : '评价已保存');
+    resetForm();
+    await loadAllData();
+    switchTab('list');
+  } catch(err) {
+    toast('保存出错: ' + (err.message||err));
+    console.error('Save error:', err);
+  } finally {
+    btn.textContent = origText;
+    btn.disabled = false;
+  }
+});
+
+function resetForm() {
+  editingEntryId = null;
+  document.getElementById('editId').value = '';
+  document.getElementById('title').value = '';
+  document.getElementById('year').value = '';
+  document.getElementById('director').value = '';
+  document.getElementById('tmdbId').value = '';
+  document.getElementById('posterPath').value = '';
+  document.getElementById('comment').value = '';
+  document.getElementById('tmdbSearch').value = '';
+  document.getElementById('seasonList').innerHTML = '';
+  document.getElementById('submitBtn').textContent = '保存评价';
+  document.getElementById('cancelEditBtn').classList.add('hidden');
+  // Reset type to movie
+  entryType = 'movie';
+  document.querySelectorAll('#typeToggle button').forEach(b=>b.classList.remove('active'));
+  document.querySelector('#typeToggle button[data-type="movie"]').classList.add('active');
+  document.getElementById('seasonSection').classList.add('hidden');
+  document.getElementById('formTitle').textContent = '记录一部电影';
+  // Reset sliders to defaults
+  document.getElementById('mainDims').innerHTML = buildDimSliders('main', {});
+  bindDimSliders();
+  updateTotalPreview();
+}
+
+document.getElementById('cancelEditBtn').addEventListener('click', resetForm);
+
+// ===== EDIT =====
+async function editEntry(id) {
+  const entry = allEntries.find(m=>m.id===id);
+  if (!entry) return;
+
+  editingEntryId = id;
+  entryType = entry.type;
+  document.getElementById('editId').value = id;
+  document.getElementById('title').value = entry.title;
+  document.getElementById('year').value = entry.year||'';
+  document.getElementById('director').value = entry.director||'';
+  document.getElementById('tmdbId').value = entry.tmdb_id||'';
+  document.getElementById('posterPath').value = entry.poster_path||'';
+  document.getElementById('comment').value = entry.comment||'';
+
+  // Set type toggle
+  document.querySelectorAll('#typeToggle button').forEach(b=>b.classList.remove('active'));
+  const typeBtn = document.querySelector(`#typeToggle button[data-type="${entry.type}"]`);
+  if (typeBtn) typeBtn.classList.add('active');
+  document.getElementById('seasonSection').classList.toggle('hidden', entry.type!=='series');
+  document.getElementById('formTitle').textContent = entry.type==='series'?'编辑剧集评价':'编辑电影评价';
+
+  // Set dimension sliders
+  document.getElementById('mainDims').innerHTML = buildDimSliders('main', entry.ratings||{});
+  bindDimSliders();
+  updateTotalPreview();
+
+  // Load season ratings
+  document.getElementById('seasonList').innerHTML = '';
+  if (entry.type==='series') {
+    const seasons = allSeasonRatings.filter(s=>s.entry_id===id&&s.user_id===currentUser.id);
+    seasons.forEach(s=>{
+      addSeasonRow({ _idx: s.id, _id: s.id, season_number: s.season_number, season_title: s.season_title, ratings: s.ratings, comment: s.comment });
+    });
+  }
+
+  document.getElementById('submitBtn').textContent = '更新评价';
+  document.getElementById('cancelEditBtn').classList.remove('hidden');
+  switchTab('rate');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
+async function deleteEntry(id) {
+  if (!confirm('确定删除这条评价？此操作不可恢复。')) return;
+  await db.from('entries').delete().eq('id', id);
+  if (editingEntryId===id) resetForm();
+  await loadAllData();
+  closeModal();
+  toast('已删除');
+}
+
+// ===== RENDER LIST =====
+let listType = 'movie';
+let ownerFilter = 'all';
+
+document.querySelectorAll('#listSubtabs button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('#listSubtabs button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    listType = btn.dataset.ltype;
+    renderList();
+  });
+});
+
+document.getElementById('ownerFilter').addEventListener('change', function(){
+  ownerFilter = this.value;
+  renderList();
+});
+
+document.getElementById('searchInput').addEventListener('input', renderList);
+document.getElementById('sortBy').addEventListener('change', renderList);
+
+function renderList() {
+  const container = document.getElementById('movieList');
+  const empty = document.getElementById('emptyState');
+  const loading = document.getElementById('loadingState');
+  const query = document.getElementById('searchInput').value.toLowerCase();
+  const sort = document.getElementById('sortBy').value;
+
+  let filtered = allEntries.filter(e=>{
+    if (e.type!==listType) return false;
+    if (ownerFilter==='me' && e.user_id!==currentUser.id) return false;
+    if (query) {
+      const hay = (e.title+(e.director||'')).toLowerCase();
+      if (!hay.includes(query)) return false;
+    }
+    return true;
+  });
+
+  filtered.sort((a,b)=>{
+    switch(sort) {
+      case 'date-desc': return new Date(b.created_at)-new Date(a.created_at);
+      case 'date-asc': return new Date(a.created_at)-new Date(b.created_at);
+      case 'score-desc': return b.total_score-a.total_score;
+      case 'score-asc': return a.total_score-b.total_score;
+      case 'title': return a.title.localeCompare(b.title,'zh');
+      default: return 0;
+    }
+  });
+
+  loading.classList.add('hidden');
+  if (!filtered.length) {
+    container.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+
+  container.innerHTML = filtered.map(e=>{
+    const isMine = e.user_id===currentUser.id;
+    const ownerName = allProfiles[e.user_id]?.display_name||'未知';
+    const seasonCount = e.type==='series' ? allSeasonRatings.filter(s=>s.entry_id===e.id&&s.user_id===e.user_id).length : 0;
+    return `
+      <div class="movie-card" onclick="showDetail('${e.id}')">
+        ${e.poster_path ? `<img class="mc-poster" src="${posterUrl(e.poster_path)}" alt="">` : '<div class="mc-poster"></div>'}
+        <div class="mc-score">${e.total_score.toFixed(1)}</div>
+        <div class="mc-info">
+          <div class="mc-title">
+            ${esc(e.title)}
+            ${e.year ? '<span style="color:var(--text2);font-weight:400">('+e.year+')</span>':''}
+            ${e.type==='series' ? '<span style="font-size:0.7rem;color:var(--gold)"> 剧集</span>' : ''}
+          </div>
+          <div class="mc-meta">
+            ${e.director ? esc(e.director)+' · ':''}${fmtDate(e.created_at)}
+            ${!isMine ? `<span class="mc-owner">${esc(ownerName)}</span>` : ''}
+            ${seasonCount>0 ? `<span class="mc-season-badge">S1-S${seasonCount}</span>` : ''}
+          </div>
+          <div class="mc-dim-scores">
+            ${Object.entries(e.ratings||{}).map(([dim,score])=>`<span>${DIM_LABELS[dim].slice(0,2)} ${score}</span>`).join('')}
+          </div>
+          ${e.comment ? `<div class="mc-comment">${esc(e.comment)}</div>` : ''}
+        </div>
+        ${isMine ? `
+        <div class="mc-actions" onclick="event.stopPropagation()">
+          <button class="btn btn-sm btn-secondary" onclick="editEntry('${e.id}')">编辑</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteEntry('${e.id}')">删除</button>
+        </div>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+// ===== DETAIL MODAL =====
+async function showDetail(id) {
+  const entry = allEntries.find(e=>e.id===id);
+  if (!entry) return;
+
+  const isMine = entry.user_id===currentUser.id;
+  const ownerName = allProfiles[entry.user_id]?.display_name||'未知';
+
+  // Find friend ratings (same tmdb_id or same title)
+  const friendEntries = allEntries.filter(e=>e.id!==id && (e.tmdb_id&&entry.tmdb_id?e.tmdb_id===entry.tmdb_id:e.title===entry.title));
+
+  // Season ratings for this entry
+  const seasons = allSeasonRatings.filter(s=>s.entry_id===id);
+
+  const modal = document.getElementById('detailModal');
+  const content = document.getElementById('modalContent');
+  content.innerHTML = `
+    <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px">
+      ${entry.poster_path ? `<img src="${posterUrl(entry.poster_path)}" style="width:80px;border-radius:8px" alt="">` : ''}
+      <div>
+        <h3 style="margin-bottom:4px">${esc(entry.title)} ${entry.year?'('+entry.year+')':''}</h3>
+        ${entry.director ? `<p style="color:var(--text2);font-size:0.85rem">${esc(entry.director)}</p>` : ''}
+        <p style="color:var(--text2);font-size:0.8rem">${ownerName} · ${fmtDate(entry.created_at)} ${entry.type==='series'?'· 剧集':''}</p>
+        <p style="font-size:1.8rem;font-weight:800;color:var(--gold);margin-top:4px">${entry.total_score.toFixed(1)} / 10</p>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
+      ${Object.entries(entry.ratings||{}).map(([dim,score])=>`
+        <div style="display:flex;justify-content:space-between;font-size:0.85rem">
+          <span>${DIM_LABELS[dim]} <span style="color:var(--text2);font-size:0.7rem">(×${(WEIGHTS[dim]*100).toFixed(0)}%)</span></span>
+          <strong style="color:var(--gold)">${score}</strong>
+        </div>
+      `).join('')}
+    </div>
+    ${entry.comment ? `<p style="font-style:italic;color:var(--text2);margin-bottom:12px">"${esc(entry.comment)}"</p>` : ''}
+    ${seasons.length ? `
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+        <h4 style="font-size:0.85rem;color:var(--text2);margin-bottom:8px">分季评分</h4>
+        ${seasons.map(s=>`
+          <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">
+            <span style="font-size:0.85rem">S${s.season_number} ${s.season_title?esc(s.season_title):''}</span>
+            <span style="font-weight:700;color:var(--gold)">${s.total_score.toFixed(1)}</span>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+    ${friendEntries.length ? `
+      <div class="friend-section">
+        <h4>朋友评分</h4>
+        ${friendEntries.map(f=>`
+          <div class="friend-rating">
+            <div class="fr-header">
+              <span class="fr-name">${esc(allProfiles[f.user_id]?.display_name||'未知')}</span>
+              <span class="fr-score">${f.total_score.toFixed(1)} / 10</span>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:0.75rem;color:var(--text2)">
+              ${Object.entries(f.ratings||{}).map(([dim,score])=>`<span>${DIM_LABELS[dim].slice(0,2)} ${score}</span>`).join('')}
+            </div>
+            ${f.comment ? `<p style="font-size:0.8rem;color:var(--text2);font-style:italic;margin-top:4px">"${esc(f.comment)}"</p>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+    <div class="btn-group" style="justify-content:flex-end">
+      ${isMine ? `<button class="btn btn-secondary btn-sm" onclick="editEntry('${entry.id}');closeModal()">编辑</button>` : ''}
+      <button class="btn btn-secondary btn-sm" onclick="closeModal()">关闭</button>
+    </div>
+  `;
+  modal.classList.add('open');
+}
+
+function closeModal() { document.getElementById('detailModal').classList.remove('open'); }
+document.getElementById('detailModal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeModal(); });
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
+
+// ===== STATS =====
+function renderStats() {
+  const container = document.getElementById('statsContent');
+  if (allEntries.length===0) {
+    container.innerHTML = '<div class="empty-state"><p>暂无评价数据</p></div>';
+    return;
+  }
+
+  const myEntries = allEntries.filter(e=>e.user_id===currentUser.id);
+  const movies = myEntries.filter(e=>e.type==='movie');
+  const series = myEntries.filter(e=>e.type==='series');
+
+  const useEntries = myEntries.length ? myEntries : allEntries;
+  const avgTotal = useEntries.reduce((s,m)=>s+m.total_score,0)/useEntries.length;
+  const best = useEntries.reduce((a,b)=>a.total_score>b.total_score?a:b);
+  const worst = useEntries.reduce((a,b)=>a.total_score<b.total_score?a:b);
+
+  const dimAvgs = {};
+  for (const dim of Object.keys(WEIGHTS)) {
+    dimAvgs[dim] = useEntries.reduce((s,m)=>s+(m.ratings[dim]||5),0)/useEntries.length;
+  }
+
+  const dist = new Array(10).fill(0);
+  useEntries.forEach(m=>{ const b=Math.min(Math.floor(m.total_score)-1,9); if(b>=0) dist[b]++; });
+  const maxDist = Math.max(...dist,1);
+
+  container.innerHTML = `
+    <div class="stats-grid">
+      <div class="stat-card"><div class="stat-value">${avgTotal.toFixed(1)}</div><div class="stat-label">平均分</div></div>
+      <div class="stat-card"><div class="stat-value">${movies.length}</div><div class="stat-label">电影</div></div>
+      <div class="stat-card"><div class="stat-value">${series.length}</div><div class="stat-label">剧集</div></div>
+      <div class="stat-card"><div class="stat-value">${best.total_score.toFixed(1)}</div><div class="stat-label">最高分 · ${esc(best.title.slice(0,8))}</div></div>
+      <div class="stat-card"><div class="stat-value">${worst.total_score.toFixed(1)}</div><div class="stat-label">最低分 · ${esc(worst.title.slice(0,8))}</div></div>
+    </div>
+
+    <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分</h3>
+    ${Object.entries(dimAvgs).map(([dim,avg])=>`
+      <div class="stat-bar-row">
+        <span class="stat-bar-label">${DIM_LABELS[dim]}</span>
+        <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${(avg/10)*100}%"></div></div>
+        <span class="stat-bar-value">${avg.toFixed(1)}</span>
+      </div>
+    `).join('')}
+
+    <h3 style="margin:20px 0 10px;font-size:0.9rem;color:var(--text2)">评分分布</h3>
+    <div class="score-dist">
+      ${dist.map((c,i)=>`
+        <div class="score-dist-bar">
+          <span style="font-size:0.68rem;font-weight:600">${c||''}</span>
+          <div class="score-dist-fill" style="height:${(c/maxDist)*100}%"></div>
+          <span class="score-dist-label">${i+1}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// ===== TABS =====
+function switchTab(name) {
+  document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.querySelector(`nav button[data-tab="${name}"]`)?.classList.add('active');
+  document.getElementById(`panel-${name}`)?.classList.add('active');
+  if (name==='list') renderList();
+  if (name==='stats') renderStats();
+}
+document.querySelectorAll('nav button').forEach(btn=>{ btn.addEventListener('click', ()=>switchTab(btn.dataset.tab)); });
+
+// ===== EXPORT / IMPORT =====
+document.getElementById('exportBtn').addEventListener('click', async ()=>{
+  const data = {
+    entries: allEntries.filter(e=>e.user_id===currentUser.id),
+    season_ratings: allSeasonRatings.filter(s=>s.user_id===currentUser.id),
+    exported_at: new Date().toISOString()
+  };
+  const blob = new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href=url; a.download=`filmnote-${new Date().toISOString().slice(0,10)}.json`; a.click();
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById('importBtn').addEventListener('click', ()=>{
+  document.getElementById('importFile').click();
+});
+
+document.getElementById('importFile').addEventListener('change', async e=>{
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async ev=>{
+    try {
+      const data = JSON.parse(ev.target.result);
+      const entries = data.entries || data; // support both formats
+      if (!Array.isArray(entries)) throw new Error('格式错误');
+      if (!confirm(`将导入 ${entries.length} 条记录，确认？`)) return;
+
+      let count=0;
+      for (const m of entries) {
+        const {error} = await db.from('entries').insert({
+          user_id: currentUser.id,
+          type: m.type||'movie',
+          tmdb_id: m.tmdb_id||null,
+          title: m.title,
+          year: m.year||null,
+          director: m.director||'',
+          poster_path: m.poster_path||'',
+          ratings: m.ratings||{},
+          total_score: m.total_score||calcTotal(m.ratings||{}),
+          comment: m.comment||'',
+          created_at: m.created_at||new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        });
+        if (!error) count++;
+      }
+      toast(`已导入 ${count} 条记录`);
+      await loadAllData();
+    } catch(err) {
+      toast('导入失败：文件格式不正确');
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
+// ===== PAGE LOAD INIT =====
+(async ()=>{
+  const {data:{session}} = await db.auth.getSession();
+  if (session?.user) {
+    await initApp(session.user);
+  }
+})();
+</script>
+</body>
+</html>

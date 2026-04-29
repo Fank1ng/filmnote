@@ -1443,7 +1443,7 @@ function renderList() {
               ${main.type==='series' ? '<span style="font-size:0.7rem;color:var(--gold)"> 剧集</span>' : ''}
             </div>
             <div class="mc-meta">
-              ${main.director ? esc(main.director)+' · ':''}
+              ${main.director ? esc(main.director)+' · ':''}${fmtDate(main.created_at)}
               ${seasonCount>0 ? `<span class="mc-season-badge">S1-S${seasonCount}</span>` : ''}
             </div>
             <div class="mc-dim-scores" style="flex-direction:column;gap:2px">
@@ -1460,7 +1460,7 @@ function renderList() {
       return `
         <div class="movie-card" id="entry-${main.id}" onclick="showDetail('${main.id}')" aria-label="${esc(main.title)} - ${esc(ownerName)} ${getEntryScore(main).toFixed(1)}分">
           ${main.poster_path ? `<img class="mc-poster" src="${posterUrl(main.poster_path)}" alt="">` : '<div class="mc-poster"></div>'}
-          <div class="mc-score" style="border-color:${getUserColor(main.user_id).main};background:${getUserColor(main.user_id).dim};color:${getUserColor(main.user_id).main}">${getEntryScore(main).toFixed(1)}</div>
+          <div class="mc-scores-compare"><div class="mc-score" style="border-color:${getUserColor(main.user_id).main};background:${getUserColor(main.user_id).dim};color:${getUserColor(main.user_id).main}">${getEntryScore(main).toFixed(1)}</div></div>
           <div class="mc-info">
             <div class="mc-title">
               ${esc(main.title)}

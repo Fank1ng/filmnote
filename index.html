@@ -770,6 +770,8 @@ let highlightEntryId = null;
 let allEntries = [];
 let allSeasonRatings = [];
 let allProfiles = {};
+let realtimeChannel = null;
+let realtimeDebounce = null;
 
 const authOverlay = $['authOverlay'];
 const mainApp = $['mainApp'];
@@ -884,7 +886,8 @@ $['nameSaveBtn'].addEventListener('click', async ()=>{
   currentProfile = { user_id: currentUser.id, display_name: name };
   nameOverlay.classList.remove('open');
   $['headerUser'].textContent = name;
-  loadAllData();
+  await loadAllData();
+  subscribeToRealtime();
 });
 
 // ===== APP INIT =====
@@ -900,6 +903,7 @@ async function initApp(user) {
     nameOverlay.classList.remove('open');
     checkMigration();
     await loadAllData();
+    subscribeToRealtime();
   } else {
     $['nameInput'].value = user.user_metadata?.display_name || user.email?.split('@')[0] || '';
     nameOverlay.classList.add('open');
@@ -908,6 +912,7 @@ async function initApp(user) {
 }
 
 function doLogout() {
+  unsubscribeRealtime();
   currentUser = null;
   currentProfile = null;
   allEntries = [];
@@ -1035,6 +1040,54 @@ function updateHeaderCount() {
   const sCount = allEntries.filter(e=>e.type==='series' && e.user_id===currentUser.id).length;
   const hparts = []; if (mCount) hparts.push(`${mCount}部电影`); if (sCount) hparts.push(`${sCount}部剧集`);
   $['headerCount'].textContent = hparts.length ? `共 ${hparts.join(' ')}` : '暂无记录';
+}
+
+// ===== REALTIME SYNC =====
+function subscribeToRealtime() {
+  if (realtimeChannel) return;
+  try {
+    realtimeChannel = db.channel('filmnote-changes')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'entries' },
+        (payload) => handleRealtimeChange(payload, 'entries')
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'season_ratings' },
+        (payload) => handleRealtimeChange(payload, 'seasons')
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'user_preferences' },
+        (payload) => handleRealtimeChange(payload, 'prefs')
+      )
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') console.log('Realtime: connected');
+        if (status === 'CHANNEL_ERROR') { console.warn('Realtime error, retrying...'); realtimeChannel = null; setTimeout(subscribeToRealtime, 3000); }
+        if (status === 'CLOSED') { realtimeChannel = null; }
+      });
+  } catch(e) {
+    console.warn('Realtime subscription failed:', e.message);
+    realtimeChannel = null;
+  }
+}
+
+function handleRealtimeChange(payload, source) {
+  // Skip own changes (already reflected in UI)
+  const uid = payload.new?.user_id || payload.old?.user_id;
+  if (uid === currentUser?.id) return;
+
+  // Debounce rapid changes
+  clearTimeout(realtimeDebounce);
+  realtimeDebounce = setTimeout(() => {
+    loadAllData();
+  }, 800);
+}
+
+function unsubscribeRealtime() {
+  if (realtimeChannel) {
+    realtimeChannel.unsubscribe();
+    realtimeChannel = null;
+  }
+  clearTimeout(realtimeDebounce);
 }
 
 // ===== DIMENSION SLIDERS =====

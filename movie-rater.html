@@ -628,6 +628,12 @@ const nameOverlay = $['nameOverlay'];
 
 // ===== HELPERS =====
 function calcTotal(ratings) { let s=0; for(const [k,w] of Object.entries(WEIGHTS)) s+=(ratings[k]||5)*w; return Math.round(s*10)/10; }
+function getEntryScore(entry) {
+  if (entry.type !== 'series') return entry.total_score;
+  const seasons = allSeasonRatings.filter(s => s.entry_id === entry.id && s.user_id === entry.user_id);
+  if (seasons.length === 0) return entry.total_score;
+  return seasons.reduce((sum, se) => sum + se.total_score, 0) / seasons.length;
+}
 function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
 function fmtDate(d){ if(!d) return ''; const dt=new Date(d); return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0'); }
 function posterUrl(path) { return path ? TMDB_IMG+path : ''; }
@@ -810,8 +816,8 @@ async function loadAllData() {
     allSeasonRatings = seasons || [];
     allProfiles = {};
     (prefs||[]).forEach(p=>{ allProfiles[p.user_id]=p; });
-    const mCount = allEntries.filter(e=>e.type==='movie').length;
-    const sCount = allEntries.filter(e=>e.type==='series').length;
+    const mCount = allEntries.filter(e=>e.type==='movie' && e.user_id===currentUser.id).length;
+    const sCount = allEntries.filter(e=>e.type==='series' && e.user_id===currentUser.id).length;
     const hparts = []; if (mCount) hparts.push(`${mCount}部电影`); if (sCount) hparts.push(`${sCount}部剧集`);
     $['headerCount'].textContent = hparts.length ? `共 ${hparts.join(' ')}` : '暂无记录';
     renderList();
@@ -1281,7 +1287,7 @@ function renderList() {
   let filtered = allEntries.filter(e=>{
     if (e.type!==listType) return false;
     if (ownerFilter==='me' && e.user_id!==currentUser.id) return false;
-    if (scoreFilterVal!=='all' && Math.floor(e.total_score)!==parseInt(scoreFilterVal)) return false;
+    if (scoreFilterVal!=='all' && Math.floor(getEntryScore(e))!==parseInt(scoreFilterVal)) return false;
     if (query) {
       const hay = (e.title+(e.director||'')).toLowerCase();
       if (!hay.includes(query)) return false;
@@ -1293,8 +1299,8 @@ function renderList() {
     switch(sort) {
       case 'date-desc': return new Date(b.created_at)-new Date(a.created_at);
       case 'date-asc': return new Date(a.created_at)-new Date(b.created_at);
-      case 'score-desc': return b.total_score-a.total_score;
-      case 'score-asc': return a.total_score-b.total_score;
+      case 'score-desc': return getEntryScore(b)-getEntryScore(a);
+      case 'score-asc': return getEntryScore(a)-getEntryScore(b);
       case 'title': return a.title.localeCompare(b.title,'zh');
       default: return 0;
     }
@@ -1324,8 +1330,6 @@ function renderList() {
 
   // Pagination: slice groups for current page
   const pageGroups = groups.slice(0, listPageNum * listPageSize);
-  const hasMore = pageGroups.length < groups.length;
-
   container.innerHTML = pageGroups.map(group=>{
     const main = group.find(e=>e.user_id===currentUser.id) || group[0];
     const others = group.filter(e=>e.user_id!==currentUser.id);
@@ -1351,7 +1355,7 @@ function renderList() {
         const uc = getUserColor(e.user_id);
         const uname = allProfiles[e.user_id]?.display_name||'未知';
         scoreBadges += `<div class="mc-score-sm mc-score-${uc.key}" title="${esc(uname)}">
-          <span class="mc-score-label">${esc(uname)}</span>${e.total_score.toFixed(1)}</div>`;
+          <span class="mc-score-label">${esc(uname)}</span>${getEntryScore(e).toFixed(1)}</div>`;
         let act = '';
         if (showActions) {
           act = `<div class="mc-actions" onclick="event.stopPropagation()" style="margin-left:auto">
@@ -1360,12 +1364,12 @@ function renderList() {
           </div>`;
         }
         dimRowsHtml += `<div class="mc-dim-row-user" style="display:flex;align-items:center;gap:6px;padding:2px 0">
-          <span class="mc-dim-user" style="color:${uc.main}">${esc(uname)}</span><span class="mc-dim-dots">${dimTags(e,uc)}</span><span class="mc-dim-total" style="color:${uc.main}">总分 ${e.total_score.toFixed(1)}</span>${act}</div>`;
+          <span class="mc-dim-user" style="color:${uc.main}">${esc(uname)}</span><span class="mc-dim-dots">${dimTags(e,uc)}</span><span class="mc-dim-total" style="color:${uc.main}">总分 ${getEntryScore(e).toFixed(1)}</span>${act}</div>`;
       }
 
       // Helper: render average row for a list of entries
       function renderAvgRow(entries) {
-        const avgTotal = entries.reduce((s,e)=>s+e.total_score,0)/entries.length;
+        const avgTotal = entries.reduce((s,e)=>s+getEntryScore(e),0)/entries.length;
         const avgDims = {};
         for (const dim of Object.keys(WEIGHTS)) {
           avgDims[dim] = Math.round(entries.reduce((s,e)=>s+(e.ratings[dim]||5),0)/entries.length);
@@ -1434,9 +1438,9 @@ function renderList() {
       // Single entry
       const ownerName = allProfiles[main.user_id]?.display_name||'未知';
       return `
-        <div class="movie-card" id="entry-${main.id}" onclick="showDetail('${main.id}')" aria-label="${esc(main.title)} - ${esc(ownerName)} ${main.total_score.toFixed(1)}分">
+        <div class="movie-card" id="entry-${main.id}" onclick="showDetail('${main.id}')" aria-label="${esc(main.title)} - ${esc(ownerName)} ${getEntryScore(main).toFixed(1)}分">
           ${main.poster_path ? `<img class="mc-poster" src="${posterUrl(main.poster_path)}" alt="">` : '<div class="mc-poster"></div>'}
-          <div class="mc-score" style="border-color:${getUserColor(main.user_id).main};background:${getUserColor(main.user_id).dim};color:${getUserColor(main.user_id).main}">${main.total_score.toFixed(1)}</div>
+          <div class="mc-score" style="border-color:${getUserColor(main.user_id).main};background:${getUserColor(main.user_id).dim};color:${getUserColor(main.user_id).main}">${getEntryScore(main).toFixed(1)}</div>
           <div class="mc-info">
             <div class="mc-title">
               ${esc(main.title)}
@@ -1450,7 +1454,7 @@ function renderList() {
             </div>
             <div class="mc-dim-scores">
               <span class="mc-dim-dots">${Object.entries(main.ratings||{}).map(([dim,score])=>`<span>${DIM_LABELS[dim].slice(0,2)} ${score}</span>`).join('')}</span>
-              <span class="mc-dim-total" style="color:${getUserColor(main.user_id).main}">总分 ${main.total_score.toFixed(1)}</span>
+              <span class="mc-dim-total" style="color:${getUserColor(main.user_id).main}">总分 ${getEntryScore(main).toFixed(1)}</span>
             </div>
             ${main.comment ? `<div class="mc-comment">${esc(main.comment)}</div>` : ''}
           </div>
@@ -1466,14 +1470,38 @@ function renderList() {
       `;
     }
   }).join('');
-  // Load more button
-  if (hasMore) {
-    container.innerHTML += `<div style="text-align:center;padding:20px">
-      <button class="btn btn-secondary" id="loadMoreBtn" onclick="listPageNum++;renderList();">
-        加载更多（已显示 ${pageGroups.length} / ${groups.length}）
-      </button></div>`;
-  } else {
-    listPageNum = 1;
+  // Pagination
+  const totalPages = Math.ceil(groups.length / listPageSize);
+  if (totalPages > 1) {
+    let pagesHtml = '';
+    let pageNums = [];
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) pageNums.push(i);
+    } else {
+      pageNums.push(1);
+      if (listPageNum > 3) pageNums.push('...');
+      for (let i = Math.max(2, listPageNum - 1); i <= Math.min(totalPages - 1, listPageNum + 1); i++) {
+        pageNums.push(i);
+      }
+      if (listPageNum < totalPages - 2) pageNums.push('...');
+      pageNums.push(totalPages);
+    }
+    if (listPageNum > 1) {
+      pagesHtml += `<button class="btn btn-sm btn-secondary" onclick="listPageNum--;renderList();window.scrollTo({top:0,behavior:'smooth'})">‹ 上一页</button>`;
+    }
+    pageNums.forEach(p => {
+      if (p === '...') {
+        pagesHtml += '<span style="color:var(--text2);padding:0 6px">…</span>';
+      } else if (p === listPageNum) {
+        pagesHtml += `<button class="btn btn-sm" style="background:var(--gold);color:#000;font-weight:700;min-width:32px">${p}</button>`;
+      } else {
+        pagesHtml += `<button class="btn btn-sm btn-secondary" onclick="listPageNum=${p};renderList();window.scrollTo({top:0,behavior:'smooth'})" style="min-width:32px">${p}</button>`;
+      }
+    });
+    if (listPageNum < totalPages) {
+      pagesHtml += `<button class="btn btn-sm btn-secondary" onclick="listPageNum++;renderList();window.scrollTo({top:0,behavior:'smooth'})">下一页 ›</button>`;
+    }
+    container.innerHTML += `<div style="text-align:center;padding:16px;display:flex;gap:6px;justify-content:center;align-items:center;flex-wrap:wrap">${pagesHtml}</div>`;
   }
 }
 
@@ -1500,7 +1528,7 @@ async function showDetail(id) {
         <h3 style="margin-bottom:4px">${esc(entry.title)} ${entry.year?'('+entry.year+')':''}</h3>
         ${entry.director ? `<p style="color:var(--text2);font-size:0.85rem">${esc(entry.director)}</p>` : ''}
         <p style="color:var(--text2);font-size:0.8rem">${ownerName} · ${fmtDate(entry.created_at)} ${entry.type==='series'?'· 剧集':''}</p>
-        <p style="font-size:1.8rem;font-weight:800;color:var(--gold);margin-top:4px">${entry.total_score.toFixed(1)} / 10</p>
+        <p style="font-size:1.8rem;font-weight:800;color:var(--gold);margin-top:4px">${getEntryScore(entry).toFixed(1)} / 10</p>
       </div>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
@@ -1530,7 +1558,7 @@ async function showDetail(id) {
           <div class="friend-rating">
             <div class="fr-header">
               <span class="fr-name" style="color:${getUserColor(f.user_id).main}">${esc(allProfiles[f.user_id]?.display_name||'未知')}</span>
-              <span class="fr-score" style="color:${getUserColor(f.user_id).main}">${f.total_score.toFixed(1)} / 10</span>
+              <span class="fr-score" style="color:${getUserColor(f.user_id).main}">${getEntryScore(f).toFixed(1)} / 10</span>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:0.75rem;color:var(--text2)">
               ${Object.entries(f.ratings||{}).map(([dim,score])=>`<span>${DIM_LABELS[dim].slice(0,2)} ${score}</span>`).join('')}
@@ -1582,9 +1610,9 @@ $['statsUserPicker'].addEventListener('change', function(){
 
 function calcStats(entries) {
   if (!entries.length) return null;
-  const avgTotal = entries.reduce((s,m)=>s+m.total_score,0)/entries.length;
-  const best = entries.reduce((a,b)=>a.total_score>b.total_score?a:b);
-  const worst = entries.reduce((a,b)=>a.total_score<b.total_score?a:b);
+  const avgTotal = entries.reduce((s,m)=>s+getEntryScore(m),0)/entries.length;
+  const best = entries.reduce((a,b)=>getEntryScore(a)>getEntryScore(b)?a:b);
+  const worst = entries.reduce((a,b)=>getEntryScore(a)<getEntryScore(b)?a:b);
   const movies = entries.filter(e=>e.type==='movie').length;
   const series = entries.filter(e=>e.type==='series').length;
   const dimAvgs = {};
@@ -1592,7 +1620,7 @@ function calcStats(entries) {
     dimAvgs[dim] = entries.reduce((s,m)=>s+(m.ratings[dim]||5),0)/entries.length;
   }
   const dist = new Array(10).fill(0);
-  entries.forEach(m=>{ const b=Math.min(Math.floor(m.total_score)-1,9); if(b>=0) dist[b]++; });
+  entries.forEach(m=>{ const b=Math.min(Math.floor(getEntryScore(m))-1,9); if(b>=0) dist[b]++; });
   return { avgTotal, best, worst, movies, series, dimAvgs, dist, count: entries.length };
 }
 
@@ -1603,8 +1631,8 @@ function renderStatCards(stats, c) {
     <div class="stat-card"><div class="stat-value" style="color:${mc}">${stats.avgTotal.toFixed(1)}</div><div class="stat-label">平均分</div></div>
     <div class="stat-card"><div class="stat-value" style="color:${mc}">${stats.movies}</div><div class="stat-label">电影</div></div>
     <div class="stat-card"><div class="stat-value" style="color:${mc}">${stats.series}</div><div class="stat-label">剧集</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:${mc}">${stats.best.total_score.toFixed(1)}</div><div class="stat-label">最高分 · ${esc(stats.best.title.slice(0,8))}</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:${mc}">${stats.worst.total_score.toFixed(1)}</div><div class="stat-label">最低分 · ${esc(stats.worst.title.slice(0,8))}</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:${mc}">${getEntryScore(stats.best).toFixed(1)}</div><div class="stat-label">最高分 · ${esc(stats.best.title.slice(0,8))}</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:${mc}">${getEntryScore(stats.worst).toFixed(1)}</div><div class="stat-label">最低分 · ${esc(stats.worst.title.slice(0,8))}</div></div>
   `;
 }
 

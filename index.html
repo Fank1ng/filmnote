@@ -1335,39 +1335,75 @@ function renderList() {
     ).join('');
 
     if (merged) {
-      // Score badges for ALL users in the group
-      const scoreBadges = group.map(e=>{
-        const uc = getUserColor(e.user_id);
-        const uname = allProfiles[e.user_id]?.display_name||'未知';
-        return `<div class="mc-score-sm mc-score-${uc.key}" title="${esc(uname)}">
-          <span class="mc-score-label">${esc(uname)}</span>
-          ${e.total_score.toFixed(1)}
-        </div>`;
-      }).join('');
-
-      // Dim score rows for ALL users (each on their own row)
+      const isPrivileged = ['fank1ng','ceci'].includes((currentProfile?.display_name||'').toLowerCase());
       const currentUserInGroup = group.some(e=>e.user_id===currentUser.id);
-      const dimRows = group.map(e=>{
+
+      let scoreBadges = '';
+      let dimRowsHtml = '';
+      let addBtnHtml = '';
+
+      // Helper: render one entry row
+      function renderOneRow(e, showActions) {
         const uc = getUserColor(e.user_id);
         const uname = allProfiles[e.user_id]?.display_name||'未知';
-        const isMe = e.user_id===currentUser.id;
-        const eSeasonCount = e.type==='series' ? allSeasonRatings.filter(s=>s.entry_id===e.id&&s.user_id===e.user_id).length : 0;
-        let actionsHtml = '';
-        if (isMe) {
-          actionsHtml = `<div class="mc-actions" onclick="event.stopPropagation()">
+        scoreBadges += `<div class="mc-score-sm mc-score-${uc.key}" title="${esc(uname)}">
+          <span class="mc-score-label">${esc(uname)}</span>${e.total_score.toFixed(1)}</div>`;
+        let act = '';
+        if (showActions) {
+          act = `<div class="mc-actions" onclick="event.stopPropagation()" style="margin-left:auto">
             <button class="btn btn-sm btn-secondary" onclick="editEntry('${e.id}')">编辑</button>
             <button class="btn btn-sm btn-danger" onclick="deleteEntry('${e.id}')">删除</button>
           </div>`;
-        } else if (!currentUserInGroup) {
-          actionsHtml = `<div class="mc-actions" onclick="event.stopPropagation()">
-            <button class="btn btn-sm btn-secondary" onclick="addMyRating('${e.id}')">＋我的评分</button>
-          </div>`;
         }
-        return `<div class="mc-dim-row-user" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:2px 0">
-          <span class="mc-dim-user" style="color:${uc.main}">${esc(uname)}</span>${dimTags(e, uc)}
-          ${actionsHtml}
-        </div>`;
-      }).join('');
+        dimRowsHtml += `<div class="mc-dim-row-user" style="display:flex;align-items:center;gap:6px;padding:2px 0">
+          <span class="mc-dim-user" style="color:${uc.main}">${esc(uname)}</span>${dimTags(e,uc)}${act}</div>`;
+      }
+
+      // Helper: render average row for a list of entries
+      function renderAvgRow(entries) {
+        const avgTotal = entries.reduce((s,e)=>s+e.total_score,0)/entries.length;
+        const avgDims = {};
+        for (const dim of Object.keys(WEIGHTS)) {
+          avgDims[dim] = Math.round(entries.reduce((s,e)=>s+(e.ratings[dim]||5),0)/entries.length);
+        }
+        scoreBadges += `<div class="mc-score-sm mc-score-friend" title="其他人平均">
+          <span class="mc-score-label">其他人均</span>${avgTotal.toFixed(1)}</div>`;
+        dimRowsHtml += `<div class="mc-dim-row-user" style="display:flex;align-items:center;gap:6px;padding:2px 0">
+          <span class="mc-dim-user" style="color:var(--friend)">其他人平均</span>${dimTags({ratings:avgDims},{key:'friend'})}</div>`;
+      }
+
+      if (isPrivileged) {
+        // Fank1ng/ceci: own row + other privileged + average of rest
+        const myEntry = group.find(e=>e.user_id===currentUser.id);
+        const otherPriv = group.find(e=>{
+          const n=(allProfiles[e.user_id]?.display_name||'').toLowerCase();
+          return (n==='fank1ng'||n==='ceci') && e.user_id!==currentUser.id;
+        });
+        const rest = group.filter(e=>{
+          const n=(allProfiles[e.user_id]?.display_name||'').toLowerCase();
+          return n!=='fank1ng' && n!=='ceci' && e.user_id!==currentUser.id;
+        });
+
+        if (myEntry) renderOneRow(myEntry, true);
+        if (otherPriv) renderOneRow(otherPriv, false);
+        if (rest.length > 0) renderAvgRow(rest);
+        if (!currentUserInGroup && rest.length > 0) {
+          addBtnHtml = `<div style="text-align:right;padding-top:4px"><button class="btn btn-sm btn-secondary" onclick="addMyRating('${rest[0].id}')">＋我的评分</button></div>`;
+        }
+      } else {
+        // Other user: self + Fank1ng + ceci
+        const myEntry = group.find(e=>e.user_id===currentUser.id);
+        const fank1ngEntry = group.find(e=>(allProfiles[e.user_id]?.display_name||'').toLowerCase()==='fank1ng');
+        const ceciEntry = group.find(e=>(allProfiles[e.user_id]?.display_name||'').toLowerCase()==='ceci');
+
+        if (myEntry) renderOneRow(myEntry, true);
+        if (fank1ngEntry && fank1ngEntry.user_id!==currentUser.id) renderOneRow(fank1ngEntry, false);
+        if (ceciEntry && ceciEntry.user_id!==currentUser.id) renderOneRow(ceciEntry, false);
+        if (!currentUserInGroup) {
+          const anyNonMe = group.find(e=>e.user_id!==currentUser.id);
+          if (anyNonMe) addBtnHtml = `<div style="text-align:right;padding-top:4px"><button class="btn btn-sm btn-secondary" onclick="addMyRating('${anyNonMe.id}')">＋我的评分</button></div>`;
+        }
+      }
 
       return `
         <div class="movie-card" id="entry-${main.id}" onclick="showDetail('${main.id}')" aria-label="${esc(main.title)} — ${group.map(e=>allProfiles[e.user_id]?.display_name||'?').join('、')}">
@@ -1384,7 +1420,8 @@ function renderList() {
               ${seasonCount>0 ? `<span class="mc-season-badge">S1-S${seasonCount}</span>` : ''}
             </div>
             <div class="mc-dim-scores" style="flex-direction:column;gap:2px">
-              ${dimRows}
+              ${dimRowsHtml}
+              ${addBtnHtml}
             </div>
           </div>
         </div>
@@ -1559,10 +1596,10 @@ function renderStatCards(stats, c) {
   const mc = c?.main||'#d4a853';
   return `
     <div class="stat-card"><div class="stat-value" style="color:${mc}">${stats.avgTotal.toFixed(1)}</div><div class="stat-label">平均分</div></div>
-    <div class="stat-card"><div class="stat-value">${stats.movies}</div><div class="stat-label">电影</div></div>
-    <div class="stat-card"><div class="stat-value">${stats.series}</div><div class="stat-label">剧集</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:${mc}">${stats.movies}</div><div class="stat-label">电影</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:${mc}">${stats.series}</div><div class="stat-label">剧集</div></div>
     <div class="stat-card"><div class="stat-value" style="color:${mc}">${stats.best.total_score.toFixed(1)}</div><div class="stat-label">最高分 · ${esc(stats.best.title.slice(0,8))}</div></div>
-    <div class="stat-card"><div class="stat-value">${stats.worst.total_score.toFixed(1)}</div><div class="stat-label">最低分 · ${esc(stats.worst.title.slice(0,8))}</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:${mc}">${stats.worst.total_score.toFixed(1)}</div><div class="stat-label">最低分 · ${esc(stats.worst.title.slice(0,8))}</div></div>
   `;
 }
 
@@ -1582,7 +1619,7 @@ function renderDist(dist, c) {
   const mc = c?.main||'#d4a853';
   return dist.map((c2,i)=>`
     <div class="score-dist-bar">
-      <span class="score-dist-count">${c2||''}</span>
+      <span class="score-dist-count" style="color:${mc}">${c2||''}</span>
       <div class="score-dist-fill" style="height:${(c2/maxDist)*100}%;background:${mc}"></div>
       <span class="score-dist-label">${i+1}分</span>
     </div>

@@ -497,14 +497,66 @@ const DIM_LABELS = { story:'故事与剧本', character:'角色与表演', visua
 let db;
 try {
   db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ===== DOM CACHE =====
+const $ = {
+  get addSeasonBtn() { return document.getElementById('addSeasonBtn'); },
+  get authEmail() { return document.getElementById('authEmail'); },
+  get authError() { return document.getElementById('authError'); },
+  get authName() { return document.getElementById('authName'); },
+  get authOverlay() { return document.getElementById('authOverlay'); },
+  get authPassword() { return document.getElementById('authPassword'); },
+  get cancelEditBtn() { return document.getElementById('cancelEditBtn'); },
+  get comment() { return document.getElementById('comment'); },
+  get detailModal() { return document.getElementById('detailModal'); },
+  get director() { return document.getElementById('director'); },
+  get dismissMigrate() { return document.getElementById('dismissMigrate'); },
+  get editId() { return document.getElementById('editId'); },
+  get emptyState() { return document.getElementById('emptyState'); },
+  get exportBtn() { return document.getElementById('exportBtn'); },
+  get formTitle() { return document.getElementById('formTitle'); },
+  get headerCount() { return document.getElementById('headerCount'); },
+  get headerUser() { return document.getElementById('headerUser'); },
+  get importBtn() { return document.getElementById('importBtn'); },
+  get importFile() { return document.getElementById('importFile'); },
+  get loadingState() { return document.getElementById('loadingState'); },
+  get loginBtn() { return document.getElementById('loginBtn'); },
+  get logoutBtn() { return document.getElementById('logoutBtn'); },
+  get mainApp() { return document.getElementById('mainApp'); },
+  get mainDims() { return document.getElementById('mainDims'); },
+  get migrateBanner() { return document.getElementById('migrateBanner'); },
+  get migrateLink() { return document.getElementById('migrateLink'); },
+  get modalContent() { return document.getElementById('modalContent'); },
+  get movieForm() { return document.getElementById('movieForm'); },
+  get movieList() { return document.getElementById('movieList'); },
+  get nameInput() { return document.getElementById('nameInput'); },
+  get nameOverlay() { return document.getElementById('nameOverlay'); },
+  get nameSaveBtn() { return document.getElementById('nameSaveBtn'); },
+  get ownerFilter() { return document.getElementById('ownerFilter'); },
+  get posterPath() { return document.getElementById('posterPath'); },
+  get searchInput() { return document.getElementById('searchInput'); },
+  get searchResults() { return document.getElementById('searchResults'); },
+  get seasonList() { return document.getElementById('seasonList'); },
+  get seasonSection() { return document.getElementById('seasonSection'); },
+  get signupBtn() { return document.getElementById('signupBtn'); },
+  get sortBy() { return document.getElementById('sortBy'); },
+  get statsContent() { return document.getElementById('statsContent'); },
+  get submitBtn() { return document.getElementById('submitBtn'); },
+  get title() { return document.getElementById('title'); },
+  get tmdbId() { return document.getElementById('tmdbId'); },
+  get tmdbSearch() { return document.getElementById('tmdbSearch'); },
+  get toast() { return document.getElementById('toast'); },
+  get totalScorePreview() { return document.getElementById('totalScorePreview'); },
+  get year() { return document.getElementById('year'); },
+};
 } catch(e) {
   console.error('Supabase init error:', e);
-  document.getElementById('authError').textContent = '初始化失败：'+e.message;
+  $['authError'].textContent = '初始化失败：'+e.message;
 }
 
 // ===== AUTH UI =====
 function showAuthError(msg) {
-  const el = document.getElementById('authError');
+  const el = $['authError'];
   el.textContent = msg;
   setTimeout(() => { el.textContent = ''; }, 4000);
 }
@@ -519,9 +571,9 @@ let allEntries = [];
 let allSeasonRatings = [];
 let allProfiles = {};
 
-const authOverlay = document.getElementById('authOverlay');
-const mainApp = document.getElementById('mainApp');
-const nameOverlay = document.getElementById('nameOverlay');
+const authOverlay = $['authOverlay'];
+const mainApp = $['mainApp'];
+const nameOverlay = $['nameOverlay'];
 
 // ===== HELPERS =====
 function calcTotal(ratings) { let s=0; for(const [k,w] of Object.entries(WEIGHTS)) s+=(ratings[k]||5)*w; return Math.round(s*10)/10; }
@@ -530,20 +582,20 @@ function fmtDate(d){ if(!d) return ''; const dt=new Date(d); return dt.getFullYe
 function posterUrl(path) { return path ? TMDB_IMG+path : ''; }
 
 function toast(msg) {
-  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  const t=$['toast']; t.textContent=msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 2500);
 }
 
 // ===== AUTH BUTTONS =====
-document.getElementById('signupBtn').addEventListener('click', async ()=>{
-  const btn = document.getElementById('signupBtn');
+$['signupBtn'].addEventListener('click', async ()=>{
+  const btn = $['signupBtn'];
   const origText = btn.textContent;
   btn.textContent = '注册中...';
   btn.disabled = true;
   try {
-    const email = document.getElementById('authEmail').value.trim();
-    const password = document.getElementById('authPassword').value;
-    const name = document.getElementById('authName').value.trim();
+    const email = $['authEmail'].value.trim();
+    const password = $['authPassword'].value;
+    const name = $['authName'].value.trim();
     if (!email || !password) { showAuthError('请填写邮箱和密码'); return; }
     if (!name) { showAuthError('请填写显示名称'); return; }
     if (!db) { showAuthError('初始化失败，请刷新页面'); return; }
@@ -570,14 +622,14 @@ document.getElementById('signupBtn').addEventListener('click', async ()=>{
   }
 });
 
-document.getElementById('loginBtn').addEventListener('click', async ()=>{
-  const btn = document.getElementById('loginBtn');
+$['loginBtn'].addEventListener('click', async ()=>{
+  const btn = $['loginBtn'];
   const origText = btn.textContent;
   btn.textContent = '登录中...';
   btn.disabled = true;
   try {
-    const email = document.getElementById('authEmail').value.trim();
-    const password = document.getElementById('authPassword').value;
+    const email = $['authEmail'].value.trim();
+    const password = $['authPassword'].value;
     if (!email || !password) { showAuthError('请填写邮箱和密码'); return; }
     if (!db) { showAuthError('初始化失败，请刷新页面'); return; }
 
@@ -593,19 +645,19 @@ document.getElementById('loginBtn').addEventListener('click', async ()=>{
   }
 });
 
-document.getElementById('logoutBtn').addEventListener('click', async ()=>{
+$['logoutBtn'].addEventListener('click', async ()=>{
   await db.auth.signOut();
   doLogout();
 });
 
 // Name setup
-document.getElementById('nameSaveBtn').addEventListener('click', async ()=>{
-  const name = document.getElementById('nameInput').value.trim();
+$['nameSaveBtn'].addEventListener('click', async ()=>{
+  const name = $['nameInput'].value.trim();
   if (!name) return;
   await db.from('user_preferences').upsert({ user_id: currentUser.id, display_name: name });
   currentProfile = { user_id: currentUser.id, display_name: name };
   nameOverlay.classList.remove('open');
-  document.getElementById('headerUser').textContent = name;
+  $['headerUser'].textContent = name;
   loadAllData();
 });
 
@@ -618,14 +670,14 @@ async function initApp(user) {
   const {data:pref} = await db.from('user_preferences').select('*').eq('user_id', user.id).maybeSingle();
   if (pref) {
     currentProfile = pref;
-    document.getElementById('headerUser').textContent = pref.display_name;
+    $['headerUser'].textContent = pref.display_name;
     nameOverlay.classList.remove('open');
     checkMigration();
     await loadAllData();
   } else {
-    document.getElementById('nameInput').value = user.user_metadata?.display_name || user.email?.split('@')[0] || '';
+    $['nameInput'].value = user.user_metadata?.display_name || user.email?.split('@')[0] || '';
     nameOverlay.classList.add('open');
-    document.getElementById('headerUser').textContent = '...';
+    $['headerUser'].textContent = '...';
   }
 }
 
@@ -637,26 +689,26 @@ function doLogout() {
   authOverlay.classList.remove('hidden');
   mainApp.classList.add('hidden');
   nameOverlay.classList.remove('open');
-  document.getElementById('migrateBanner').classList.add('hidden');
+  $['migrateBanner'].classList.add('hidden');
 }
 
 // ===== MIGRATION =====
 function checkMigration() {
   const old = localStorage.getItem('filmnote_movies');
   if (old && JSON.parse(old).length > 0) {
-    document.getElementById('migrateBanner').classList.remove('hidden');
+    $['migrateBanner'].classList.remove('hidden');
   }
 }
-document.getElementById('migrateLink').addEventListener('click', async ()=>{
+$['migrateLink'].addEventListener('click', async ()=>{
   const old = JSON.parse(localStorage.getItem('filmnote_movies')||'[]');
   if (!old.length) return;
   if (!confirm(`将迁移 ${old.length} 条旧记录到云端账号"${currentProfile?.display_name}"，确认？`)) return;
 
-  let count = 0;
+  let movieCount = 0, seriesCount = 0;
   for (const m of old) {
     const entry = {
       user_id: currentUser.id,
-      type: 'movie',
+      type: m.type || 'movie',
       title: m.title,
       year: m.year || null,
       director: m.director || '',
@@ -666,15 +718,32 @@ document.getElementById('migrateLink').addEventListener('click', async ()=>{
       created_at: m.createdAt || new Date().toISOString(),
       updated_at: m.updatedAt || new Date().toISOString()
     };
-    const {error} = await db.from('entries').insert(entry);
-    if (!error) count++;
+    const {data:inserted, error} = await db.from('entries').insert(entry).select('id').single();
+    if (!error && inserted) {
+      if (entry.type==='series') seriesCount++; else movieCount++;
+      if (entry.type==='series' && m.seasons && m.seasons.length) {
+        for (const s of m.seasons) {
+          await db.from('season_ratings').insert({
+            entry_id: inserted.id, user_id: currentUser.id,
+            season_number: s.season_number||1, season_title: s.season_title||'',
+            ratings: s.ratings||{}, total_score: s.totalScore||calcTotal(s.ratings||{}),
+            comment: s.comment||'', created_at: new Date().toISOString(), updated_at: new Date().toISOString()
+          });
+        }
+      }
+    }
   }
-  if (count) { localStorage.removeItem('filmnote_movies'); toast(`已迁移 ${count} 条记录`); }
-  document.getElementById('migrateBanner').classList.add('hidden');
+  const total = movieCount + seriesCount;
+  if (total) {
+    localStorage.removeItem('filmnote_movies');
+    const parts = []; if (movieCount) parts.push(`${movieCount} 部电影`); if (seriesCount) parts.push(`${seriesCount} 部剧集`);
+    toast(`已迁移 ${parts.join('、')}，共 ${total} 条记录`);
+  }
+  $['migrateBanner'].classList.add('hidden');
   loadAllData();
 });
-document.getElementById('dismissMigrate').addEventListener('click', ()=>{
-  document.getElementById('migrateBanner').classList.add('hidden');
+$['dismissMigrate'].addEventListener('click', ()=>{
+  $['migrateBanner'].classList.add('hidden');
 });
 
 // ===== DATA LOADING =====
@@ -690,7 +759,7 @@ async function loadAllData() {
     allSeasonRatings = seasons || [];
     allProfiles = {};
     (prefs||[]).forEach(p=>{ allProfiles[p.user_id]=p; });
-    document.getElementById('headerCount').textContent = `共 ${allEntries.length} 部`;
+    $['headerCount'].textContent = `共 ${allEntries.length} 部`;
     renderList();
     renderStats();
   } catch(e) {
@@ -705,7 +774,7 @@ function buildDimSliders(prefix, ratings) {
     <div class="dim-row">
       <div class="dim-info"><div class="dim-name">${label}</div><div class="dim-weight">权重 ${WEIGHTS[dim]*100}%</div></div>
       <div class="dim-slider">
-        <input type="range" min="1" max="10" value="${ratings[dim]||5}" data-prefix="${prefix}" data-dim="${dim}">
+        <input type="range" min="1" max="10" value="${ratings[dim]||5}" data-prefix="${prefix}" data-dim="${dim}" aria-label="${label}" aria-valuenow="${ratings[dim]||5}" aria-valuemin="1" aria-valuemax="10">
         <span class="dim-score" data-prefix="${prefix}" data-dim="${dim}">${ratings[dim]||5}</span>
       </div>
     </div>
@@ -717,17 +786,18 @@ function refreshMainDims() {
   document.querySelectorAll('#mainDims input[type="range"]').forEach(s=>{
     ratings[s.dataset.dim]=parseInt(s.value);
   });
-  document.getElementById('mainDims').innerHTML = buildDimSliders('main', ratings);
-  bindDimSliders();
+  $['mainDims'].innerHTML = buildDimSliders('main', ratings);
+  bindDimSliders('main');
   updateTotalPreview();
 }
 
-document.getElementById('mainDims').innerHTML = buildDimSliders('main', {});
-bindDimSliders();
+$['mainDims'].innerHTML = buildDimSliders('main', {});
+bindDimSliders('main');
 updateTotalPreview();
 
-function bindDimSliders() {
-  document.querySelectorAll('.dim-slider input[type="range"]').forEach(s=>{
+function bindDimSliders(prefix) {
+  const selector = prefix ? `.dim-slider input[type="range"][data-prefix="${prefix}"]` : '.dim-slider input[type="range"]';
+  document.querySelectorAll(selector).forEach(s=>{
     s.addEventListener('input', ()=>{
       const scoreEl = document.querySelector(`.dim-score[data-prefix="${s.dataset.prefix}"][data-dim="${s.dataset.dim}"]`);
       if (scoreEl) scoreEl.textContent = s.value;
@@ -744,7 +814,7 @@ function getMainRatings() {
 }
 
 function updateTotalPreview() {
-  document.getElementById('totalScorePreview').textContent = calcTotal(getMainRatings()).toFixed(1);
+  $['totalScorePreview'].textContent = calcTotal(getMainRatings()).toFixed(1);
 }
 
 function updateSeasonPreview(prefix) {
@@ -782,7 +852,7 @@ function addSeasonRow(seasonData) {
       </div>
     </div>
   `;
-  document.getElementById('seasonList').appendChild(card);
+  $['seasonList'].appendChild(card);
 
   // Toggle expand
   card.querySelector('.season-header').addEventListener('click', function(e) {
@@ -792,7 +862,7 @@ function addSeasonRow(seasonData) {
   // Expand by default for new seasons
   if (!seasonData?._id) card.querySelector('.season-body').classList.add('open');
 
-  bindDimSliders();
+  bindDimSliders(prefix);
 }
 
 function removeSeason(idx) {
@@ -821,11 +891,14 @@ function collectSeasonData() {
       comment: commentEl?.value?.trim() || ''
     });
   });
+  seasons.sort((a,b)=>a.season_number-b.season_number);
   return seasons;
 }
 
-document.getElementById('addSeasonBtn').addEventListener('click', ()=>{
-  addSeasonRow(null);
+$['addSeasonBtn'].addEventListener('click', ()=>{
+  const existing = collectSeasonData().map(s=>s.season_number);
+  const next = existing.length>0 ? Math.max(...existing)+1 : 1;
+  addSeasonRow({ season_number: next });
 });
 
 // ===== TYPE TOGGLE =====
@@ -835,23 +908,23 @@ document.querySelectorAll('#typeToggle button').forEach(btn=>{
     btn.classList.add('active');
     entryType = btn.dataset.type;
     const isSeries = entryType==='series';
-    document.getElementById('seasonSection').classList.toggle('hidden', !isSeries);
-    document.getElementById('formTitle').textContent = isSeries ? '记录一部剧集' : '记录一部电影';
-    document.getElementById('tmdbSearch').placeholder = isSeries ? '🔍 从 TMDb 搜索剧集信息，自动填入...' : '🔍 从 TMDb 搜索电影信息，自动填入...';
+    $['seasonSection'].classList.toggle('hidden', !isSeries);
+    $['formTitle'].textContent = isSeries ? '记录一部剧集' : '记录一部电影';
+    $['tmdbSearch'].placeholder = isSeries ? '🔍 从 TMDb 搜索剧集信息，自动填入...' : '🔍 从 TMDb 搜索电影信息，自动填入...';
   });
 });
 
 // ===== TMDB SEARCH =====
 let tmdbTimer = null;
-document.getElementById('tmdbSearch').addEventListener('input', function(){
+$['tmdbSearch'].addEventListener('input', function(){
   clearTimeout(tmdbTimer);
   const q = this.value.trim();
-  if (!q) { document.getElementById('searchResults').classList.remove('open'); return; }
+  if (!q) { $['searchResults'].classList.remove('open'); return; }
   tmdbTimer = setTimeout(()=>searchTmdb(q), 350);
 });
 
 async function searchTmdb(query) {
-  const container = document.getElementById('searchResults');
+  const container = $['searchResults'];
   try {
     const type = entryType==='series' ? 'tv' : 'movie';
     const ctrl = new AbortController();
@@ -885,11 +958,11 @@ async function searchTmdb(query) {
     container.querySelectorAll('.sr-item').forEach(item=>{
       item.addEventListener('click', async ()=>{
         const tmdbId = item.dataset.tmdbId;
-        document.getElementById('title').value = item.dataset.title;
-        document.getElementById('year').value = item.dataset.year || '';
-        document.getElementById('tmdbId').value = tmdbId;
-        document.getElementById('posterPath').value = item.dataset.poster;
-        document.getElementById('tmdbSearch').value = '';
+        $['title'].value = item.dataset.title;
+        $['year'].value = item.dataset.year || '';
+        $['tmdbId'].value = tmdbId;
+        $['posterPath'].value = item.dataset.poster;
+        $['tmdbSearch'].value = '';
         container.classList.remove('open');
 
         // Fetch director
@@ -905,7 +978,7 @@ async function searchTmdb(query) {
             const dir = (credData.crew||[]).find(c=>c.job==='Director');
             director = dir?.name || '';
           }
-          if (director) document.getElementById('director').value = director;
+          if (director) $['director'].value = director;
         } catch(e){}
         toast('已自动填入信息');
       });
@@ -918,41 +991,45 @@ async function searchTmdb(query) {
 
 // Close search on click outside
 document.addEventListener('click', e=>{
-  if (!e.target.closest('.search-wrap')) document.getElementById('searchResults').classList.remove('open');
+  if (!e.target.closest('.search-wrap')) $['searchResults'].classList.remove('open');
 });
 
 // ===== FORM SUBMIT =====
-document.getElementById('movieForm').addEventListener('submit', async e=>{
+$['movieForm'].addEventListener('submit', async e=>{
   e.preventDefault();
-  const btn = document.getElementById('submitBtn');
+  const btn = $['submitBtn'];
   const origText = btn.textContent;
   btn.textContent = '保存中...';
   btn.disabled = true;
   try {
-    const title = document.getElementById('title').value.trim();
-    if (!title) { toast('请填写电影名称'); return; }
+    const title = $['title'].value.trim();
+    if (!title) { toast('请填写电影名称'); btn.textContent=origText; btn.disabled=false; return; }
+    if (title.length < 2 || title.length > 100) { toast('片名需 2-100 个字符'); btn.textContent=origText; btn.disabled=false; return; }
+    const yearVal = parseInt($['year'].value);
+    if ($['year'].value && (isNaN(yearVal) || yearVal < 1900 || yearVal > 2100)) { toast('年份需在 1900-2100 之间'); btn.textContent=origText; btn.disabled=false; return; }
 
     const ratings = getMainRatings();
     const entryData = {
       user_id: currentUser.id,
       type: entryType,
-      tmdb_id: parseInt(document.getElementById('tmdbId').value) || null,
+      tmdb_id: parseInt($['tmdbId'].value) || null,
       title,
-      year: parseInt(document.getElementById('year').value) || null,
-      director: document.getElementById('director').value.trim(),
-      poster_path: document.getElementById('posterPath').value,
+      year: parseInt($['year'].value) || null,
+      director: $['director'].value.trim(),
+      poster_path: $['posterPath'].value,
       ratings,
       total_score: calcTotal(ratings),
-      comment: document.getElementById('comment').value.trim(),
+      comment: $['comment'].value.trim(),
       updated_at: new Date().toISOString()
     };
 
     let entryId = editingEntryId;
 
     if (editingEntryId) {
+      const {error: delErr} = await db.from('season_ratings').delete().eq('entry_id', editingEntryId).eq('user_id', currentUser.id);
+      if (delErr) { toast('清除旧季数据失败: '+delErr.message); btn.textContent=origText; btn.disabled=false; return; }
       const {error: updateErr} = await db.from('entries').update(entryData).eq('id', editingEntryId);
-      if (updateErr) { toast('更新失败: '+updateErr.message); return; }
-      await db.from('season_ratings').delete().eq('entry_id', editingEntryId).eq('user_id', currentUser.id);
+      if (updateErr) { toast('更新失败: '+updateErr.message); btn.textContent=origText; btn.disabled=false; return; }
     } else {
       entryData.created_at = new Date().toISOString();
       // Verify session before insert
@@ -1001,30 +1078,30 @@ document.getElementById('movieForm').addEventListener('submit', async e=>{
 
 function resetForm() {
   editingEntryId = null;
-  document.getElementById('editId').value = '';
-  document.getElementById('title').value = '';
-  document.getElementById('year').value = '';
-  document.getElementById('director').value = '';
-  document.getElementById('tmdbId').value = '';
-  document.getElementById('posterPath').value = '';
-  document.getElementById('comment').value = '';
-  document.getElementById('tmdbSearch').value = '';
-  document.getElementById('seasonList').innerHTML = '';
-  document.getElementById('submitBtn').textContent = '保存评价';
-  document.getElementById('cancelEditBtn').classList.add('hidden');
+  $['editId'].value = '';
+  $['title'].value = '';
+  $['year'].value = '';
+  $['director'].value = '';
+  $['tmdbId'].value = '';
+  $['posterPath'].value = '';
+  $['comment'].value = '';
+  $['tmdbSearch'].value = '';
+  $['seasonList'].innerHTML = '';
+  $['submitBtn'].textContent = '保存评价';
+  $['cancelEditBtn'].classList.add('hidden');
   // Reset type to movie
   entryType = 'movie';
   document.querySelectorAll('#typeToggle button').forEach(b=>b.classList.remove('active'));
   document.querySelector('#typeToggle button[data-type="movie"]').classList.add('active');
-  document.getElementById('seasonSection').classList.add('hidden');
-  document.getElementById('formTitle').textContent = '记录一部电影';
+  $['seasonSection'].classList.add('hidden');
+  $['formTitle'].textContent = '记录一部电影';
   // Reset sliders to defaults
-  document.getElementById('mainDims').innerHTML = buildDimSliders('main', {});
-  bindDimSliders();
+  $['mainDims'].innerHTML = buildDimSliders('main', {});
+  bindDimSliders('main');
   updateTotalPreview();
 }
 
-document.getElementById('cancelEditBtn').addEventListener('click', resetForm);
+$['cancelEditBtn'].addEventListener('click', resetForm);
 
 // ===== EDIT =====
 async function editEntry(id) {
@@ -1033,28 +1110,28 @@ async function editEntry(id) {
 
   editingEntryId = id;
   entryType = entry.type;
-  document.getElementById('editId').value = id;
-  document.getElementById('title').value = entry.title;
-  document.getElementById('year').value = entry.year||'';
-  document.getElementById('director').value = entry.director||'';
-  document.getElementById('tmdbId').value = entry.tmdb_id||'';
-  document.getElementById('posterPath').value = entry.poster_path||'';
-  document.getElementById('comment').value = entry.comment||'';
+  $['editId'].value = id;
+  $['title'].value = entry.title;
+  $['year'].value = entry.year||'';
+  $['director'].value = entry.director||'';
+  $['tmdbId'].value = entry.tmdb_id||'';
+  $['posterPath'].value = entry.poster_path||'';
+  $['comment'].value = entry.comment||'';
 
   // Set type toggle
   document.querySelectorAll('#typeToggle button').forEach(b=>b.classList.remove('active'));
   const typeBtn = document.querySelector(`#typeToggle button[data-type="${entry.type}"]`);
   if (typeBtn) typeBtn.classList.add('active');
-  document.getElementById('seasonSection').classList.toggle('hidden', entry.type!=='series');
-  document.getElementById('formTitle').textContent = entry.type==='series'?'编辑剧集评价':'编辑电影评价';
+  $['seasonSection'].classList.toggle('hidden', entry.type!=='series');
+  $['formTitle'].textContent = entry.type==='series'?'编辑剧集评价':'编辑电影评价';
 
   // Set dimension sliders
-  document.getElementById('mainDims').innerHTML = buildDimSliders('main', entry.ratings||{});
-  bindDimSliders();
+  $['mainDims'].innerHTML = buildDimSliders('main', entry.ratings||{});
+  bindDimSliders('main');
   updateTotalPreview();
 
   // Load season ratings
-  document.getElementById('seasonList').innerHTML = '';
+  $['seasonList'].innerHTML = '';
   if (entry.type==='series') {
     const seasons = allSeasonRatings.filter(s=>s.entry_id===id&&s.user_id===currentUser.id);
     seasons.forEach(s=>{
@@ -1062,8 +1139,8 @@ async function editEntry(id) {
     });
   }
 
-  document.getElementById('submitBtn').textContent = '更新评价';
-  document.getElementById('cancelEditBtn').classList.remove('hidden');
+  $['submitBtn'].textContent = '更新评价';
+  $['cancelEditBtn'].classList.remove('hidden');
   switchTab('rate');
   window.scrollTo({top:0,behavior:'smooth'});
 }
@@ -1080,30 +1157,32 @@ async function deleteEntry(id) {
 // ===== RENDER LIST =====
 let listType = 'movie';
 let ownerFilter = 'all';
+let listPageSize = 20;
+let listPageNum = 1;
 
 document.querySelectorAll('#listSubtabs button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     document.querySelectorAll('#listSubtabs button').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
     listType = btn.dataset.ltype;
-    renderList();
+    listPageNum = 1; renderList();
   });
 });
 
-document.getElementById('ownerFilter').addEventListener('change', function(){
+$['ownerFilter'].addEventListener('change', function(){
   ownerFilter = this.value;
-  renderList();
+  listPageNum = 1; renderList();
 });
 
-document.getElementById('searchInput').addEventListener('input', renderList);
-document.getElementById('sortBy').addEventListener('change', renderList);
+$['searchInput'].addEventListener('input', ()=>{ listPageNum = 1; renderList(); });
+$['sortBy'].addEventListener('change', ()=>{ listPageNum = 1; renderList(); });
 
 function renderList() {
-  const container = document.getElementById('movieList');
-  const empty = document.getElementById('emptyState');
-  const loading = document.getElementById('loadingState');
-  const query = document.getElementById('searchInput').value.toLowerCase();
-  const sort = document.getElementById('sortBy').value;
+  const container = $['movieList'];
+  const empty = $['emptyState'];
+  const loading = $['loadingState'];
+  const query = $['searchInput'].value.toLowerCase();
+  const sort = $['sortBy'].value;
 
   let filtered = allEntries.filter(e=>{
     if (e.type!==listType) return false;
@@ -1134,34 +1213,25 @@ function renderList() {
   }
   empty.style.display = 'none';
 
-  // Group entries by tmdb_id or title
+  // Group entries by tmdb_id or title+year
   const groups = [];
   const seen = new Set();
   filtered.forEach(e=>{
-    const gkey = e.tmdb_id ? 'tmdb_'+e.tmdb_id : 'title_'+e.title.toLowerCase().trim();
+    const gkey = e.tmdb_id ? 'tmdb_'+e.tmdb_id : 'title_'+e.title.toLowerCase().trim()+'_'+(e.year||0);
     if (seen.has(gkey)) return;
     seen.add(gkey);
     const group = filtered.filter(f=>{
-      const fkey = f.tmdb_id ? 'tmdb_'+f.tmdb_id : 'title_'+f.title.toLowerCase().trim();
+      const fkey = f.tmdb_id ? 'tmdb_'+f.tmdb_id : 'title_'+f.title.toLowerCase().trim()+'_'+(f.year||0);
       return fkey === gkey;
     });
     groups.push(group);
   });
 
-  // Re-sort groups by representative entry
-  groups.sort((ga,gb)=>{
-    const a = ga[0], b = gb[0];
-    switch(sort) {
-      case 'date-desc': return new Date(b.created_at)-new Date(a.created_at);
-      case 'date-asc': return new Date(a.created_at)-new Date(b.created_at);
-      case 'score-desc': return b.total_score-a.total_score;
-      case 'score-asc': return a.total_score-b.total_score;
-      case 'title': return a.title.localeCompare(b.title,'zh');
-      default: return 0;
-    }
-  });
+  // Pagination: slice groups for current page
+  const pageGroups = groups.slice(0, listPageNum * listPageSize);
+  const hasMore = pageGroups.length < groups.length;
 
-  container.innerHTML = groups.map(group=>{
+  container.innerHTML = pageGroups.map(group=>{
     const main = group.find(e=>e.user_id===currentUser.id) || group[0];
     const others = group.filter(e=>e.user_id!==currentUser.id);
     const isMine = main.user_id===currentUser.id;
@@ -1178,7 +1248,7 @@ function renderList() {
       const friendName = allProfiles[friend.user_id]?.display_name||'未知';
       const myName = allProfiles[main.user_id]?.display_name||'未知';
       return `
-        <div class="movie-card" id="entry-${main.id}" onclick="showDetail('${main.id}')">
+        <div class="movie-card" id="entry-${main.id}" onclick="showDetail('${main.id}')" aria-label="${esc(main.title)} - ${esc(myName)} ${main.total_score.toFixed(1)}分">
           ${main.poster_path ? `<img class="mc-poster" src="${posterUrl(main.poster_path)}" alt="">` : '<div class="mc-poster"></div>'}
           <div class="mc-scores-compare">
             <div class="mc-score-sm mc-score-mine" title="${esc(myName)}">
@@ -1216,7 +1286,7 @@ function renderList() {
       // Single entry
       const ownerName = allProfiles[main.user_id]?.display_name||'未知';
       return `
-        <div class="movie-card" id="entry-${main.id}" onclick="showDetail('${main.id}')">
+        <div class="movie-card" id="entry-${main.id}" onclick="showDetail('${main.id}')" aria-label="${esc(main.title)} - ${esc(myName)} ${main.total_score.toFixed(1)}分">
           ${main.poster_path ? `<img class="mc-poster" src="${posterUrl(main.poster_path)}" alt="">` : '<div class="mc-poster"></div>'}
           <div class="mc-score">${main.total_score.toFixed(1)}</div>
           <div class="mc-info">
@@ -1244,6 +1314,15 @@ function renderList() {
       `;
     }
   }).join('');
+  // Load more button
+  if (hasMore) {
+    container.innerHTML += `<div style="text-align:center;padding:20px">
+      <button class="btn btn-secondary" id="loadMoreBtn" onclick="listPageNum++;renderList();">
+        加载更多（已显示 ${pageGroups.length} / ${groups.length}）
+      </button></div>`;
+  } else {
+    listPageNum = 1;
+  }
 }
 
 // ===== DETAIL MODAL =====
@@ -1260,8 +1339,8 @@ async function showDetail(id) {
   // Season ratings for this entry
   const seasons = allSeasonRatings.filter(s=>s.entry_id===id);
 
-  const modal = document.getElementById('detailModal');
-  const content = document.getElementById('modalContent');
+  const modal = $['detailModal'];
+  const content = $['modalContent'];
   content.innerHTML = `
     <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px">
       ${entry.poster_path ? `<img src="${posterUrl(entry.poster_path)}" style="width:80px;border-radius:8px" alt="">` : ''}
@@ -1317,8 +1396,8 @@ async function showDetail(id) {
   modal.classList.add('open');
 }
 
-function closeModal() { document.getElementById('detailModal').classList.remove('open'); }
-document.getElementById('detailModal').addEventListener('click', e=>{ if(e.target===e.currentTarget) closeModal(); });
+function closeModal() { $['detailModal'].classList.remove('open'); }
+$['detailModal'].addEventListener('click', e=>{ if(e.target===e.currentTarget) closeModal(); });
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
 
 // ===== STATS =====
@@ -1382,7 +1461,7 @@ function renderDist(dist, colorClass) {
 }
 
 function renderStats() {
-  const container = document.getElementById('statsContent');
+  const container = $['statsContent'];
   if (allEntries.length===0) {
     container.innerHTML = '<div class="empty-state"><p>暂无评价数据</p></div>';
     return;
@@ -1417,15 +1496,15 @@ function renderStats() {
       <div class="score-dist">${renderDist(otherStats.dist, 'friend')}</div>`;
   } else if (statsFilter==='compare') {
     const myName = currentProfile?.display_name||'我';
-    const otherName = otherEntries.length>0 ? allProfiles[otherEntries[0].user_id]?.display_name||'对方' : '对方';
+    const otherLabel = otherEntries.length>1 ? '其他人平均' : (otherEntries.length>0 ? allProfiles[otherEntries[0].user_id]?.display_name||'对方' : '对方');
     html += `<div class="stats-grid">
       <div class="stat-card"><div class="stat-value" style="color:var(--gold)">${myStats?myStats.avgTotal.toFixed(1):'-'}</div><div class="stat-label">${esc(myName)}均分</div></div>
-      <div class="stat-card"><div class="stat-value" style="color:var(--friend)">${otherStats?otherStats.avgTotal.toFixed(1):'-'}</div><div class="stat-label">${esc(otherName)}均分</div></div>
-      <div class="stat-card"><div class="stat-value">${myStats?myStats.movies:0}/${otherStats?otherStats.movies:0}</div><div class="stat-label">电影 (我/对方)</div></div>
-      <div class="stat-card"><div class="stat-value">${myStats?myStats.series:0}/${otherStats?otherStats.series:0}</div><div class="stat-label">剧集 (我/对方)</div></div>
-      <div class="stat-card"><div class="stat-value">${myStats?myStats.count:0}/${otherStats?otherStats.count:0}</div><div class="stat-label">总计 (我/对方)</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:var(--friend)">${otherStats?otherStats.avgTotal.toFixed(1):'-'}</div><div class="stat-label">${esc(otherLabel)}均分</div></div>
+      <div class="stat-card"><div class="stat-value">${myStats?myStats.movies:0}/${otherStats?otherStats.movies:0}</div><div class="stat-label">电影 (我/其他)</div></div>
+      <div class="stat-card"><div class="stat-value">${myStats?myStats.series:0}/${otherStats?otherStats.series:0}</div><div class="stat-label">剧集 (我/其他)</div></div>
+      <div class="stat-card"><div class="stat-value">${myStats?myStats.count:0}/${otherStats?otherStats.count:0}</div><div class="stat-label">总计 (我/其他)</div></div>
     </div>
-    <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分对比 <span style="font-size:0.75rem"><span style="color:var(--gold)">${esc(myName)}</span> / <span style="color:var(--friend)">${esc(otherName)}</span></span></h3>`;
+    <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分对比 <span style="font-size:0.75rem"><span style="color:var(--gold)">${esc(myName)}</span> / <span style="color:var(--friend)">${esc(otherLabel)}</span></span></h3>`;
     for (const dim of Object.keys(WEIGHTS)) {
       const mv = myStats?myStats.dimAvgs[dim]:0;
       const ov = otherStats?otherStats.dimAvgs[dim]:0;
@@ -1486,7 +1565,7 @@ function scrollToHighlight() {
 document.querySelectorAll('nav button').forEach(btn=>{ btn.addEventListener('click', ()=>switchTab(btn.dataset.tab)); });
 
 // ===== EXPORT / IMPORT =====
-document.getElementById('exportBtn').addEventListener('click', async ()=>{
+$['exportBtn'].addEventListener('click', async ()=>{
   const data = {
     entries: allEntries.filter(e=>e.user_id===currentUser.id),
     season_ratings: allSeasonRatings.filter(s=>s.user_id===currentUser.id),
@@ -1499,11 +1578,11 @@ document.getElementById('exportBtn').addEventListener('click', async ()=>{
   URL.revokeObjectURL(url);
 });
 
-document.getElementById('importBtn').addEventListener('click', ()=>{
-  document.getElementById('importFile').click();
+$['importBtn'].addEventListener('click', ()=>{
+  $['importFile'].click();
 });
 
-document.getElementById('importFile').addEventListener('change', async e=>{
+$['importFile'].addEventListener('change', async e=>{
   const file = e.target.files[0];
   if (!file) return;
   const reader = new FileReader();

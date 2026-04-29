@@ -198,6 +198,7 @@
     background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--radius); padding: 12px 16px; margin-bottom: 8px;
     display: flex; align-items: center; gap: 14px; transition: var(--t); cursor: pointer;
+    content-visibility: auto; contain-intrinsic-size: auto 90px;
   }
   .movie-card:hover { border-color: var(--gold); }
   .mc-poster { width: 44px; height: 66px; border-radius: 6px; object-fit: cover; background: var(--border); flex-shrink: 0; }
@@ -420,10 +421,10 @@
     </div>
   </header>
 
-  <nav>
-    <button class="active" data-tab="rate">添加评价</button>
-    <button data-tab="list">影单</button>
-    <button data-tab="stats">统计分析</button>
+  <nav role="tablist" aria-label="主导航">
+    <button class="active" data-tab="rate" role="tab" aria-selected="true" aria-label="添加评价">添加评价</button>
+    <button data-tab="list" role="tab" aria-selected="false" aria-label="影单">影单</button>
+    <button data-tab="stats" role="tab" aria-selected="false" aria-label="统计分析">统计分析</button>
   </nav>
 
   <main>
@@ -791,6 +792,25 @@ function toast(msg) {
   setTimeout(()=>t.classList.remove('show'), 2500);
 }
 
+// ── Template helper (auto-escapes, use raw() for intentional HTML) ──
+function html(strings, ...vals) {
+  let out = '';
+  for (let i = 0; i < strings.length; i++) {
+    out += strings[i];
+    if (i < vals.length) {
+      const v = vals[i];
+      if (v === undefined || v === null) continue;
+      if (typeof v === 'object' && v !== null && v._raw) { out += v._raw; continue; }
+      if (Array.isArray(v)) { out += v.join(''); continue; }
+      out += esc(String(v));
+    }
+  }
+  return out;
+}
+function raw(h) { return { _raw: h }; }
+// Render helper: set innerHTML safely (when html`` not practical for large blocks)
+function render(el, markup) { if (typeof el === 'string') el = document.getElementById(el); if (el) el.innerHTML = markup; }
+
 // ===== AUTH BUTTONS =====
 $['signupBtn'].addEventListener('click', async ()=>{
   const btn = $['signupBtn'];
@@ -914,7 +934,7 @@ $['migrateLink'].addEventListener('click', async ()=>{
   for (const m of old) {
     const entry = {
       user_id: currentUser.id,
-      type: m.type || 'movie',
+      type: m.type || (m.seasons?.length ? 'series' : 'movie'),
       title: m.title,
       year: m.year || null,
       director: m.director || '',
@@ -952,9 +972,39 @@ $['dismissMigrate'].addEventListener('click', ()=>{
   $['migrateBanner'].classList.add('hidden');
 });
 
-// ===== DATA LOADING =====
+// ===== DATA LOADING (with localStorage cache) =====
+const CACHE_KEY = 'filmnote_cache_';
+function getCache(key) {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY + key);
+    if (!raw) return null;
+    const {data, ts} = JSON.parse(raw);
+    if (Date.now() - ts > 3600000) { localStorage.removeItem(CACHE_KEY + key); return null; }
+    return data;
+  } catch { return null; }
+}
+function setCache(key, data) {
+  try { localStorage.setItem(CACHE_KEY + key, JSON.stringify({data, ts: Date.now()})); } catch {}
+}
+
 async function loadAllData() {
   if (!currentUser) return;
+  const uid = currentUser.id;
+
+  // 1. Try cache first for instant render
+  const cachedEntries = getCache('entries_' + uid);
+  const cachedSeasons = getCache('seasons_' + uid);
+  const cachedPrefs = getCache('prefs_' + uid);
+  if (cachedEntries) {
+    allEntries = cachedEntries;
+    allSeasonRatings = cachedSeasons || [];
+    allProfiles = cachedPrefs || {};
+    updateHeaderCount();
+    renderList();
+    renderStats();
+  }
+
+  // 2. Fetch fresh data from Supabase
   try {
     const [{data:entries},{data:seasons},{data:prefs}] = await Promise.all([
       db.from('entries').select('*').order('created_at',{ascending:false}),
@@ -965,16 +1015,26 @@ async function loadAllData() {
     allSeasonRatings = seasons || [];
     allProfiles = {};
     (prefs||[]).forEach(p=>{ allProfiles[p.user_id]=p; });
-    const mCount = allEntries.filter(e=>e.type==='movie' && e.user_id===currentUser.id).length;
-    const sCount = allEntries.filter(e=>e.type==='series' && e.user_id===currentUser.id).length;
-    const hparts = []; if (mCount) hparts.push(`${mCount}部电影`); if (sCount) hparts.push(`${sCount}部剧集`);
-    $['headerCount'].textContent = hparts.length ? `共 ${hparts.join(' ')}` : '暂无记录';
+
+    // Update cache
+    setCache('entries_' + uid, allEntries);
+    setCache('seasons_' + uid, allSeasonRatings);
+    setCache('prefs_' + uid, allProfiles);
+
+    updateHeaderCount();
     renderList();
     renderStats();
   } catch(e) {
     console.error('loadAllData error:', e);
-    toast('加载数据失败: ' + (e.message||e));
+    if (!cachedEntries) toast('加载数据失败: ' + (e.message||e));
   }
+}
+
+function updateHeaderCount() {
+  const mCount = allEntries.filter(e=>e.type==='movie' && e.user_id===currentUser.id).length;
+  const sCount = allEntries.filter(e=>e.type==='series' && e.user_id===currentUser.id).length;
+  const hparts = []; if (mCount) hparts.push(`${mCount}部电影`); if (sCount) hparts.push(`${sCount}部剧集`);
+  $['headerCount'].textContent = hparts.length ? `共 ${hparts.join(' ')}` : '暂无记录';
 }
 
 // ===== DIMENSION SLIDERS =====
@@ -1047,7 +1107,7 @@ function addSeasonRow(seasonData) {
   card.dataset.seasonIdx = sidx;
   card.innerHTML = `
     <div class="season-header" data-prefix="${prefix}">
-      <span class="season-title">📺 第 <input type="number" value="${snum}" min="1" max="50" placeholder="?" style="width:50px;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:0.85rem" onclick="event.stopPropagation()"> 季 · <input type="text" value="${esc(stitle)}" placeholder="季标题（可选）" style="width:140px;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:0.85rem" onclick="event.stopPropagation()"></span>
+      <span class="season-title">📺 第 <input type="number" value="${snum}" min="1" max="50" placeholder="?" style="width:50px;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:0.85rem" onclick="event.stopPropagation()" title="季号不可重复"> 季 · <input type="text" value="${esc(stitle)}" placeholder="季标题（可选）" style="width:140px;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:0.85rem" onclick="event.stopPropagation()"></span>
       <div style="display:flex;align-items:center;gap:8px">
         <span class="season-score" id="seasonTotal-${prefix}">${calcTotal(ratings).toFixed(1)}</span>
         <button type="button" class="btn btn-xs btn-danger" onclick="removeSeason('${sidx}')" title="删除此季">✕</button>
@@ -1256,6 +1316,9 @@ $['movieForm'].addEventListener('submit', async e=>{
 
     if (entryType==='series') {
       const seasons = collectSeasonData().filter(s=>s.season_number>0);
+      const snums = seasons.map(s=>s.season_number);
+      const dup = snums.find((n,i)=>snums.indexOf(n)!==i);
+      if (dup) { toast(`季号 S${dup} 重复，请修改后再保存`); btn.textContent=origText; btn.disabled=false; return; }
       for (const s of seasons) {
         await db.from('season_ratings').insert({
           entry_id: entryId,
@@ -1509,8 +1572,8 @@ function renderList() {
         let act = '';
         if (showActions) {
           act = `<div class="mc-actions" onclick="event.stopPropagation()" style="margin-left:auto">
-            <button class="btn btn-sm btn-secondary" onclick="editEntry('${e.id}')">编辑</button>
-            <button class="btn btn-sm btn-danger" onclick="deleteEntry('${e.id}')">删除</button>
+            <button class="btn btn-sm btn-secondary" onclick="editEntry('${e.id}')" aria-label="编辑 ${esc(allProfiles[e.user_id]?.display_name||'')} 的评价">编辑</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteEntry('${e.id}')" aria-label="删除 ${esc(allProfiles[e.user_id]?.display_name||'')} 的评价">删除</button>
           </div>`;
         }
         dimRowsHtml += `<div class="mc-dim-row-user" style="display:flex;align-items:center;gap:6px;padding:2px 0">
@@ -1546,7 +1609,7 @@ function renderList() {
         if (otherPriv) renderOneRow(otherPriv, false);
         if (rest.length > 0) renderAvgRow(rest);
         if (!currentUserInGroup && rest.length > 0) {
-          addBtnHtml = `<div style="text-align:right;padding-top:4px"><button class="btn btn-sm btn-secondary" onclick="addMyRating('${rest[0].id}')">＋我的评分</button></div>`;
+          addBtnHtml = `<div style="text-align:right;padding-top:4px"><button class="btn btn-sm btn-secondary" onclick="addMyRating('${rest[0].id}')" aria-label="添加我的评分">＋我的评分</button></div>`;
         }
       } else {
         // Other user: self + Fank1ng + ceci
@@ -1559,17 +1622,17 @@ function renderList() {
         if (ceciEntry && ceciEntry.user_id!==currentUser.id) renderOneRow(ceciEntry, false);
         if (!currentUserInGroup) {
           const anyNonMe = group.find(e=>e.user_id!==currentUser.id);
-          if (anyNonMe) addBtnHtml = `<div style="text-align:right;padding-top:4px"><button class="btn btn-sm btn-secondary" onclick="addMyRating('${anyNonMe.id}')">＋我的评分</button></div>`;
+          if (anyNonMe) addBtnHtml = `<div style="text-align:right;padding-top:4px"><button class="btn btn-sm btn-secondary" onclick="addMyRating('${anyNonMe.id}')" aria-label="添加我的评分">＋我的评分</button></div>`;
         }
       }
 
       let cardActionsHtml = '';
       const myEntryInGroup = group.find(e=>e.user_id===currentUser.id);
       if (myEntryInGroup) {
-        cardActionsHtml = `<div class="mc-actions-mobile" onclick="event.stopPropagation()"><button class="btn btn-sm btn-secondary" onclick="editEntry('${myEntryInGroup.id}')">编辑</button><button class="btn btn-sm btn-danger" onclick="deleteEntry('${myEntryInGroup.id}')">删除</button></div>`;
+        cardActionsHtml = `<div class="mc-actions-mobile" onclick="event.stopPropagation()"><button class="btn btn-sm btn-secondary" onclick="editEntry('${myEntryInGroup.id}')" aria-label="编辑我的评价">编辑</button><button class="btn btn-sm btn-danger" onclick="deleteEntry('${myEntryInGroup.id}')" aria-label="删除我的评价">删除</button></div>`;
       } else {
         const firstOther = group.find(e=>e.user_id!==currentUser.id);
-        if (firstOther) cardActionsHtml = `<div class="mc-actions-mobile" onclick="event.stopPropagation()"><button class="btn btn-sm btn-secondary" onclick="addMyRating('${firstOther.id}')">＋我的评分</button></div>`;
+        if (firstOther) cardActionsHtml = `<div class="mc-actions-mobile" onclick="event.stopPropagation()"><button class="btn btn-sm btn-secondary" onclick="addMyRating('${firstOther.id}')" aria-label="添加我的评分">＋我的评分</button></div>`;
       }
 
       return `
@@ -1621,11 +1684,11 @@ function renderList() {
           </div>
           ${isMine ? `
           <div class="mc-actions" onclick="event.stopPropagation()">
-            <button class="btn btn-sm btn-secondary" onclick="editEntry('${main.id}')">编辑</button>
-            <button class="btn btn-sm btn-danger" onclick="deleteEntry('${main.id}')">删除</button>
+            <button class="btn btn-sm btn-secondary" onclick="editEntry('${main.id}')" aria-label="编辑 ${esc(ownerName)} 的评价">编辑</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteEntry('${main.id}')" aria-label="删除 ${esc(ownerName)} 的评价">删除</button>
           </div>` : `
           <div class="mc-actions" onclick="event.stopPropagation()">
-            <button class="btn btn-sm btn-secondary" onclick="addMyRating('${main.id}')">＋我的评分</button>
+            <button class="btn btn-sm btn-secondary" onclick="addMyRating('${main.id}')" aria-label="添加我对 ${esc(main.title)} 的评分">＋我的评分</button>
           </div>`}
         </div>
       `;
@@ -1939,9 +2002,10 @@ function renderStats() {
 
 // ===== TABS =====
 function switchTab(name) {
-  document.querySelectorAll('nav button').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('nav button').forEach(b=>{ b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
-  document.querySelector(`nav button[data-tab="${name}"]`)?.classList.add('active');
+  const tabBtn = document.querySelector(`nav button[data-tab="${name}"]`);
+  if (tabBtn) { tabBtn.classList.add('active'); tabBtn.setAttribute('aria-selected','true'); }
   document.getElementById(`panel-${name}`)?.classList.add('active');
   if (name==='list') { listPageNum = 1; renderList(); scrollToHighlight(); }
   if (name==='stats') { renderStats(); }

@@ -11,6 +11,7 @@
     --gold-dim: #3a3020; --radius: 10px; --t: 0.2s ease;
     --danger: #a04040; --danger-bg: #2a1515;
     --friend: #5b9db0; --friend-dim: #1a2a30;
+    --ceci: #FF69B4; --ceci-dim: #2a1525;
   }
   * { margin:0; padding:0; box-sizing:border-box; }
   body {
@@ -221,12 +222,14 @@
   }
   .mc-score-mine { border: 2px solid var(--gold); background: var(--gold-dim); color: var(--gold); }
   .mc-score-friend { border: 2px solid var(--friend); background: var(--friend-dim); color: var(--friend); }
+  .mc-score-ceci { border: 2px solid var(--ceci); background: var(--ceci-dim); color: var(--ceci); }
   .mc-score-label { font-size: 0.55rem; font-weight: 400; line-height: 1; }
   .mc-dim-row { font-size: 0.65rem; color: var(--text2); display: flex; gap: 4px; align-items: center; }
   .mc-dim-row .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
   .mc-dim-row .dot-mine { background: var(--gold); }
   .mc-dim-row .dot-friend { background: var(--friend); }
-  .mc-dim-user { font-size: 0.65rem; font-weight: 600; white-space: nowrap; }
+  .mc-dim-row .dot-ceci { background: var(--ceci); }
+  .mc-dim-user { font-size: 0.65rem; font-weight: 600; white-space: nowrap; min-width: 75px; }
 
   .empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
 
@@ -240,6 +243,7 @@
   .stat-compare-values { display: flex; gap: 12px; font-size: 0.78rem; font-weight: 600; width: 70px; flex-shrink: 0; }
   .stat-compare-values .v-mine { color: var(--gold); }
   .stat-compare-values .v-friend { color: var(--friend); }
+  .stat-compare-values .v-ceci { color: var(--ceci); }
 
   /* ── Stats ── */
   .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 24px; }
@@ -274,6 +278,7 @@
   .cd-bar:hover { filter: brightness(1.3); }
   .cd-mine { background: var(--gold); }
   .cd-friend { background: var(--friend); }
+  .cd-ceci { background: var(--ceci); }
   .cd-count { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); font-size: 0.6rem; font-weight: 700; white-space: nowrap; color: var(--text); }
   .cd-label { font-size: 0.68rem; color: var(--text2); }
 
@@ -1229,6 +1234,14 @@ function addMyRating(entryId) {
   window.scrollTo({top:0,behavior:'smooth'});
 }
 
+// ===== USER COLOR =====
+function getUserColor(userId) {
+  const name = (allProfiles[userId]?.display_name||'').toLowerCase();
+  if (name==='fank1ng') return { key:'gold', main:'#d4a853', dim:'#3a3020' };
+  if (name==='ceci') return { key:'ceci', main:'#FF69B4', dim:'#2a1525' };
+  return { key:'friend', main:'#5b9db0', dim:'#1a2a30' };
+}
+
 // ===== RENDER LIST =====
 let listType = 'movie';
 let ownerFilter = 'all';
@@ -1317,27 +1330,48 @@ function renderList() {
     const merged = uniqueUsers.size > 1;
     const seasonCount = main.type==='series' ? allSeasonRatings.filter(s=>s.entry_id===main.id&&s.user_id===main.user_id).length : 0;
 
-    const dimTags = (entry, colorClass) => Object.entries(entry.ratings||{}).map(([dim,score])=>
-      `<span class="mc-dim-row"><span class="dot ${colorClass}"></span>${DIM_LABELS[dim].slice(0,2)} ${score}</span>`
+    const dimTags = (entry, uc) => Object.entries(entry.ratings||{}).map(([dim,score])=>
+      `<span class="mc-dim-row"><span class="dot dot-${uc.key}"></span>${DIM_LABELS[dim].slice(0,2)} ${score}</span>`
     ).join('');
 
     if (merged) {
-      const friend = others[0];
-      const friendName = allProfiles[friend.user_id]?.display_name||'未知';
-      const myName = allProfiles[main.user_id]?.display_name||'未知';
+      // Score badges for ALL users in the group
+      const scoreBadges = group.map(e=>{
+        const uc = getUserColor(e.user_id);
+        const uname = allProfiles[e.user_id]?.display_name||'未知';
+        return `<div class="mc-score-sm mc-score-${uc.key}" title="${esc(uname)}">
+          <span class="mc-score-label">${esc(uname)}</span>
+          ${e.total_score.toFixed(1)}
+        </div>`;
+      }).join('');
+
+      // Dim score rows for ALL users (each on their own row)
+      const dimRows = group.map(e=>{
+        const uc = getUserColor(e.user_id);
+        const uname = allProfiles[e.user_id]?.display_name||'未知';
+        const isMe = e.user_id===currentUser.id;
+        const eSeasonCount = e.type==='series' ? allSeasonRatings.filter(s=>s.entry_id===e.id&&s.user_id===e.user_id).length : 0;
+        let actionsHtml = '';
+        if (isMe) {
+          actionsHtml = `<div class="mc-actions" onclick="event.stopPropagation()">
+            <button class="btn btn-sm btn-secondary" onclick="editEntry('${e.id}')">编辑</button>
+            <button class="btn btn-sm btn-danger" onclick="deleteEntry('${e.id}')">删除</button>
+          </div>`;
+        } else {
+          actionsHtml = `<div class="mc-actions" onclick="event.stopPropagation()">
+            <button class="btn btn-sm btn-secondary" onclick="addMyRating('${e.id}')">＋我的评分</button>
+          </div>`;
+        }
+        return `<div class="mc-dim-row-user" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:2px 0">
+          <span class="mc-dim-user" style="color:${uc.main}">${esc(uname)}</span>${dimTags(e, uc)}
+          ${actionsHtml}
+        </div>`;
+      }).join('');
+
       return `
-        <div class="movie-card" id="entry-${main.id}" onclick="showDetail('${main.id}')" aria-label="${esc(main.title)} - ${esc(myName)} ${main.total_score.toFixed(1)}分">
+        <div class="movie-card" id="entry-${main.id}" onclick="showDetail('${main.id}')" aria-label="${esc(main.title)} — ${group.map(e=>allProfiles[e.user_id]?.display_name||'?').join('、')}">
           ${main.poster_path ? `<img class="mc-poster" src="${posterUrl(main.poster_path)}" alt="">` : '<div class="mc-poster"></div>'}
-          <div class="mc-scores-compare">
-            <div class="mc-score-sm mc-score-mine" title="${esc(myName)}">
-              <span class="mc-score-label">${esc(myName)}</span>
-              ${main.total_score.toFixed(1)}
-            </div>
-            <div class="mc-score-sm mc-score-friend" title="${esc(friendName)}">
-              <span class="mc-score-label">${esc(friendName)}</span>
-              ${friend.total_score.toFixed(1)}
-            </div>
-          </div>
+          <div class="mc-scores-compare" style="flex-wrap:wrap;gap:8px">${scoreBadges}</div>
           <div class="mc-info">
             <div class="mc-title">
               ${esc(main.title)}
@@ -1348,19 +1382,10 @@ function renderList() {
               ${main.director ? esc(main.director)+' · ':''}
               ${seasonCount>0 ? `<span class="mc-season-badge">S1-S${seasonCount}</span>` : ''}
             </div>
-            <div class="mc-dim-scores" style="flex-direction:column;gap:4px">
-              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span class="mc-dim-user" style="color:var(--gold)">${esc(myName)}</span>${dimTags(main, 'dot-mine')}</div>
-              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span class="mc-dim-user" style="color:var(--friend)">${esc(friendName)}</span>${dimTags(friend, 'dot-friend')}</div>
+            <div class="mc-dim-scores" style="flex-direction:column;gap:2px">
+              ${dimRows}
             </div>
           </div>
-          ${isMine ? `
-          <div class="mc-actions" onclick="event.stopPropagation()">
-            <button class="btn btn-sm btn-secondary" onclick="editEntry('${main.id}')">编辑</button>
-            <button class="btn btn-sm btn-danger" onclick="deleteEntry('${main.id}')">删除</button>
-          </div>` : `
-          <div class="mc-actions" onclick="event.stopPropagation()">
-            <button class="btn btn-sm btn-secondary" onclick="addMyRating('${main.id}')">＋我的评分</button>
-          </div>`}
         </div>
       `;
     } else {
@@ -1369,7 +1394,7 @@ function renderList() {
       return `
         <div class="movie-card" id="entry-${main.id}" onclick="showDetail('${main.id}')" aria-label="${esc(main.title)} - ${esc(ownerName)} ${main.total_score.toFixed(1)}分">
           ${main.poster_path ? `<img class="mc-poster" src="${posterUrl(main.poster_path)}" alt="">` : '<div class="mc-poster"></div>'}
-          <div class="mc-score">${main.total_score.toFixed(1)}</div>
+          <div class="mc-score" style="border-color:${getUserColor(main.user_id).main};background:${getUserColor(main.user_id).dim};color:${getUserColor(main.user_id).main}">${main.total_score.toFixed(1)}</div>
           <div class="mc-info">
             <div class="mc-title">
               ${esc(main.title)}
@@ -1378,7 +1403,7 @@ function renderList() {
             </div>
             <div class="mc-meta">
               ${main.director ? esc(main.director)+' · ':''}${fmtDate(main.created_at)}
-              ${!isMine ? `<span class="mc-owner">${esc(ownerName)}</span>` : ''}
+              ${!isMine ? `<span class="mc-owner" style="color:${getUserColor(main.user_id).main};background:${getUserColor(main.user_id).dim}">${esc(ownerName)}</span>` : ''}
               ${seasonCount>0 ? `<span class="mc-season-badge">S1-S${seasonCount}</span>` : ''}
             </div>
             <div class="mc-dim-scores">
@@ -1461,8 +1486,8 @@ async function showDetail(id) {
         ${friendEntries.map(f=>`
           <div class="friend-rating">
             <div class="fr-header">
-              <span class="fr-name">${esc(allProfiles[f.user_id]?.display_name||'未知')}</span>
-              <span class="fr-score">${f.total_score.toFixed(1)} / 10</span>
+              <span class="fr-name" style="color:${getUserColor(f.user_id).main}">${esc(allProfiles[f.user_id]?.display_name||'未知')}</span>
+              <span class="fr-score" style="color:${getUserColor(f.user_id).main}">${f.total_score.toFixed(1)} / 10</span>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:0.75rem;color:var(--text2)">
               ${Object.entries(f.ratings||{}).map(([dim,score])=>`<span>${DIM_LABELS[dim].slice(0,2)} ${score}</span>`).join('')}
@@ -1602,6 +1627,9 @@ function renderStats() {
   const myStats = calcStats(myEntries);
   const otherStats = calcStats(otherEntries);
 
+  const myColor = getUserColor(currentUser.id);
+  const otherColor = statsOtherUser ? getUserColor(statsOtherUser) : { key:'friend', main:'#5b9db0', dim:'#1a2a30' };
+
   const typeLabel = statsType==='movie'?'电影':(statsType==='series'?'剧集':'');
   const typeSuffix = typeLabel ? ` · ${typeLabel}` : '';
 
@@ -1609,52 +1637,52 @@ function renderStats() {
 
   if (statsFilter==='me') {
     if (!myStats) { container.innerHTML = '<div class="empty-state"><p>暂无评价数据</p></div>'; return; }
-    html += `<div class="stats-grid">${renderStatCards(myStats, 'gold')}</div>
+    html += `<div class="stats-grid">${renderStatCards(myStats, myColor.key)}</div>
       <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分${typeSuffix}</h3>
-      ${renderDimBars(myStats.dimAvgs, 'gold')}
+      ${renderDimBars(myStats.dimAvgs, myColor.key)}
       <h3 style="margin:20px 0 10px;font-size:0.9rem;color:var(--text2)">评分分布${typeSuffix}</h3>
-      <div class="score-dist">${renderDist(myStats.dist, 'gold')}</div>`;
+      <div class="score-dist">${renderDist(myStats.dist, myColor.key)}</div>`;
 
   } else if (statsFilter==='others') {
     if (!otherStats) { container.innerHTML = '<div class="empty-state"><p>暂无评价数据</p></div>'; return; }
     const otherName = statsOtherUser ? (allProfiles[statsOtherUser]?.display_name||'用户') : '所有他人';
-    html += `<h3 style="margin-bottom:14px;font-size:0.9rem;color:var(--friend)">${esc(otherName)}${typeSuffix}</h3>
-      <div class="stats-grid">${renderStatCards(otherStats, 'friend')}</div>
+    html += `<h3 style="margin-bottom:14px;font-size:0.9rem;color:${otherColor.main}">${esc(otherName)}${typeSuffix}</h3>
+      <div class="stats-grid">${renderStatCards(otherStats, otherColor.key)}</div>
       <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分</h3>
-      ${renderDimBars(otherStats.dimAvgs, 'friend')}
+      ${renderDimBars(otherStats.dimAvgs, otherColor.key)}
       <h3 style="margin:20px 0 10px;font-size:0.9rem;color:var(--text2)">评分分布</h3>
-      <div class="score-dist">${renderDist(otherStats.dist, 'friend')}</div>`;
+      <div class="score-dist">${renderDist(otherStats.dist, otherColor.key)}</div>`;
 
   } else if (statsFilter==='compare') {
     const myName = currentProfile?.display_name||'我';
     const otherLabel = statsOtherUser ? (allProfiles[statsOtherUser]?.display_name||'对方') : (otherEntries.length>1?'其他人平均':(otherEntries.length>0?allProfiles[otherEntries[0].user_id]?.display_name||'对方':'对方'));
     html += `<div class="stats-grid">
-      <div class="stat-card"><div class="stat-value" style="color:var(--gold)">${myStats?myStats.avgTotal.toFixed(1):'-'}</div><div class="stat-label">${esc(myName)}均分${typeSuffix}</div></div>
-      <div class="stat-card"><div class="stat-value" style="color:var(--friend)">${otherStats?otherStats.avgTotal.toFixed(1):'-'}</div><div class="stat-label">${esc(otherLabel)}均分${typeSuffix}</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:${myColor.main}">${myStats?myStats.avgTotal.toFixed(1):'-'}</div><div class="stat-label">${esc(myName)}均分${typeSuffix}</div></div>
+      <div class="stat-card"><div class="stat-value" style="color:${otherColor.main}">${otherStats?otherStats.avgTotal.toFixed(1):'-'}</div><div class="stat-label">${esc(otherLabel)}均分${typeSuffix}</div></div>
       <div class="stat-card"><div class="stat-value">${myStats?myStats.movies:0}/${otherStats?otherStats.movies:0}</div><div class="stat-label">电影 (我/${esc(otherLabel)})</div></div>
       <div class="stat-card"><div class="stat-value">${myStats?myStats.series:0}/${otherStats?otherStats.series:0}</div><div class="stat-label">剧集 (我/${esc(otherLabel)})</div></div>
       <div class="stat-card"><div class="stat-value">${myStats?myStats.count:0}/${otherStats?otherStats.count:0}</div><div class="stat-label">总计 (我/${esc(otherLabel)})</div></div>
     </div>
-    <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分对比 <span style="font-size:0.75rem"><span style="color:var(--gold)">${esc(myName)}</span> / <span style="color:var(--friend)">${esc(otherLabel)}</span></span></h3>`;
+    <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分对比 <span style="font-size:0.75rem"><span style="color:${myColor.main}">${esc(myName)}</span> / <span style="color:${otherColor.main}">${esc(otherLabel)}</span></span></h3>`;
     for (const dim of Object.keys(WEIGHTS)) {
       const mv = myStats?myStats.dimAvgs[dim]:0;
       const ov = otherStats?otherStats.dimAvgs[dim]:0;
       html += `<div class="stat-compare-row">
         <span class="stat-compare-label">${DIM_LABELS[dim]}</span>
         <div class="stat-compare-bars">
-          <div class="stat-compare-bar mine" style="width:${(mv/10)*100}%"></div>
-          <div class="stat-compare-bar friend" style="width:${(ov/10)*100}%"></div>
+          <div style="height:7px;border-radius:3px;background:${myColor.main};width:${(mv/10)*100}%"></div>
+          <div style="height:7px;border-radius:3px;background:${otherColor.main};width:${(ov/10)*100}%"></div>
         </div>
         <div class="stat-compare-values">
-          <span class="v-mine">${mv.toFixed(1)}</span>
-          <span class="v-friend">${ov.toFixed(1)}</span>
+          <span style="color:${myColor.main}">${mv.toFixed(1)}</span>
+          <span style="color:${otherColor.main}">${ov.toFixed(1)}</span>
         </div>
       </div>`;
     }
     html += `<h3 style="margin:20px 0 10px;font-size:0.9rem;color:var(--text2)">评分分布对比</h3>
     <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:0.65rem">
-      <span style="display:inline-block;width:10px;height:10px;background:var(--gold);border-radius:2px"></span> ${esc(myName)}
-      <span style="display:inline-block;width:10px;height:10px;background:var(--friend);border-radius:2px"></span> ${esc(otherLabel)}
+      <span style="display:inline-block;width:10px;height:10px;background:${myColor.main};border-radius:2px"></span> ${esc(myName)}
+      <span style="display:inline-block;width:10px;height:10px;background:${otherColor.main};border-radius:2px"></span> ${esc(otherLabel)}
     </div>
     <div class="compare-dist">
       ${(myStats?myStats.dist:new Array(10).fill(0)).map((c,i)=>{
@@ -1662,8 +1690,8 @@ function renderStats() {
         const maxAll = Math.max(...(myStats?myStats.dist:[]),...(otherStats?otherStats.dist:[]),1);
         return `<div class="cd-bar-group">
           <div class="cd-bars">
-            <div class="cd-bar cd-mine" style="height:${(c/maxAll)*100}%"><span class="cd-count">${c||''}</span></div>
-            <div class="cd-bar cd-friend" style="height:${(oc/maxAll)*100}%"><span class="cd-count">${oc||''}</span></div>
+            <div class="cd-bar" style="height:${(c/maxAll)*100}%;background:${myColor.main}"><span class="cd-count">${c||''}</span></div>
+            <div class="cd-bar" style="height:${(oc/maxAll)*100}%;background:${otherColor.main}"><span class="cd-count">${oc||''}</span></div>
           </div>
           <span class="cd-label">${i+1}分</span>
         </div>`;

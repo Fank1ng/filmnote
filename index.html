@@ -226,6 +226,7 @@
   .mc-dim-row .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
   .mc-dim-row .dot-mine { background: var(--gold); }
   .mc-dim-row .dot-friend { background: var(--friend); }
+  .mc-dim-user { font-size: 0.65rem; font-weight: 600; white-space: nowrap; }
 
   .empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
 
@@ -264,6 +265,17 @@
   .score-dist-fill:hover { filter: brightness(1.3); }
   .score-dist-label { font-size: 0.7rem; color: var(--text2); margin-top: 2px; }
   .score-dist-count { font-size: 0.7rem; font-weight: 700; color: var(--gold); }
+
+  /* ── Compare Distribution ── */
+  .compare-dist { display: flex; gap: 6px; align-items: flex-end; height: 140px; padding: 0 2px; }
+  .cd-bar-group { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; }
+  .cd-bars { display: flex; gap: 3px; align-items: flex-end; flex: 1; width: 100%; justify-content: center; }
+  .cd-bar { width: 14px; border-radius: 3px 3px 0 0; min-height: 3px; position: relative; transition: height 0.5s ease; }
+  .cd-bar:hover { filter: brightness(1.3); }
+  .cd-mine { background: var(--gold); }
+  .cd-friend { background: var(--friend); }
+  .cd-count { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); font-size: 0.6rem; font-weight: 700; white-space: nowrap; color: var(--text); }
+  .cd-label { font-size: 0.68rem; color: var(--text2); }
 
   /* ── Modal ── */
   .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
@@ -448,6 +460,19 @@
           <option value="all">所有人</option>
           <option value="me">仅自己</option>
         </select>
+        <select id="scoreFilter">
+          <option value="all">全部分数</option>
+          <option value="10">10分</option>
+          <option value="9">9分</option>
+          <option value="8">8分</option>
+          <option value="7">7分</option>
+          <option value="6">6分</option>
+          <option value="5">5分</option>
+          <option value="4">4分</option>
+          <option value="3">3分</option>
+          <option value="2">2分</option>
+          <option value="1">1分</option>
+        </select>
       </div>
       <div id="movieList"></div>
       <div class="empty-state" id="emptyState">
@@ -553,6 +578,7 @@ const $ = {
   get nameSaveBtn() { return document.getElementById('nameSaveBtn'); },
   get ownerFilter() { return document.getElementById('ownerFilter'); },
   get posterPath() { return document.getElementById('posterPath'); },
+  get scoreFilter() { return document.getElementById('scoreFilter'); },
   get searchInput() { return document.getElementById('searchInput'); },
   get searchResults() { return document.getElementById('searchResults'); },
   get seasonList() { return document.getElementById('seasonList'); },
@@ -1084,8 +1110,11 @@ $['movieForm'].addEventListener('submit', async e=>{
     toast(editingEntryId ? '评价已更新' : '评价已保存');
     highlightEntryId = entryId;
     resetForm();
+    const prevSort = $['sortBy'].value;
+    $['sortBy'].value = 'date-desc';
     await loadAllData();
     switchTab('list');
+    setTimeout(() => { $['sortBy'].value = prevSort; }, 800);
   } catch(err) {
     toast('保存出错: ' + (err.message||err));
     console.error('Save error:', err);
@@ -1173,6 +1202,33 @@ async function deleteEntry(id) {
   toast('已删除');
 }
 
+function addMyRating(entryId) {
+  const entry = allEntries.find(e=>e.id===entryId);
+  if (!entry) return;
+  editingEntryId = null;
+  $['editId'].value = '';
+  $['title'].value = entry.title;
+  $['year'].value = entry.year||'';
+  $['director'].value = entry.director||'';
+  $['tmdbId'].value = entry.tmdb_id||'';
+  $['posterPath'].value = entry.poster_path||'';
+  $['comment'].value = '';
+  $['seasonList'].innerHTML = '';
+  $['submitBtn'].textContent = '保存评价';
+  $['cancelEditBtn'].classList.add('hidden');
+  entryType = entry.type;
+  document.querySelectorAll('#typeToggle button').forEach(b=>b.classList.remove('active'));
+  const typeBtn = document.querySelector(`#typeToggle button[data-type="${entry.type}"]`);
+  if (typeBtn) typeBtn.classList.add('active');
+  $['seasonSection'].classList.toggle('hidden', entry.type!=='series');
+  $['formTitle'].textContent = entry.type==='series'?'记录一部剧集（补充评分）':'记录一部电影（补充评分）';
+  $['mainDims'].innerHTML = buildDimSliders('main', {});
+  bindDimSliders('main');
+  updateTotalPreview();
+  switchTab('rate');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+
 // ===== RENDER LIST =====
 let listType = 'movie';
 let ownerFilter = 'all';
@@ -1195,6 +1251,7 @@ $['ownerFilter'].addEventListener('change', function(){
 
 $['searchInput'].addEventListener('input', ()=>{ listPageNum = 1; renderList(); });
 $['sortBy'].addEventListener('change', ()=>{ listPageNum = 1; renderList(); });
+$['scoreFilter'].addEventListener('change', ()=>{ listPageNum = 1; renderList(); });
 
 function renderList() {
   const container = $['movieList'];
@@ -1203,9 +1260,11 @@ function renderList() {
   const query = $['searchInput'].value.toLowerCase();
   const sort = $['sortBy'].value;
 
+  const scoreFilterVal = $['scoreFilter'].value;
   let filtered = allEntries.filter(e=>{
     if (e.type!==listType) return false;
     if (ownerFilter==='me' && e.user_id!==currentUser.id) return false;
+    if (scoreFilterVal!=='all' && Math.floor(e.total_score)!==parseInt(scoreFilterVal)) return false;
     if (query) {
       const hay = (e.title+(e.director||'')).toLowerCase();
       if (!hay.includes(query)) return false;
@@ -1289,16 +1348,19 @@ function renderList() {
               ${main.director ? esc(main.director)+' · ':''}
               ${seasonCount>0 ? `<span class="mc-season-badge">S1-S${seasonCount}</span>` : ''}
             </div>
-            <div class="mc-dim-scores" style="display:flex;gap:10px;flex-wrap:wrap">
-              <span style="font-size:0.65rem;color:var(--gold)">${esc(myName)}</span>${dimTags(main, 'dot-mine')}
-              <span style="font-size:0.65rem;color:var(--friend)">${esc(friendName)}</span>${dimTags(friend, 'dot-friend')}
+            <div class="mc-dim-scores" style="flex-direction:column;gap:4px">
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span class="mc-dim-user" style="color:var(--gold)">${esc(myName)}</span>${dimTags(main, 'dot-mine')}</div>
+              <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span class="mc-dim-user" style="color:var(--friend)">${esc(friendName)}</span>${dimTags(friend, 'dot-friend')}</div>
             </div>
           </div>
           ${isMine ? `
           <div class="mc-actions" onclick="event.stopPropagation()">
             <button class="btn btn-sm btn-secondary" onclick="editEntry('${main.id}')">编辑</button>
             <button class="btn btn-sm btn-danger" onclick="deleteEntry('${main.id}')">删除</button>
-          </div>` : ''}
+          </div>` : `
+          <div class="mc-actions" onclick="event.stopPropagation()">
+            <button class="btn btn-sm btn-secondary" onclick="addMyRating('${main.id}')">＋我的评分</button>
+          </div>`}
         </div>
       `;
     } else {
@@ -1328,7 +1390,10 @@ function renderList() {
           <div class="mc-actions" onclick="event.stopPropagation()">
             <button class="btn btn-sm btn-secondary" onclick="editEntry('${main.id}')">编辑</button>
             <button class="btn btn-sm btn-danger" onclick="deleteEntry('${main.id}')">删除</button>
-          </div>` : ''}
+          </div>` : `
+          <div class="mc-actions" onclick="event.stopPropagation()">
+            <button class="btn btn-sm btn-secondary" onclick="addMyRating('${main.id}')">＋我的评分</button>
+          </div>`}
         </div>
       `;
     }
@@ -1587,17 +1652,20 @@ function renderStats() {
       </div>`;
     }
     html += `<h3 style="margin:20px 0 10px;font-size:0.9rem;color:var(--text2)">评分分布对比</h3>
-    <div class="score-dist" style="position:relative;height:110px">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:0.65rem">
+      <span style="display:inline-block;width:10px;height:10px;background:var(--gold);border-radius:2px"></span> ${esc(myName)}
+      <span style="display:inline-block;width:10px;height:10px;background:var(--friend);border-radius:2px"></span> ${esc(otherLabel)}
+    </div>
+    <div class="compare-dist">
       ${(myStats?myStats.dist:new Array(10).fill(0)).map((c,i)=>{
         const oc = otherStats?otherStats.dist[i]:0;
         const maxAll = Math.max(...(myStats?myStats.dist:[]),...(otherStats?otherStats.dist:[]),1);
-        return `<div class="score-dist-bar" style="flex:1">
-          <span style="font-size:0.65rem;font-weight:600"><span style="color:var(--gold)">${c||''}</span> <span style="color:var(--friend)">${oc||''}</span></span>
-          <div style="display:flex;gap:1px;width:100%;height:100%">
-            <div class="score-dist-fill" style="flex:1;height:${(c/maxAll)*100}%;background:var(--gold);border-radius:2px 2px 0 0"></div>
-            <div class="score-dist-fill" style="flex:1;height:${(oc/maxAll)*100}%;background:var(--friend);border-radius:2px 2px 0 0"></div>
+        return `<div class="cd-bar-group">
+          <div class="cd-bars">
+            <div class="cd-bar cd-mine" style="height:${(c/maxAll)*100}%"><span class="cd-count">${c||''}</span></div>
+            <div class="cd-bar cd-friend" style="height:${(oc/maxAll)*100}%"><span class="cd-count">${oc||''}</span></div>
           </div>
-          <span class="score-dist-label">${i+1}</span>
+          <span class="cd-label">${i+1}分</span>
         </div>`;
       }).join('')}
     </div>`;

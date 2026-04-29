@@ -212,8 +212,8 @@
   .mc-dim-scores { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
   .mc-dim-scores span { font-size: 0.68rem; color: var(--text2); background: rgba(255,255,255,0.04); padding: 1px 6px; border-radius: 4px; }
   .mc-comment { font-size: 0.8rem; color: var(--text2); margin-top: 3px; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 350px; }
-  .mc-actions { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
-  .mc-actions-mobile { display: none; flex-direction: column; gap: 4px; }
+  .mc-actions { display: flex; flex-direction: row; gap: 6px; flex-shrink: 0; }
+  .mc-actions-mobile { display: none; flex-direction: row; gap: 6px; }
   .mc-season-badge { font-size: 0.7rem; color: var(--gold); background: var(--gold-dim); padding: 2px 8px; border-radius: 10px; }
   .mc-scores-compare { display: flex; gap: 10px; align-items: center; min-width: 176px; flex-shrink: 0; }
   .mc-score-sm {
@@ -720,6 +720,7 @@ $['logoutBtn'].addEventListener('click', async ()=>{
 $['nameSaveBtn'].addEventListener('click', async ()=>{
   const name = $['nameInput'].value.trim();
   if (!name) return;
+  if (!/^[a-zA-Z0-9]{1,6}$/.test(name)) { toast('用户名仅支持英文和数字，最多6位'); return; }
   await db.from('user_preferences').upsert({ user_id: currentUser.id, display_name: name });
   currentProfile = { user_id: currentUser.id, display_name: name };
   nameOverlay.classList.remove('open');
@@ -1473,6 +1474,7 @@ function renderList() {
               ${seasonCount>0 ? `<span class="mc-season-badge">S1-S${seasonCount}</span>` : ''}
             </div>
             <div class="mc-dim-scores">
+              <span class="mc-dim-user" style="color:${getUserColor(main.user_id).main}">${esc(ownerName)}</span>
               <span class="mc-dim-dots">${Object.entries(main.ratings||{}).map(([dim,score])=>`<span class="mc-dim-item" style="border-color:${getUserColor(main.user_id).main}"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${getUserColor(main.user_id).main}">${score}</span></span>`).join('')}</span>
               <span class="mc-dim-total" style="color:${getUserColor(main.user_id).main}">总分 ${getEntryScore(main).toFixed(1)}</span>
             </div>

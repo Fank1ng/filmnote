@@ -217,7 +217,7 @@
   .mc-season-badge { font-size: 0.7rem; color: var(--gold); background: var(--gold-dim); padding: 2px 8px; border-radius: 10px; }
   .mc-scores-compare { display: flex; gap: 12px; align-items: center; }
   .mc-score-sm {
-    width: 44px; height: 44px; border-radius: 10px; flex-shrink: 0;
+    width: 52px; height: 52px; border-radius: 10px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
     font-size: 1.05rem; font-weight: 800; flex-direction: column;
   }
@@ -225,11 +225,11 @@
   .mc-score-friend { border: 2px solid var(--friend); background: var(--friend-dim); color: var(--friend); }
   .mc-score-ceci { border: 2px solid var(--ceci); background: var(--ceci-dim); color: var(--ceci); }
   .mc-score-label { font-size: 0.55rem; font-weight: 400; line-height: 1; }
-  .mc-dim-row { font-size: 0.65rem; display: inline-flex; gap: 2px; align-items: baseline; white-space: nowrap; }
+  .mc-dim-row { font-size: 0.65rem; display: flex; justify-content: space-between; gap: 2px; align-items: baseline; white-space: nowrap; }
   .dim-lab { color: var(--text2); }
   .dim-val { font-weight: 600; }
   .mc-dim-user { font-size: 0.65rem; font-weight: 600; white-space: nowrap; min-width: 75px; }
-  .mc-dim-dots { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .mc-dim-dots { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 2px 8px; }
   .mc-dim-total { display: none; font-size: 0.75rem; font-weight: 700; }
 
   .empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
@@ -336,8 +336,7 @@
     .mc-dim-scores { display: none; }
     .mc-actions-mobile { display: flex !important; flex-direction: column; gap: 4px; align-items: flex-end; margin-top: 6px; }
     .mc-poster { width: 36px; height: 54px; }
-    .mc-score-sm { width: 38px; height: 38px; font-size: 0.9rem; }
-    .mc-scores-compare { gap: 6px; }
+    .mc-scores-compare { gap: 4px; }
     .mc-title { font-size: 0.88rem; }
   }
 </style>

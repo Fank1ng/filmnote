@@ -2019,13 +2019,6 @@ $['importFile'].addEventListener('change', async e=>{
 });
 
 // ===== PAGE LOAD INIT =====
-(async ()=>{
-  const {data:{session}} = await db.auth.getSession();
-  if (session?.user) {
-    await initApp(session.user);
-  }
-})();
-
 // Auth state listener (password recovery, login/logout)
 db.auth.onAuthStateChange((event, session) => {
   if (event === 'PASSWORD_RECOVERY') {
@@ -2039,6 +2032,14 @@ db.auth.onAuthStateChange((event, session) => {
     $['authBox'].querySelector('.subtitle').textContent = '设置新密码';
   }
 });
+
+// ===== PAGE LOAD INIT =====
+(async ()=>{
+  const {data:{session}} = await db.auth.getSession();
+  if (session?.user) {
+    await initApp(session.user);
+  }
+})();
 </script>
 </body>
 </html>

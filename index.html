@@ -498,6 +498,11 @@ let db;
 try {
   db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+} catch(e) {
+  console.error('Supabase init error:', e);
+  document.getElementById('authError').textContent = '初始化失败：'+e.message;
+}
+
 // ===== DOM CACHE =====
 const $ = {
   get addSeasonBtn() { return document.getElementById('addSeasonBtn'); },
@@ -549,10 +554,6 @@ const $ = {
   get totalScorePreview() { return document.getElementById('totalScorePreview'); },
   get year() { return document.getElementById('year'); },
 };
-} catch(e) {
-  console.error('Supabase init error:', e);
-  $['authError'].textContent = '初始化失败：'+e.message;
-}
 
 // ===== AUTH UI =====
 function showAuthError(msg) {

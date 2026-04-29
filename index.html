@@ -213,6 +213,7 @@
   .mc-dim-scores span { font-size: 0.68rem; color: var(--text2); background: rgba(255,255,255,0.04); padding: 1px 6px; border-radius: 4px; }
   .mc-comment { font-size: 0.8rem; color: var(--text2); margin-top: 3px; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 350px; }
   .mc-actions { display: flex; gap: 6px; flex-shrink: 0; }
+  .mc-actions-mobile { display: none; }
   .mc-season-badge { font-size: 0.7rem; color: var(--gold); background: var(--gold-dim); padding: 2px 8px; border-radius: 10px; }
   .mc-scores-compare { display: flex; gap: 12px; align-items: center; }
   .mc-score-sm {
@@ -326,13 +327,17 @@
   /* ── Responsive ── */
   @media (max-width: 640px) {
     .form-row, .form-row-3 { grid-template-columns: 1fr; }
-    .movie-card { flex-wrap: wrap; }
-    .mc-actions { width: 100%; justify-content: flex-end; }
+    .movie-card { flex-wrap: wrap; padding: 10px 12px; }
+    .mc-actions { flex-shrink: 1; }
     .dim-info { min-width: 90px; }
     header { padding: 10px 14px; }
     main { padding: 14px; }
     .mc-dim-dots { display: none; }
-    .mc-dim-total { display: inline; }
+    .mc-dim-total { display: none; }
+    .mc-dim-scores { display: none; }
+    .mc-actions-mobile { display: flex !important; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+    .mc-poster { width: 36px; height: 54px; }
+    .mc-score-sm { width: 38px; height: 38px; font-size: 0.9rem; }
   }
 </style>
 </head>
@@ -1329,7 +1334,8 @@ function renderList() {
   });
 
   // Pagination: slice groups for current page
-  const pageGroups = groups.slice(0, listPageNum * listPageSize);
+  const start = (listPageNum - 1) * listPageSize;
+  const pageGroups = groups.slice(start, start + listPageSize);
   container.innerHTML = pageGroups.map(group=>{
     const main = group.find(e=>e.user_id===currentUser.id) || group[0];
     const others = group.filter(e=>e.user_id!==currentUser.id);
@@ -1339,7 +1345,7 @@ function renderList() {
     const seasonCount = main.type==='series' ? allSeasonRatings.filter(s=>s.entry_id===main.id&&s.user_id===main.user_id).length : 0;
 
     const dimTags = (entry, uc) => Object.entries(entry.ratings||{}).map(([dim,score])=>
-      `<span class="mc-dim-row"><span class="dot dot-${uc.key}"></span>${DIM_LABELS[dim].slice(0,2)} ${score}</span>`
+      `<span class="mc-dim-row"><span class="dot dot-${uc.key}"></span>${DIM_LABELS[dim].slice(0,2)} ${String(score).padStart(2,'\u00A0')}</span>`
     ).join('');
 
     if (merged) {
@@ -1413,6 +1419,15 @@ function renderList() {
         }
       }
 
+      let cardActionsHtml = '';
+      const myEntryInGroup = group.find(e=>e.user_id===currentUser.id);
+      if (myEntryInGroup) {
+        cardActionsHtml = `<div class="mc-actions-mobile" onclick="event.stopPropagation()"><button class="btn btn-sm btn-secondary" onclick="editEntry('${myEntryInGroup.id}')">编辑</button><button class="btn btn-sm btn-danger" onclick="deleteEntry('${myEntryInGroup.id}')">删除</button></div>`;
+      } else {
+        const firstOther = group.find(e=>e.user_id!==currentUser.id);
+        if (firstOther) cardActionsHtml = `<div class="mc-actions-mobile" onclick="event.stopPropagation()"><button class="btn btn-sm btn-secondary" onclick="addMyRating('${firstOther.id}')">＋我的评分</button></div>`;
+      }
+
       return `
         <div class="movie-card" id="entry-${main.id}" onclick="showDetail('${main.id}')" aria-label="${esc(main.title)} — ${group.map(e=>allProfiles[e.user_id]?.display_name||'?').join('、')}">
           ${main.poster_path ? `<img class="mc-poster" src="${posterUrl(main.poster_path)}" alt="">` : '<div class="mc-poster"></div>'}
@@ -1432,6 +1447,7 @@ function renderList() {
               ${addBtnHtml}
             </div>
           </div>
+          ${cardActionsHtml}
         </div>
       `;
     } else {
@@ -1453,7 +1469,7 @@ function renderList() {
               ${seasonCount>0 ? `<span class="mc-season-badge">S1-S${seasonCount}</span>` : ''}
             </div>
             <div class="mc-dim-scores">
-              <span class="mc-dim-dots">${Object.entries(main.ratings||{}).map(([dim,score])=>`<span>${DIM_LABELS[dim].slice(0,2)} ${score}</span>`).join('')}</span>
+              <span class="mc-dim-dots">${Object.entries(main.ratings||{}).map(([dim,score])=>`<span>${DIM_LABELS[dim].slice(0,2)} ${String(score).padStart(2,'\u00A0')}</span>`).join('')}</span>
               <span class="mc-dim-total" style="color:${getUserColor(main.user_id).main}">总分 ${getEntryScore(main).toFixed(1)}</span>
             </div>
             ${main.comment ? `<div class="mc-comment">${esc(main.comment)}</div>` : ''}

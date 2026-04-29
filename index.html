@@ -215,7 +215,7 @@
   .mc-actions { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
   .mc-actions-mobile { display: none; flex-direction: column; gap: 4px; }
   .mc-season-badge { font-size: 0.7rem; color: var(--gold); background: var(--gold-dim); padding: 2px 8px; border-radius: 10px; }
-  .mc-scores-compare { display: flex; gap: 12px; align-items: center; }
+  .mc-scores-compare { display: flex; gap: 10px; align-items: center; min-width: 176px; flex-shrink: 0; }
   .mc-score-sm {
     width: 52px; height: 52px; border-radius: 10px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
@@ -225,11 +225,15 @@
   .mc-score-friend { border: 2px solid var(--friend); background: var(--friend-dim); color: var(--friend); }
   .mc-score-ceci { border: 2px solid var(--ceci); background: var(--ceci-dim); color: var(--ceci); }
   .mc-score-label { font-size: 0.55rem; font-weight: 400; line-height: 1; }
-  .mc-dim-row { font-size: 0.65rem; display: flex; justify-content: space-between; gap: 2px; align-items: baseline; white-space: nowrap; }
-  .dim-lab { color: var(--text2); }
-  .dim-val { font-weight: 600; }
+  .mc-dim-item {
+    width: 50px; display: flex; flex-direction: column; align-items: center;
+    padding: 3px 4px; border-radius: 6px; gap: 1px;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+  }
+  .dim-lab { font-size: 0.6rem; color: var(--text2); line-height: 1.1; }
+  .dim-val { font-size: 0.8rem; font-weight: 700; line-height: 1.2; }
   .mc-dim-user { font-size: 0.65rem; font-weight: 600; white-space: nowrap; min-width: 75px; }
-  .mc-dim-dots { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 2px 8px; }
+  .mc-dim-dots { display: flex; gap: 6px; align-items: flex-start; flex-wrap: wrap; }
   .mc-dim-total { display: none; font-size: 0.75rem; font-weight: 700; }
 
   .empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
@@ -334,9 +338,9 @@
     .mc-dim-dots { display: none; }
     .mc-dim-total { display: none; }
     .mc-dim-scores { display: none; }
-    .mc-actions-mobile { display: flex !important; flex-direction: column; gap: 4px; align-items: flex-end; margin-top: 6px; }
+    .mc-actions-mobile { display: flex !important; flex-direction: row; gap: 6px; align-items: center; margin-top: 6px; }
     .mc-poster { width: 36px; height: 54px; }
-    .mc-scores-compare { gap: 4px; }
+    .mc-scores-compare { gap: 4px; min-width: 0; flex-shrink: 1; }
     .mc-title { font-size: 0.88rem; }
   }
 </style>
@@ -1345,7 +1349,7 @@ function renderList() {
     const seasonCount = main.type==='series' ? allSeasonRatings.filter(s=>s.entry_id===main.id&&s.user_id===main.user_id).length : 0;
 
     const dimTags = (entry, uc) => Object.entries(entry.ratings||{}).map(([dim,score])=>
-      `<span class="mc-dim-row"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${uc.main}">${String(score).padStart(2,'\u00A0')}</span></span>`
+      `<span class="mc-dim-item" style="border-color:${uc.main}"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${uc.main}">${score}</span></span>`
     ).join('');
 
     if (merged) {
@@ -1469,7 +1473,7 @@ function renderList() {
               ${seasonCount>0 ? `<span class="mc-season-badge">S1-S${seasonCount}</span>` : ''}
             </div>
             <div class="mc-dim-scores">
-              <span class="mc-dim-dots">${Object.entries(main.ratings||{}).map(([dim,score])=>`<span class="mc-dim-row"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${getUserColor(main.user_id).main}">${String(score).padStart(2,'\u00A0')}</span></span>`).join('')}</span>
+              <span class="mc-dim-dots">${Object.entries(main.ratings||{}).map(([dim,score])=>`<span class="mc-dim-item" style="border-color:${getUserColor(main.user_id).main}"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${getUserColor(main.user_id).main}">${score}</span></span>`).join('')}</span>
               <span class="mc-dim-total" style="color:${getUserColor(main.user_id).main}">总分 ${getEntryScore(main).toFixed(1)}</span>
             </div>
             ${main.comment ? `<div class="mc-comment">${esc(main.comment)}</div>` : ''}
@@ -1577,7 +1581,7 @@ async function showDetail(id) {
               <span class="fr-score" style="color:${getUserColor(f.user_id).main}">${getEntryScore(f).toFixed(1)} / 10</span>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:0.75rem;color:var(--text2)">
-              ${Object.entries(f.ratings||{}).map(([dim,score])=>`<span class="mc-dim-row"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val">${String(score).padStart(2,'\u00A0')}</span></span>`).join('')}
+              ${Object.entries(f.ratings||{}).map(([dim,score])=>`<span class="mc-dim-item"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val">${score}</span></span>`).join('')}
             </div>
             ${f.comment ? `<p style="font-size:0.8rem;color:var(--text2);font-style:italic;margin-top:4px">"${esc(f.comment)}"</p>` : ''}
           </div>

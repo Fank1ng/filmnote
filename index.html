@@ -1287,7 +1287,7 @@ function renderList() {
       // Single entry
       const ownerName = allProfiles[main.user_id]?.display_name||'未知';
       return `
-        <div class="movie-card" id="entry-${main.id}" onclick="showDetail('${main.id}')" aria-label="${esc(main.title)} - ${esc(myName)} ${main.total_score.toFixed(1)}分">
+        <div class="movie-card" id="entry-${main.id}" onclick="showDetail('${main.id}')" aria-label="${esc(main.title)} - ${esc(ownerName)} ${main.total_score.toFixed(1)}分">
           ${main.poster_path ? `<img class="mc-poster" src="${posterUrl(main.poster_path)}" alt="">` : '<div class="mc-poster"></div>'}
           <div class="mc-score">${main.total_score.toFixed(1)}</div>
           <div class="mc-info">

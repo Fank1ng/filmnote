@@ -212,8 +212,8 @@
   .mc-dim-scores { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
   .mc-dim-scores span { font-size: 0.68rem; color: var(--text2); background: rgba(255,255,255,0.04); padding: 1px 6px; border-radius: 4px; }
   .mc-comment { font-size: 0.8rem; color: var(--text2); margin-top: 3px; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 350px; }
-  .mc-actions { display: flex; gap: 6px; flex-shrink: 0; }
-  .mc-actions-mobile { display: none; }
+  .mc-actions { display: flex; flex-direction: column; gap: 4px; flex-shrink: 0; }
+  .mc-actions-mobile { display: none; flex-direction: column; gap: 4px; }
   .mc-season-badge { font-size: 0.7rem; color: var(--gold); background: var(--gold-dim); padding: 2px 8px; border-radius: 10px; }
   .mc-scores-compare { display: flex; gap: 12px; align-items: center; }
   .mc-score-sm {
@@ -225,13 +225,11 @@
   .mc-score-friend { border: 2px solid var(--friend); background: var(--friend-dim); color: var(--friend); }
   .mc-score-ceci { border: 2px solid var(--ceci); background: var(--ceci-dim); color: var(--ceci); }
   .mc-score-label { font-size: 0.55rem; font-weight: 400; line-height: 1; }
-  .mc-dim-row { font-size: 0.65rem; color: var(--text2); display: flex; gap: 4px; align-items: center; min-width: 44px; }
-  .mc-dim-row .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-  .mc-dim-row .dot-mine { background: var(--gold); }
-  .mc-dim-row .dot-friend { background: var(--friend); }
-  .mc-dim-row .dot-ceci { background: var(--ceci); }
+  .mc-dim-row { font-size: 0.65rem; display: inline-flex; gap: 2px; align-items: baseline; white-space: nowrap; }
+  .dim-lab { color: var(--text2); }
+  .dim-val { font-weight: 600; }
   .mc-dim-user { font-size: 0.65rem; font-weight: 600; white-space: nowrap; min-width: 75px; }
-  .mc-dim-dots { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+  .mc-dim-dots { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
   .mc-dim-total { display: none; font-size: 0.75rem; font-weight: 700; }
 
   .empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
@@ -327,17 +325,20 @@
   /* ── Responsive ── */
   @media (max-width: 640px) {
     .form-row, .form-row-3 { grid-template-columns: 1fr; }
-    .movie-card { flex-wrap: wrap; padding: 10px 12px; }
+    .movie-card { flex-wrap: wrap; padding: 10px 12px; gap: 8px; }
     .mc-actions { flex-shrink: 1; }
+    .mc-info { width: 100%; min-width: 100%; }
     .dim-info { min-width: 90px; }
     header { padding: 10px 14px; }
     main { padding: 14px; }
     .mc-dim-dots { display: none; }
     .mc-dim-total { display: none; }
     .mc-dim-scores { display: none; }
-    .mc-actions-mobile { display: flex !important; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+    .mc-actions-mobile { display: flex !important; flex-direction: column; gap: 4px; align-items: flex-end; margin-top: 6px; }
     .mc-poster { width: 36px; height: 54px; }
     .mc-score-sm { width: 38px; height: 38px; font-size: 0.9rem; }
+    .mc-scores-compare { gap: 6px; }
+    .mc-title { font-size: 0.88rem; }
   }
 </style>
 </head>
@@ -1345,7 +1346,7 @@ function renderList() {
     const seasonCount = main.type==='series' ? allSeasonRatings.filter(s=>s.entry_id===main.id&&s.user_id===main.user_id).length : 0;
 
     const dimTags = (entry, uc) => Object.entries(entry.ratings||{}).map(([dim,score])=>
-      `<span class="mc-dim-row"><span class="dot dot-${uc.key}"></span>${DIM_LABELS[dim].slice(0,2)} ${String(score).padStart(2,'\u00A0')}</span>`
+      `<span class="mc-dim-row"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${uc.main}">${String(score).padStart(2,'\u00A0')}</span></span>`
     ).join('');
 
     if (merged) {
@@ -1469,7 +1470,7 @@ function renderList() {
               ${seasonCount>0 ? `<span class="mc-season-badge">S1-S${seasonCount}</span>` : ''}
             </div>
             <div class="mc-dim-scores">
-              <span class="mc-dim-dots">${Object.entries(main.ratings||{}).map(([dim,score])=>`<span>${DIM_LABELS[dim].slice(0,2)} ${String(score).padStart(2,'\u00A0')}</span>`).join('')}</span>
+              <span class="mc-dim-dots">${Object.entries(main.ratings||{}).map(([dim,score])=>`<span class="mc-dim-row"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${getUserColor(main.user_id).main}">${String(score).padStart(2,'\u00A0')}</span></span>`).join('')}</span>
               <span class="mc-dim-total" style="color:${getUserColor(main.user_id).main}">总分 ${getEntryScore(main).toFixed(1)}</span>
             </div>
             ${main.comment ? `<div class="mc-comment">${esc(main.comment)}</div>` : ''}
@@ -1577,7 +1578,7 @@ async function showDetail(id) {
               <span class="fr-score" style="color:${getUserColor(f.user_id).main}">${getEntryScore(f).toFixed(1)} / 10</span>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:0.75rem;color:var(--text2)">
-              ${Object.entries(f.ratings||{}).map(([dim,score])=>`<span>${DIM_LABELS[dim].slice(0,2)} ${score}</span>`).join('')}
+              ${Object.entries(f.ratings||{}).map(([dim,score])=>`<span class="mc-dim-row"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val">${String(score).padStart(2,'\u00A0')}</span></span>`).join('')}
             </div>
             ${f.comment ? `<p style="font-size:0.8rem;color:var(--text2);font-style:italic;margin-top:4px">"${esc(f.comment)}"</p>` : ''}
           </div>

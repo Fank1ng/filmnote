@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Fan&ceci — 电影剧集评价</title>
+<title>FD&Ceci — 电影剧集评价</title>
 <style>
   :root {
     --bg: #0f0f0f; --surface: #1a1a1a; --border: #2a2a2a;
@@ -27,7 +27,8 @@
   }
   .auth-box { width: 360px; padding: 32px; }
   .auth-box h1 { font-size: 1.6rem; margin-bottom: 4px; }
-  .auth-box h1 span { color: var(--gold); }
+  .auth-box h1 .fd { color: var(--gold); }
+  .auth-box h1 .ce { color: var(--ceci); }
   .auth-box .subtitle { color: var(--text2); font-size: 0.85rem; margin-bottom: 24px; }
   .auth-box input {
     width: 100%; padding: 12px; margin-bottom: 10px;
@@ -47,7 +48,8 @@
     justify-content: space-between; position: sticky; top: 0; z-index: 10;
   }
   .logo { font-size: 1.3rem; font-weight: 700; }
-  .logo span { color: var(--gold); }
+  .logo .fd { color: var(--gold); }
+  .logo .ce { color: var(--ceci); }
   .header-right { display: flex; align-items: center; gap: 12px; }
   .user-badge { font-size: 0.8rem; color: var(--gold); }
 
@@ -350,7 +352,7 @@
 <!-- ═══ Auth Overlay ═══ -->
 <div id="authOverlay">
   <div class="auth-box">
-    <h1>Fan<span>&amp;ceci</span></h1>
+    <h1><span class="fd">FD</span>&amp;<span class="ce">Ceci</span></h1>
     <p class="subtitle">登录或注册</p>
     <div class="auth-error" id="authError"></div>
     <input type="email" id="authEmail" placeholder="邮箱">
@@ -382,7 +384,7 @@
 <!-- ═══ Main App ═══ -->
 <div id="mainApp" class="hidden">
   <header>
-    <div class="logo">Fan<span>&amp;ceci</span></div>
+    <div class="logo"><span class="fd">FD</span>&amp;<span class="ce">Ceci</span></div>
     <div class="header-right">
       <span class="user-badge" id="headerUser"></span>
       <span id="headerCount" style="font-size:0.85rem;color:var(--text2)"></span>

@@ -1237,7 +1237,7 @@ function addMyRating(entryId) {
 // ===== USER COLOR =====
 function getUserColor(userId) {
   const name = (allProfiles[userId]?.display_name||'').toLowerCase();
-  if (name==='fank1ng') return { key:'gold', main:'#d4a853', dim:'#3a3020' };
+  if (name==='fank1ng') return { key:'mine', main:'#d4a853', dim:'#3a3020' };
   if (name==='ceci') return { key:'ceci', main:'#FF69B4', dim:'#2a1525' };
   return { key:'friend', main:'#5b9db0', dim:'#1a2a30' };
 }
@@ -1346,6 +1346,7 @@ function renderList() {
       }).join('');
 
       // Dim score rows for ALL users (each on their own row)
+      const currentUserInGroup = group.some(e=>e.user_id===currentUser.id);
       const dimRows = group.map(e=>{
         const uc = getUserColor(e.user_id);
         const uname = allProfiles[e.user_id]?.display_name||'未知';
@@ -1357,7 +1358,7 @@ function renderList() {
             <button class="btn btn-sm btn-secondary" onclick="editEntry('${e.id}')">编辑</button>
             <button class="btn btn-sm btn-danger" onclick="deleteEntry('${e.id}')">删除</button>
           </div>`;
-        } else {
+        } else if (!currentUserInGroup) {
           actionsHtml = `<div class="mc-actions" onclick="event.stopPropagation()">
             <button class="btn btn-sm btn-secondary" onclick="addMyRating('${e.id}')">＋我的评分</button>
           </div>`;
@@ -1553,33 +1554,36 @@ function calcStats(entries) {
   return { avgTotal, best, worst, movies, series, dimAvgs, dist, count: entries.length };
 }
 
-function renderStatCards(stats, colorClass) {
+function renderStatCards(stats, c) {
   if (!stats) return '<div class="stat-card"><div class="stat-value">-</div><div class="stat-label">无数据</div></div>';
+  const mc = c?.main||'#d4a853';
   return `
-    <div class="stat-card"><div class="stat-value" style="color:var(--${colorClass||'gold'})">${stats.avgTotal.toFixed(1)}</div><div class="stat-label">平均分</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:${mc}">${stats.avgTotal.toFixed(1)}</div><div class="stat-label">平均分</div></div>
     <div class="stat-card"><div class="stat-value">${stats.movies}</div><div class="stat-label">电影</div></div>
     <div class="stat-card"><div class="stat-value">${stats.series}</div><div class="stat-label">剧集</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:var(--${colorClass||'gold'})">${stats.best.total_score.toFixed(1)}</div><div class="stat-label">最高分 · ${esc(stats.best.title.slice(0,8))}</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:${mc}">${stats.best.total_score.toFixed(1)}</div><div class="stat-label">最高分 · ${esc(stats.best.title.slice(0,8))}</div></div>
     <div class="stat-card"><div class="stat-value">${stats.worst.total_score.toFixed(1)}</div><div class="stat-label">最低分 · ${esc(stats.worst.title.slice(0,8))}</div></div>
   `;
 }
 
-function renderDimBars(dimAvgs, colorClass) {
+function renderDimBars(dimAvgs, c) {
+  const mc = c?.main||'#d4a853';
   return Object.entries(dimAvgs).map(([dim,avg])=>`
     <div class="stat-bar-row">
       <span class="stat-bar-label">${DIM_LABELS[dim]}</span>
-      <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${(avg/10)*100}%;background:var(--${colorClass||'gold'})"></div></div>
+      <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${(avg/10)*100}%;background:${mc}"></div></div>
       <span class="stat-bar-value">${avg.toFixed(1)}</span>
     </div>
   `).join('');
 }
 
-function renderDist(dist, colorClass) {
+function renderDist(dist, c) {
   const maxDist = Math.max(...dist,1);
-  return dist.map((c,i)=>`
+  const mc = c?.main||'#d4a853';
+  return dist.map((c2,i)=>`
     <div class="score-dist-bar">
-      <span class="score-dist-count">${c||''}</span>
-      <div class="score-dist-fill" style="height:${(c/maxDist)*100}%;background:var(--${colorClass||'gold'})"></div>
+      <span class="score-dist-count">${c2||''}</span>
+      <div class="score-dist-fill" style="height:${(c2/maxDist)*100}%;background:${mc}"></div>
       <span class="score-dist-label">${i+1}分</span>
     </div>
   `).join('');
@@ -1637,21 +1641,21 @@ function renderStats() {
 
   if (statsFilter==='me') {
     if (!myStats) { container.innerHTML = '<div class="empty-state"><p>暂无评价数据</p></div>'; return; }
-    html += `<div class="stats-grid">${renderStatCards(myStats, myColor.key)}</div>
+    html += `<div class="stats-grid">${renderStatCards(myStats, myColor)}</div>
       <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分${typeSuffix}</h3>
-      ${renderDimBars(myStats.dimAvgs, myColor.key)}
+      ${renderDimBars(myStats.dimAvgs, myColor)}
       <h3 style="margin:20px 0 10px;font-size:0.9rem;color:var(--text2)">评分分布${typeSuffix}</h3>
-      <div class="score-dist">${renderDist(myStats.dist, myColor.key)}</div>`;
+      <div class="score-dist">${renderDist(myStats.dist, myColor)}</div>`;
 
   } else if (statsFilter==='others') {
     if (!otherStats) { container.innerHTML = '<div class="empty-state"><p>暂无评价数据</p></div>'; return; }
     const otherName = statsOtherUser ? (allProfiles[statsOtherUser]?.display_name||'用户') : '所有他人';
     html += `<h3 style="margin-bottom:14px;font-size:0.9rem;color:${otherColor.main}">${esc(otherName)}${typeSuffix}</h3>
-      <div class="stats-grid">${renderStatCards(otherStats, otherColor.key)}</div>
+      <div class="stats-grid">${renderStatCards(otherStats, otherColor)}</div>
       <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分</h3>
-      ${renderDimBars(otherStats.dimAvgs, otherColor.key)}
+      ${renderDimBars(otherStats.dimAvgs, otherColor)}
       <h3 style="margin:20px 0 10px;font-size:0.9rem;color:var(--text2)">评分分布</h3>
-      <div class="score-dist">${renderDist(otherStats.dist, otherColor.key)}</div>`;
+      <div class="score-dist">${renderDist(otherStats.dist, otherColor)}</div>`;
 
   } else if (statsFilter==='compare') {
     const myName = currentProfile?.display_name||'我';

@@ -29,7 +29,7 @@
   .auth-box h1 { font-size: 1.6rem; margin-bottom: 4px; }
   .auth-box h1 .fd { color: var(--gold); }
   .auth-box h1 .ce { color: var(--ceci); }
-  .auth-box .subtitle { color: var(--text2); font-size: 0.85rem; margin-bottom: 24px; }
+  .auth-box .subtitle { color: var(--text2); font-size: 0.85rem; margin-bottom: 16px; }
   .auth-box input {
     width: 100%; padding: 12px; margin-bottom: 10px;
     background: var(--surface); border: 1px solid var(--border);
@@ -362,6 +362,20 @@
       <button class="btn btn-primary" id="loginBtn" style="flex:1">登录</button>
       <button class="btn btn-secondary" id="signupBtn" style="flex:1">注册</button>
     </div>
+    <div style="text-align:center;margin-top:8px">
+      <a id="forgotPwLink" style="color:var(--text2);font-size:0.8rem;cursor:pointer">忘记密码？</a>
+    </div>
+    <div id="resetPwForm" class="hidden" style="margin-top:12px">
+      <p style="color:var(--text2);font-size:0.8rem;margin-bottom:8px">输入邮箱，我们将发送重置链接</p>
+      <input type="email" id="resetEmail" placeholder="邮箱" style="width:100%;padding:10px;margin-bottom:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius)">
+      <button class="btn btn-primary" id="sendResetBtn" style="width:100%;margin-bottom:6px">发送重置邮件</button>
+      <a id="backToLoginLink" style="color:var(--text2);font-size:0.8rem;cursor:pointer">← 返回登录</a>
+    </div>
+    <div id="newPwForm" class="hidden" style="margin-top:12px">
+      <p style="color:var(--text2);font-size:0.8rem;margin-bottom:8px">设置新密码</p>
+      <input type="password" id="newPassword" placeholder="新密码（至少6位）" style="width:100%;padding:10px;margin-bottom:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius)">
+      <button class="btn btn-primary" id="updatePwBtn" style="width:100%">更新密码并登录</button>
+    </div>
   </div>
 </div>
 
@@ -372,6 +386,19 @@
     <p style="color:var(--text2);font-size:0.85rem;margin-bottom:12px">你的名称将对朋友可见</p>
     <input type="text" id="nameInput" placeholder="输入名称" style="width:100%;padding:10px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);margin-bottom:12px">
     <button class="btn btn-primary" id="nameSaveBtn">保存</button>
+  </div>
+</div>
+
+<!-- ═══ Change Password Modal ═══ -->
+<div id="changePwOverlay" class="modal-overlay">
+  <div class="modal" style="max-width:380px">
+    <h3>修改密码</h3>
+    <p style="color:var(--text2);font-size:0.8rem;margin-bottom:12px">输入新密码（至少6位）</p>
+    <input type="password" id="changePwInput" placeholder="新密码" style="width:100%;padding:10px;margin-bottom:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius)">
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-secondary btn-sm" id="changePwCancel">取消</button>
+      <button class="btn btn-primary btn-sm" id="changePwSave">确认修改</button>
+    </div>
   </div>
 </div>
 
@@ -388,7 +415,8 @@
     <div class="header-right">
       <span class="user-badge" id="headerUser"></span>
       <span id="headerCount" style="font-size:0.85rem;color:var(--text2)"></span>
-      <button class="btn btn-sm btn-secondary" id="logoutBtn">退出</button>
+      <button class="btn btn-sm btn-secondary" id="changePwBtn">修改密码</button>
+        <button class="btn btn-sm btn-secondary" id="logoutBtn">退出</button>
     </div>
   </header>
 
@@ -566,6 +594,7 @@ try {
 const $ = {
   get addSeasonBtn() { return document.getElementById('addSeasonBtn'); },
   get authEmail() { return document.getElementById('authEmail'); },
+  get authBox() { return document.querySelector('.auth-box'); },
   get authError() { return document.getElementById('authError'); },
   get authName() { return document.getElementById('authName'); },
   get authOverlay() { return document.getElementById('authOverlay'); },
@@ -586,6 +615,19 @@ const $ = {
   get loadingState() { return document.getElementById('loadingState'); },
   get loginBtn() { return document.getElementById('loginBtn'); },
   get logoutBtn() { return document.getElementById('logoutBtn'); },
+  get changePwBtn() { return document.getElementById('changePwBtn'); },
+  get changePwCancel() { return document.getElementById('changePwCancel'); },
+  get changePwInput() { return document.getElementById('changePwInput'); },
+  get changePwOverlay() { return document.getElementById('changePwOverlay'); },
+  get changePwSave() { return document.getElementById('changePwSave'); },
+  get forgotPwLink() { return document.getElementById('forgotPwLink'); },
+  get resetEmail() { return document.getElementById('resetEmail'); },
+  get resetPwForm() { return document.getElementById('resetPwForm'); },
+  get newPwForm() { return document.getElementById('newPwForm'); },
+  get newPassword() { return document.getElementById('newPassword'); },
+  get sendResetBtn() { return document.getElementById('sendResetBtn'); },
+  get updatePwBtn() { return document.getElementById('updatePwBtn'); },
+  get backToLoginLink() { return document.getElementById('backToLoginLink'); },
   get mainApp() { return document.getElementById('mainApp'); },
   get mainDims() { return document.getElementById('mainDims'); },
   get migrateBanner() { return document.getElementById('migrateBanner'); },
@@ -617,11 +659,106 @@ const $ = {
 };
 
 // ===== AUTH UI =====
+function showAuthForm(mode) {
+  const el = $['authError']; el.textContent = '';
+  if (mode === 'login') {
+    $['authPassword'].classList.remove('hidden');
+    $['authName'].classList.add('hidden');
+    $['loginBtn'].classList.remove('hidden');
+    $['signupBtn'].classList.remove('hidden');
+    $['forgotPwLink'].classList.remove('hidden');
+    $['resetPwForm'].classList.add('hidden');
+    $['newPwForm'].classList.add('hidden');
+    $['authBox'].querySelector('.subtitle').textContent = '登录或注册';
+  }
+}
 function showAuthError(msg) {
   const el = $['authError'];
   el.textContent = msg;
   setTimeout(() => { el.textContent = ''; }, 4000);
 }
+
+// Forgot password toggle
+$['forgotPwLink'].addEventListener('click', ()=>{
+  $['authPassword'].classList.add('hidden');
+  $['authName'].classList.add('hidden');
+  $['loginBtn'].classList.add('hidden');
+  $['signupBtn'].classList.add('hidden');
+  $['forgotPwLink'].classList.add('hidden');
+  $['resetPwForm'].classList.remove('hidden');
+  $['authBox'].querySelector('.subtitle').textContent = '找回密码';
+  $['resetEmail'].value = $['authEmail'].value;
+});
+
+// Back to login
+$['backToLoginLink'].addEventListener('click', ()=>{
+  $['authPassword'].classList.remove('hidden');
+  $['loginBtn'].classList.remove('hidden');
+  $['signupBtn'].classList.remove('hidden');
+  $['forgotPwLink'].classList.remove('hidden');
+  $['resetPwForm'].classList.add('hidden');
+  $['newPwForm'].classList.add('hidden');
+  $['authBox'].querySelector('.subtitle').textContent = '登录或注册';
+});
+
+// Send reset email
+$['sendResetBtn'].addEventListener('click', async ()=>{
+  const email = $['resetEmail'].value.trim();
+  if (!email) { showAuthError('请输入邮箱'); return; }
+  const btn = $['sendResetBtn'];
+  btn.textContent = '发送中...'; btn.disabled = true;
+  const {error} = await db.auth.resetPasswordForEmail(email, {redirectTo: window.location.origin + window.location.pathname});
+  if (error) { showAuthError('发送失败: '+error.message); btn.textContent='发送重置邮件'; btn.disabled=false; return; }
+  toast('重置邮件已发送，请查收并点击链接');
+  $['resetPwForm'].classList.add('hidden');
+  $['authPassword'].classList.remove('hidden');
+  $['loginBtn'].classList.remove('hidden');
+  $['signupBtn'].classList.remove('hidden');
+  $['forgotPwLink'].classList.remove('hidden');
+  $['authBox'].querySelector('.subtitle').textContent = '登录或注册';
+  btn.textContent = '发送重置邮件'; btn.disabled = false;
+});
+
+// Update password from recovery link
+$['updatePwBtn'].addEventListener('click', async ()=>{
+  const pw = $['newPassword'].value;
+  if (!pw || pw.length < 6) { showAuthError('密码至少6位'); return; }
+  const btn = $['updatePwBtn'];
+  btn.textContent = '更新中...'; btn.disabled = true;
+  const {error} = await db.auth.updateUser({password: pw});
+  if (error) { showAuthError('更新失败: '+error.message); btn.textContent='更新密码并登录'; btn.disabled=false; return; }
+  toast('密码已更新');
+  const {data:{session}} = await db.auth.getSession();
+  if (session) {
+    $['newPwForm'].classList.add('hidden');
+    $['authPassword'].classList.remove('hidden');
+    $['loginBtn'].classList.remove('hidden');
+    $['signupBtn'].classList.remove('hidden');
+    $['forgotPwLink'].classList.remove('hidden');
+    $['authBox'].querySelector('.subtitle').textContent = '登录或注册';
+    await initApp(session.user);
+  }
+  btn.textContent = '更新密码并登录'; btn.disabled = false;
+});
+
+// Change password (logged in)
+$['changePwBtn'].addEventListener('click', ()=>{
+  $['changePwInput'].value = '';
+  $['changePwOverlay'].classList.add('open');
+});
+$['changePwCancel'].addEventListener('click', ()=>{
+  $['changePwOverlay'].classList.remove('open');
+});
+$['changePwSave'].addEventListener('click', async ()=>{
+  const pw = $['changePwInput'].value;
+  if (!pw || pw.length < 6) { toast('密码至少6位'); return; }
+  const btn = $['changePwSave']; btn.textContent = '保存中...'; btn.disabled = true;
+  const {error} = await db.auth.updateUser({password: pw});
+  if (error) { toast('修改失败: '+error.message); btn.textContent='确认修改'; btn.disabled=false; return; }
+  toast('密码已修改');
+  $['changePwOverlay'].classList.remove('open');
+  btn.textContent = '确认修改'; btn.disabled = false;
+});
 
 // ===== STATE =====
 let currentUser = null;
@@ -1888,6 +2025,20 @@ $['importFile'].addEventListener('change', async e=>{
     await initApp(session.user);
   }
 })();
+
+// Auth state listener (password recovery, login/logout)
+db.auth.onAuthStateChange((event, session) => {
+  if (event === 'PASSWORD_RECOVERY') {
+    $['newPwForm'].classList.remove('hidden');
+    $['authPassword'].classList.add('hidden');
+    $['authName'].classList.add('hidden');
+    $['loginBtn'].classList.add('hidden');
+    $['signupBtn'].classList.add('hidden');
+    $['forgotPwLink'].classList.add('hidden');
+    $['resetPwForm'].classList.add('hidden');
+    $['authBox'].querySelector('.subtitle').textContent = '设置新密码';
+  }
+});
 </script>
 </body>
 </html>

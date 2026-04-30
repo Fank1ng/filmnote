@@ -259,13 +259,7 @@
   .stat-compare-row { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; }
   .stat-compare-label { width: 110px; font-size: 0.82rem; text-align: right; flex-shrink: 0; }
   .stat-compare-bars { flex: 1; display: flex; flex-direction: column; gap: 3px; }
-  .stat-compare-bar { height: 7px; border-radius: 3px; }
-  .stat-compare-bar.mine { background: var(--gold); }
-  .stat-compare-bar.friend { background: var(--friend); }
   .stat-compare-values { display: flex; gap: 12px; font-size: 0.78rem; font-weight: 600; width: 70px; flex-shrink: 0; }
-  .stat-compare-values .v-mine { color: var(--gold); }
-  .stat-compare-values .v-friend { color: var(--friend); }
-  .stat-compare-values .v-ceci { color: var(--ceci); }
 
   /* ── Stats ── */
   .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 24px; }
@@ -303,9 +297,6 @@
   .cd-bars { display: flex; gap: 3px; align-items: flex-end; flex: 1; width: 100%; justify-content: center; }
   .cd-bar { width: 14px; border-radius: 3px 3px 0 0; min-height: 3px; position: relative; transition: height 0.5s ease; }
   .cd-bar:hover { filter: brightness(1.3); }
-  .cd-mine { background: var(--gold); }
-  .cd-friend { background: var(--friend); }
-  .cd-ceci { background: var(--ceci); }
   .cd-count { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); font-size: 0.75rem; font-weight: 700; white-space: nowrap; color: var(--text); }
   .cd-label { font-size: 0.68rem; color: var(--text2); flex-shrink: 0; }
 
@@ -864,24 +855,10 @@ function toast(msg) {
   setTimeout(()=>t.classList.remove('show'), 2500);
 }
 
-// ── Template helper (auto-escapes, use raw() for intentional HTML) ──
-function html(strings, ...vals) {
-  let out = '';
-  for (let i = 0; i < strings.length; i++) {
-    out += strings[i];
-    if (i < vals.length) {
-      const v = vals[i];
-      if (v === undefined || v === null) continue;
-      if (typeof v === 'object' && v !== null && v._raw) { out += v._raw; continue; }
-      if (Array.isArray(v)) { out += v.join(''); continue; }
-      out += esc(String(v));
-    }
-  }
-  return out;
-}
-function raw(h) { return { _raw: h }; }
-// Render helper: set innerHTML safely (when html`` not practical for large blocks)
-function render(el, markup) { if (typeof el === 'string') el = document.getElementById(el); if (el) el.innerHTML = markup; }
+// ── Shared helpers ──
+function getGroupKey(e) { return e.tmdb_id ? 'tmdb_'+e.tmdb_id : 'title_'+e.title.toLowerCase().trim()+'_'+(e.year||0); }
+function getUserName(uid) { return (allProfiles[uid]?.display_name||'').toLowerCase(); }
+const isPrivileged = () => ['fank1ng','ceci'].includes((currentProfile?.display_name||'').toLowerCase());
 
 // ===== AUTH BUTTONS =====
 // Register with invite code
@@ -1051,7 +1028,7 @@ async function initApp(user) {
     await loadAllData();
     subscribeToRealtime();
     // Show invite management for fank1ng/ceci
-    const uname = (pref?.display_name || '').toLowerCase();
+    const uname = getUserName(user.id);
     $['inviteMenuBtn'].classList.toggle('hidden', uname !== 'fank1ng' && uname !== 'ceci');
   } else {
     $['nameInput'].value = user.user_metadata?.display_name || user.email?.split('@')[0] || '';
@@ -1154,8 +1131,7 @@ async function loadAllData() {
     allSeasonRatings = cachedSeasons || [];
     allProfiles = cachedPrefs || {};
     updateHeaderCount();
-    renderList();
-    renderStats();
+    renderActiveTab();
   }
 
   // 2. Fetch fresh data from Supabase
@@ -1176,12 +1152,21 @@ async function loadAllData() {
     setCache('prefs_' + uid, allProfiles);
 
     updateHeaderCount();
-    renderList();
-    renderStats();
+    renderActiveTab();
   } catch(e) {
     console.error('loadAllData error:', e);
     if (!cachedEntries) toast('加载数据失败: ' + (e.message||e));
   }
+}
+
+function getActiveTab() {
+  const btn = document.querySelector('nav button.active');
+  return btn ? btn.dataset.tab : 'rate';
+}
+function renderActiveTab() {
+  const tab = getActiveTab();
+  if (tab==='list') renderList();
+  if (tab==='stats') renderStats();
 }
 
 function updateHeaderCount() {
@@ -1387,6 +1372,7 @@ document.querySelectorAll('#typeToggle button').forEach(btn=>{
 
 // ===== TMDB SEARCH =====
 let tmdbTimer = null;
+let tmdbAbort = null;
 $['tmdbSearch'].addEventListener('input', function(){
   clearTimeout(tmdbTimer);
   const q = this.value.trim();
@@ -1396,12 +1382,12 @@ $['tmdbSearch'].addEventListener('input', function(){
 
 async function searchTmdb(query) {
   const container = $['searchResults'];
+  // Abort previous in-flight request
+  if (tmdbAbort) tmdbAbort.abort();
+  tmdbAbort = new AbortController();
   try {
     const type = entryType==='series' ? 'tv' : 'movie';
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
-    const res = await fetch(`https://api.themoviedb.org/3/search/${type}?api_key=${TMDB_KEY}&query=${encodeURIComponent(query)}&language=zh-CN`, { signal: ctrl.signal });
-    clearTimeout(timer);
+    const res = await fetch(`https://api.themoviedb.org/3/search/${type}?api_key=${TMDB_KEY}&query=${encodeURIComponent(query)}&language=zh-CN`, { signal: tmdbAbort.signal });
     const data = await res.json();
     if (!data.results?.length) {
       container.innerHTML = '<div style="padding:12px;color:var(--text2);font-size:0.85rem">无结果</div>';
@@ -1455,6 +1441,7 @@ async function searchTmdb(query) {
       });
     });
   } catch(e) {
+    if (e.name==='AbortError') return; // Cancelled by newer request
     container.innerHTML = '<div style="padding:12px;color:var(--text2);font-size:0.85rem">搜索失败</div>';
     container.classList.add('open');
   }
@@ -1660,7 +1647,7 @@ function addMyRating(entryId) {
 
 // ===== USER COLOR =====
 function getUserColor(userId) {
-  const name = (allProfiles[userId]?.display_name||'').toLowerCase();
+  const name = getUserName(userId);
   if (name==='fank1ng') return { key:'mine', main:'#d4a853', dim:'#3a3020' };
   if (name==='ceci') return { key:'ceci', main:'#FF69B4', dim:'#2a1525' };
   return { key:'friend', main:'#5b9db0', dim:'#1a2a30' };
@@ -1721,13 +1708,10 @@ function renderList() {
   const groups = [];
   const seen = new Set();
   filtered.forEach(e=>{
-    const gkey = e.tmdb_id ? 'tmdb_'+e.tmdb_id : 'title_'+e.title.toLowerCase().trim()+'_'+(e.year||0);
+    const gkey = getGroupKey(e);
     if (seen.has(gkey)) return;
     seen.add(gkey);
-    const group = filtered.filter(f=>{
-      const fkey = f.tmdb_id ? 'tmdb_'+f.tmdb_id : 'title_'+f.title.toLowerCase().trim()+'_'+(f.year||0);
-      return fkey === gkey;
-    });
+    const group = filtered.filter(f=>getGroupKey(f)===gkey);
     // Attach group average score
     group._avgScore = group.reduce((s,e)=>s+getEntryScore(e),0)/group.length;
     groups.push(group);
@@ -1774,7 +1758,7 @@ function renderList() {
     ).join('');
 
     if (merged) {
-      const isPrivileged = ['fank1ng','ceci'].includes((currentProfile?.display_name||'').toLowerCase());
+      const priv = isPrivileged();
       const currentUserInGroup = group.some(e=>e.user_id===currentUser.id);
 
       let scoreBadges = '';
@@ -1811,15 +1795,15 @@ function renderList() {
           <span class="mc-dim-user" style="color:var(--friend)">平均</span><span class="mc-dim-dots">${dimTags({ratings:avgDims},{key:'friend'})}</span><span class="mc-dim-total" style="color:var(--friend)">总分 ${avgTotal.toFixed(1)}</span></div>`;
       }
 
-      if (isPrivileged) {
+      if (priv) {
         // Fank1ng/ceci: own row + other privileged + average of rest
         const myEntry = group.find(e=>e.user_id===currentUser.id);
         const otherPriv = group.find(e=>{
-          const n=(allProfiles[e.user_id]?.display_name||'').toLowerCase();
+          const n=getUserName(e.user_id);
           return (n==='fank1ng'||n==='ceci') && e.user_id!==currentUser.id;
         });
         const rest = group.filter(e=>{
-          const n=(allProfiles[e.user_id]?.display_name||'').toLowerCase();
+          const n=getUserName(e.user_id);
           return n!=='fank1ng' && n!=='ceci' && e.user_id!==currentUser.id;
         });
 
@@ -1832,8 +1816,8 @@ function renderList() {
       } else {
         // Other user: self + Fank1ng + ceci
         const myEntry = group.find(e=>e.user_id===currentUser.id);
-        const fank1ngEntry = group.find(e=>(allProfiles[e.user_id]?.display_name||'').toLowerCase()==='fank1ng');
-        const ceciEntry = group.find(e=>(allProfiles[e.user_id]?.display_name||'').toLowerCase()==='ceci');
+        const fank1ngEntry = group.find(e=>getUserName(e.user_id)==='fank1ng');
+        const ceciEntry = group.find(e=>getUserName(e.user_id)==='ceci');
 
         if (myEntry) renderOneRow(myEntry, true);
         if (fank1ngEntry && fank1ngEntry.user_id!==currentUser.id) renderOneRow(fank1ngEntry, false);
@@ -1961,7 +1945,6 @@ async function showDetail(id) {
   const ownerName = allProfiles[entry.user_id]?.display_name||'未知';
 
   // Find friend ratings using same group key as renderList
-  const getGroupKey = e => e.tmdb_id ? 'tmdb_'+e.tmdb_id : 'title_'+e.title.toLowerCase().trim()+'_'+(e.year||0);
   const entryKey = getGroupKey(entry);
   const friendEntries = allEntries.filter(e=>e.id!==id && getGroupKey(e)===entryKey);
 

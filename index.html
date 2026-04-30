@@ -428,6 +428,7 @@
   <header>
     <div class="logo"><span class="fd">FD</span>&amp;<span class="ce">Ceci</span></div>
     <div class="header-right">
+      <span id="headerCount" style="font-size:0.85rem;color:var(--text2)"></span>
       <div class="user-menu" id="userMenu">
         <span class="user-badge" id="headerUser" style="cursor:pointer"></span>
         <span class="user-arrow">▾</span>
@@ -436,7 +437,6 @@
           <button id="logoutBtn">退出</button>
         </div>
       </div>
-      <span id="headerCount" style="font-size:0.85rem;color:var(--text2)"></span>
     </div>
   </header>
 
@@ -1581,26 +1581,15 @@ function renderList() {
   const sort = $['sortBy'].value;
 
   const scoreFilterVal = $['scoreFilter'].value;
+  // Filter without score — score filtering happens after grouping
   let filtered = allEntries.filter(e=>{
     if (e.type!==listType) return false;
     if (ownerFilter==='me' && e.user_id!==currentUser.id) return false;
-    if (scoreFilterVal!=='all' && Math.floor(getEntryScore(e))!==parseInt(scoreFilterVal)) return false;
     if (query) {
       const hay = (e.title+(e.director||'')).toLowerCase();
       if (!hay.includes(query)) return false;
     }
     return true;
-  });
-
-  filtered.sort((a,b)=>{
-    switch(sort) {
-      case 'date-desc': return new Date(b.created_at)-new Date(a.created_at);
-      case 'date-asc': return new Date(a.created_at)-new Date(b.created_at);
-      case 'score-desc': return getEntryScore(b)-getEntryScore(a);
-      case 'score-asc': return getEntryScore(a)-getEntryScore(b);
-      case 'title': return a.title.localeCompare(b.title,'zh');
-      default: return 0;
-    }
   });
 
   loading.classList.add('hidden');
@@ -1622,12 +1611,38 @@ function renderList() {
       const fkey = f.tmdb_id ? 'tmdb_'+f.tmdb_id : 'title_'+f.title.toLowerCase().trim()+'_'+(f.year||0);
       return fkey === gkey;
     });
+    // Attach group average score
+    group._avgScore = group.reduce((s,e)=>s+getEntryScore(e),0)/group.length;
     groups.push(group);
+  });
+
+  // Apply score filter on group averages
+  let scoredGroups = groups;
+  if (scoreFilterVal!=='all') {
+    scoredGroups = groups.filter(g=>Math.floor(g._avgScore)===parseInt(scoreFilterVal));
+  }
+
+  if (!scoredGroups.length) {
+    container.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+
+  // Sort groups
+  scoredGroups.sort((a,b)=>{
+    switch(sort) {
+      case 'score-desc': return b._avgScore-a._avgScore;
+      case 'score-asc': return a._avgScore-b._avgScore;
+      case 'date-desc': return new Date(b[0].created_at)-new Date(a[0].created_at);
+      case 'date-asc': return new Date(a[0].created_at)-new Date(b[0].created_at);
+      case 'title': return a[0].title.localeCompare(b[0].title,'zh');
+      default: return 0;
+    }
   });
 
   // Pagination: slice groups for current page
   const start = (listPageNum - 1) * listPageSize;
-  const pageGroups = groups.slice(start, start + listPageSize);
+  const pageGroups = scoredGroups.slice(start, start + listPageSize);
   container.innerHTML = pageGroups.map(group=>{
     const main = group.find(e=>e.user_id===currentUser.id) || group[0];
     const others = group.filter(e=>e.user_id!==currentUser.id);
@@ -1780,7 +1795,7 @@ function renderList() {
     }
   }).join('');
   // Pagination
-  const totalPages = Math.ceil(groups.length / listPageSize);
+  const totalPages = Math.ceil(scoredGroups.length / listPageSize);
   if (totalPages > 1) {
     let pagesHtml = '';
     let pageNums = [];

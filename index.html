@@ -368,24 +368,45 @@
 <div id="authOverlay">
   <div class="auth-box">
     <h1><span class="fd">FD</span>&amp;<span class="ce">Ceci</span></h1>
-    <p class="subtitle">登录或注册</p>
-    <div class="auth-error" id="authError"></div>
-    <input type="email" id="authEmail" placeholder="邮箱">
-    <input type="password" id="authPassword" placeholder="密码">
-    <input type="text" id="authName" placeholder="显示名称（注册时填写）">
-    <div style="display:flex;gap:10px">
-      <button class="btn btn-primary" id="loginBtn" style="flex:1">登录</button>
-      <button class="btn btn-secondary" id="signupBtn" style="flex:1">注册</button>
+
+    <!-- Login view -->
+    <div id="authLoginView">
+      <p class="subtitle">欢迎回来</p>
+      <div class="auth-error" id="authError"></div>
+      <input type="email" id="authEmail" placeholder="邮箱">
+      <input type="password" id="authPassword" placeholder="密码">
+      <button class="btn btn-primary" id="loginBtn" style="width:100%">登录</button>
+      <div style="text-align:center;margin-top:8px">
+        <a id="forgotPwLink" style="color:var(--text2);font-size:0.8rem;cursor:pointer">忘记密码？</a>
+      </div>
+      <div style="text-align:center;margin-top:8px;font-size:0.85rem;color:var(--text2)">
+        没有账号？<a id="showRegisterLink" style="color:var(--gold);cursor:pointer">注册</a>
+      </div>
     </div>
-    <div style="text-align:center;margin-top:8px">
-      <a id="forgotPwLink" style="color:var(--text2);font-size:0.8rem;cursor:pointer">忘记密码？</a>
+
+    <!-- Register view -->
+    <div id="authRegisterView" class="hidden">
+      <p class="subtitle">创建账号</p>
+      <div class="auth-error" id="authRegError"></div>
+      <input type="email" id="regEmail" placeholder="邮箱">
+      <input type="password" id="regPassword" placeholder="密码（至少6位）">
+      <input type="text" id="regName" placeholder="显示名称（英文或数字，最多6位）">
+      <input type="text" id="regInviteCode" placeholder="邀请码">
+      <button class="btn btn-primary" id="regSignupBtn" style="width:100%">注册</button>
+      <div style="text-align:center;margin-top:8px;font-size:0.85rem;color:var(--text2)">
+        <a id="showLoginLink" style="color:var(--gold);cursor:pointer">← 返回登录</a>
+      </div>
     </div>
+
+    <!-- Reset password -->
     <div id="resetPwForm" class="hidden" style="margin-top:12px">
       <p style="color:var(--text2);font-size:0.8rem;margin-bottom:8px">输入邮箱，我们将发送重置链接</p>
       <input type="email" id="resetEmail" placeholder="邮箱" style="width:100%;padding:10px;margin-bottom:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius)">
       <button class="btn btn-primary" id="sendResetBtn" style="width:100%;margin-bottom:6px">发送重置邮件</button>
       <a id="backToLoginLink" style="color:var(--text2);font-size:0.8rem;cursor:pointer">← 返回登录</a>
     </div>
+
+    <!-- New password from recovery -->
     <div id="newPwForm" class="hidden" style="margin-top:12px">
       <p style="color:var(--text2);font-size:0.8rem;margin-bottom:8px">设置新密码</p>
       <input type="password" id="newPassword" placeholder="新密码（至少6位）" style="width:100%;padding:10px;margin-bottom:8px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius)">
@@ -417,6 +438,23 @@
   </div>
 </div>
 
+<!-- ═══ Invite Code Modal ═══ -->
+<div id="inviteCodeOverlay" class="modal-overlay">
+  <div class="modal" style="max-width:420px">
+    <h3>邀请码管理</h3>
+    <div style="margin-bottom:12px">
+      <button class="btn btn-primary btn-sm" id="inviteGenerateBtn">生成邀请码</button>
+      <span style="font-size:0.75rem;color:var(--text2);margin-left:8px">有效期 3 小时，一码一人</span>
+    </div>
+    <div id="inviteCodeList" style="max-height:240px;overflow-y:auto">
+      <p style="color:var(--text2);font-size:0.8rem">加载中...</p>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+      <button class="btn btn-secondary btn-sm" id="inviteCloseBtn">关闭</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ Migrate Banner ═══ -->
 <div id="migrateBanner" class="hidden" style="background:var(--gold-dim);border:1px solid var(--gold);padding:12px 20px;text-align:center;font-size:0.85rem;color:var(--gold)">
   检测到旧版本本地数据，<a id="migrateLink" style="color:var(--gold);text-decoration:underline;cursor:pointer;font-weight:700">点击迁移</a>到云端账号
@@ -434,6 +472,7 @@
         <span class="user-arrow">▾</span>
         <div class="user-dropdown" id="userDropdown">
           <button id="changePwBtn">修改密码</button>
+          <button id="inviteMenuBtn" class="hidden">邀请码管理</button>
           <button id="logoutBtn">退出</button>
         </div>
       </div>
@@ -616,9 +655,22 @@ const $ = {
   get authEmail() { return document.getElementById('authEmail'); },
   get authBox() { return document.querySelector('.auth-box'); },
   get authError() { return document.getElementById('authError'); },
-  get authName() { return document.getElementById('authName'); },
   get authOverlay() { return document.getElementById('authOverlay'); },
   get authPassword() { return document.getElementById('authPassword'); },
+  get authLoginView() { return document.getElementById('authLoginView'); },
+  get authRegisterView() { return document.getElementById('authRegisterView'); },
+  get authRegError() { return document.getElementById('authRegError'); },
+  get regEmail() { return document.getElementById('regEmail'); },
+  get regPassword() { return document.getElementById('regPassword'); },
+  get regName() { return document.getElementById('regName'); },
+  get regInviteCode() { return document.getElementById('regInviteCode'); },
+  get showRegisterLink() { return document.getElementById('showRegisterLink'); },
+  get showLoginLink() { return document.getElementById('showLoginLink'); },
+  get inviteMenuBtn() { return document.getElementById('inviteMenuBtn'); },
+  get inviteCodeOverlay() { return document.getElementById('inviteCodeOverlay'); },
+  get inviteGenerateBtn() { return document.getElementById('inviteGenerateBtn'); },
+  get inviteCodeList() { return document.getElementById('inviteCodeList'); },
+  get inviteCloseBtn() { return document.getElementById('inviteCloseBtn'); },
   get cancelEditBtn() { return document.getElementById('cancelEditBtn'); },
   get comment() { return document.getElementById('comment'); },
   get detailModal() { return document.getElementById('detailModal'); },
@@ -665,7 +717,7 @@ const $ = {
   get searchResults() { return document.getElementById('searchResults'); },
   get seasonList() { return document.getElementById('seasonList'); },
   get seasonSection() { return document.getElementById('seasonSection'); },
-  get signupBtn() { return document.getElementById('signupBtn'); },
+  get regSignupBtn() { return document.getElementById('regSignupBtn'); },
   get sortBy() { return document.getElementById('sortBy'); },
   get statsContent() { return document.getElementById('statsContent'); },
   get statsUserPicker() { return document.getElementById('statsUserPicker'); },
@@ -681,21 +733,25 @@ const $ = {
 };
 
 // ===== AUTH UI =====
-function showAuthForm(mode) {
-  const el = $['authError']; el.textContent = '';
-  if (mode === 'login') {
-    $['authPassword'].classList.remove('hidden');
-    $['authName'].classList.add('hidden');
-    $['loginBtn'].classList.remove('hidden');
-    $['signupBtn'].classList.remove('hidden');
-    $['forgotPwLink'].classList.remove('hidden');
-    $['resetPwForm'].classList.add('hidden');
-    $['newPwForm'].classList.add('hidden');
-    $['authBox'].querySelector('.subtitle').textContent = '登录或注册';
-  }
+function showLoginView() {
+  $['authError'].textContent = '';
+  $['authLoginView'].classList.remove('hidden');
+  $['authRegisterView'].classList.add('hidden');
+  $['resetPwForm'].classList.add('hidden');
+  $['newPwForm'].classList.add('hidden');
+  $['authPassword'].classList.remove('hidden');
+  $['loginBtn'].classList.remove('hidden');
+  $['forgotPwLink'].classList.remove('hidden');
 }
-function showAuthError(msg) {
-  const el = $['authError'];
+function showRegisterView() {
+  $['authRegError'].textContent = '';
+  $['authLoginView'].classList.add('hidden');
+  $['authRegisterView'].classList.remove('hidden');
+  $['resetPwForm'].classList.add('hidden');
+  $['newPwForm'].classList.add('hidden');
+}
+function showAuthError(msg, isReg) {
+  const el = isReg ? $['authRegError'] : $['authError'];
   el.textContent = msg;
   setTimeout(() => { el.textContent = ''; }, 4000);
 }
@@ -703,24 +759,18 @@ function showAuthError(msg) {
 // Forgot password toggle
 $['forgotPwLink'].addEventListener('click', ()=>{
   $['authPassword'].classList.add('hidden');
-  $['authName'].classList.add('hidden');
   $['loginBtn'].classList.add('hidden');
-  $['signupBtn'].classList.add('hidden');
   $['forgotPwLink'].classList.add('hidden');
   $['resetPwForm'].classList.remove('hidden');
-  $['authBox'].querySelector('.subtitle').textContent = '找回密码';
+  $['authLoginView'].querySelector('.subtitle').textContent = '找回密码';
   $['resetEmail'].value = $['authEmail'].value;
 });
 
-// Back to login
+// Back to login from reset/new-pw
 $['backToLoginLink'].addEventListener('click', ()=>{
-  $['authPassword'].classList.remove('hidden');
-  $['loginBtn'].classList.remove('hidden');
-  $['signupBtn'].classList.remove('hidden');
-  $['forgotPwLink'].classList.remove('hidden');
   $['resetPwForm'].classList.add('hidden');
   $['newPwForm'].classList.add('hidden');
-  $['authBox'].querySelector('.subtitle').textContent = '登录或注册';
+  showLoginView();
 });
 
 // Send reset email
@@ -733,11 +783,7 @@ $['sendResetBtn'].addEventListener('click', async ()=>{
   if (error) { showAuthError('发送失败: '+error.message); btn.textContent='发送重置邮件'; btn.disabled=false; return; }
   toast('重置邮件已发送，请查收并点击链接');
   $['resetPwForm'].classList.add('hidden');
-  $['authPassword'].classList.remove('hidden');
-  $['loginBtn'].classList.remove('hidden');
-  $['signupBtn'].classList.remove('hidden');
-  $['forgotPwLink'].classList.remove('hidden');
-  $['authBox'].querySelector('.subtitle').textContent = '登录或注册';
+  showLoginView();
   btn.textContent = '发送重置邮件'; btn.disabled = false;
 });
 
@@ -753,11 +799,7 @@ $['updatePwBtn'].addEventListener('click', async ()=>{
   const {data:{session}} = await db.auth.getSession();
   if (session) {
     $['newPwForm'].classList.add('hidden');
-    $['authPassword'].classList.remove('hidden');
-    $['loginBtn'].classList.remove('hidden');
-    $['signupBtn'].classList.remove('hidden');
-    $['forgotPwLink'].classList.remove('hidden');
-    $['authBox'].querySelector('.subtitle').textContent = '登录或注册';
+    showLoginView();
     await initApp(session.user);
   }
   btn.textContent = '更新密码并登录'; btn.disabled = false;
@@ -836,40 +878,51 @@ function raw(h) { return { _raw: h }; }
 function render(el, markup) { if (typeof el === 'string') el = document.getElementById(el); if (el) el.innerHTML = markup; }
 
 // ===== AUTH BUTTONS =====
-$['signupBtn'].addEventListener('click', async ()=>{
-  const btn = $['signupBtn'];
+// Register with invite code
+$['regSignupBtn'].addEventListener('click', async ()=>{
+  const btn = $['regSignupBtn'];
   const origText = btn.textContent;
   btn.textContent = '注册中...';
   btn.disabled = true;
   try {
-    const email = $['authEmail'].value.trim();
-    const password = $['authPassword'].value;
-    const name = $['authName'].value.trim();
-    if (!email || !password) { showAuthError('请填写邮箱和密码'); return; }
-    if (!name) { showAuthError('请填写显示名称'); return; }
-    if (!db) { showAuthError('初始化失败，请刷新页面'); return; }
+    const email = $['regEmail'].value.trim();
+    const password = $['regPassword'].value;
+    const name = $['regName'].value.trim();
+    const inviteCode = $['regInviteCode'].value.trim();
+    if (!email || !password) { showAuthError('请填写邮箱和密码', true); btn.textContent=origText; btn.disabled=false; return; }
+    if (!name) { showAuthError('请填写显示名称', true); btn.textContent=origText; btn.disabled=false; return; }
+    if (!/^[a-zA-Z0-9]{1,6}$/.test(name)) { showAuthError('用户名仅支持英文和数字，最多6位', true); btn.textContent=origText; btn.disabled=false; return; }
+    if (!inviteCode) { showAuthError('请填写邀请码', true); btn.textContent=origText; btn.disabled=false; return; }
+    if (!db) { showAuthError('初始化失败，请刷新页面', true); btn.textContent=origText; btn.disabled=false; return; }
+
+    // Validate invite code
+    const {data: valid, error: rpcErr} = await db.rpc('claim_invite_code', { p_code: inviteCode });
+    if (rpcErr || !valid) { showAuthError('邀请码无效或已用完', true); btn.textContent=origText; btn.disabled=false; return; }
 
     const {data, error} = await db.auth.signUp({
       email, password,
       options: { data: { display_name: name } }
     });
     if (error) {
-      showAuthError(error.message.includes('already registered') ? '该邮箱已注册，请直接登录' : error.message);
+      showAuthError(error.message.includes('already registered') ? '该邮箱已注册，请直接登录' : error.message, true);
+      btn.textContent=origText; btn.disabled=false;
       return;
     }
-    if (data.user?.identities?.length===0) { showAuthError('该邮箱已注册，请直接登录'); return; }
+    if (data.user?.identities?.length===0) { showAuthError('该邮箱已注册，请直接登录', true); btn.textContent=origText; btn.disabled=false; return; }
     const {data: loginData, error: signInErr} = await db.auth.signInWithPassword({email, password});
-    if (signInErr) { showAuthError('注册成功但登录失败，请尝试手动登录'); return; }
+    if (signInErr) { showAuthError('注册成功但登录失败，请尝试手动登录', true); btn.textContent=origText; btn.disabled=false; return; }
     await initApp(loginData.user);
     toast('注册成功！');
   } catch(e) {
-    showAuthError('错误: ' + (e.message||e));
+    showAuthError('错误: ' + (e.message||e), true);
     console.error(e);
-  } finally {
     btn.textContent = origText;
     btn.disabled = false;
   }
 });
+
+$['showRegisterLink'].addEventListener('click', showRegisterView);
+$['showLoginLink'].addEventListener('click', showLoginView);
 
 $['loginBtn'].addEventListener('click', async ()=>{
   const btn = $['loginBtn'];
@@ -909,6 +962,60 @@ document.addEventListener('click', ()=>{
   $['userMenu'].classList.remove('open');
 });
 
+
+// ===== INVITE CODE MANAGEMENT =====
+async function loadInviteCodes() {
+  const {data: codes, error} = await db.from('invite_codes')
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (error) { $['inviteCodeList'].innerHTML = '<p style="color:var(--text2);font-size:0.8rem">加载失败</p>'; return; }
+  const active = (codes||[]).filter(c => new Date(c.expires_at) > new Date() && c.use_count < c.max_uses);
+
+  if (!active.length) {
+    $['inviteCodeList'].innerHTML = '<p style="color:var(--text2);font-size:0.8rem">暂无有效邀请码，点击上方按钮生成</p>';
+    return;
+  }
+  $['inviteCodeList'].innerHTML = active.map(c => {
+    const remaining = Math.max(0, new Date(c.expires_at) - Date.now());
+    const h = Math.floor(remaining / 3600000);
+    const m = Math.floor((remaining % 3600000) / 60000);
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div>
+        <code style="font-size:1rem;color:var(--gold);font-weight:700;letter-spacing:1px">${esc(c.code)}</code>
+        <span style="font-size:0.7rem;color:var(--text2);margin-left:8px">剩余 ${h}小时${m}分</span>
+      </div>
+      <button class="btn btn-xs btn-secondary" onclick="copyInviteCode('${esc(c.code)}')" aria-label="复制邀请码">复制</button>
+    </div>`;
+  }).join('');
+}
+
+function copyInviteCode(code) {
+  navigator.clipboard.writeText(code).then(() => toast('已复制邀请码'));
+}
+
+$['inviteGenerateBtn'].addEventListener('click', async () => {
+  const btn = $['inviteGenerateBtn'];
+  btn.textContent = '生成中...'; btn.disabled = true;
+  const {data: code, error} = await db.rpc('generate_invite_code');
+  if (error) { toast('生成失败: ' + error.message); btn.textContent='生成邀请码'; btn.disabled=false; return; }
+  toast('已生成: ' + code);
+  await loadInviteCodes();
+  btn.textContent = '生成邀请码'; btn.disabled = false;
+});
+
+$['inviteMenuBtn'].addEventListener('click', () => {
+  $['userMenu'].classList.remove('open');
+  $['inviteCodeOverlay'].classList.add('open');
+  loadInviteCodes();
+});
+
+$['inviteCloseBtn'].addEventListener('click', () => {
+  $['inviteCodeOverlay'].classList.remove('open');
+});
+$['inviteCodeOverlay'].addEventListener('click', (e) => {
+  if (e.target === e.currentTarget) $['inviteCodeOverlay'].classList.remove('open');
+});
+
 // Name setup
 $['nameSaveBtn'].addEventListener('click', async ()=>{
   const name = $['nameInput'].value.trim();
@@ -920,6 +1027,7 @@ $['nameSaveBtn'].addEventListener('click', async ()=>{
   $['headerUser'].textContent = name;
   await loadAllData();
   subscribeToRealtime();
+  if (name.toLowerCase() === 'fank1ng' || name.toLowerCase() === 'ceci') $['inviteMenuBtn'].classList.remove('hidden');
 });
 
 // ===== APP INIT =====
@@ -936,6 +1044,9 @@ async function initApp(user) {
     checkMigration();
     await loadAllData();
     subscribeToRealtime();
+    // Show invite management for fank1ng/ceci
+    const uname = (pref?.display_name || '').toLowerCase();
+    if (uname === 'fank1ng' || uname === 'ceci') $['inviteMenuBtn'].classList.remove('hidden');
   } else {
     $['nameInput'].value = user.user_metadata?.display_name || user.email?.split('@')[0] || '';
     nameOverlay.classList.add('open');
@@ -2188,12 +2299,10 @@ db.auth.onAuthStateChange((event, session) => {
   if (event === 'PASSWORD_RECOVERY') {
     $['newPwForm'].classList.remove('hidden');
     $['authPassword'].classList.add('hidden');
-    $['authName'].classList.add('hidden');
     $['loginBtn'].classList.add('hidden');
-    $['signupBtn'].classList.add('hidden');
     $['forgotPwLink'].classList.add('hidden');
     $['resetPwForm'].classList.add('hidden');
-    $['authBox'].querySelector('.subtitle').textContent = '设置新密码';
+    $['authLoginView'].querySelector('.subtitle').textContent = '设置新密码';
   }
 });
 

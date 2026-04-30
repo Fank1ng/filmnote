@@ -1027,7 +1027,7 @@ $['nameSaveBtn'].addEventListener('click', async ()=>{
   $['headerUser'].textContent = name;
   await loadAllData();
   subscribeToRealtime();
-  if (name.toLowerCase() === 'fank1ng' || name.toLowerCase() === 'ceci') $['inviteMenuBtn'].classList.remove('hidden');
+  $['inviteMenuBtn'].classList.toggle('hidden', name.toLowerCase() !== 'fank1ng' && name.toLowerCase() !== 'ceci');
 });
 
 // ===== APP INIT =====
@@ -1046,7 +1046,7 @@ async function initApp(user) {
     subscribeToRealtime();
     // Show invite management for fank1ng/ceci
     const uname = (pref?.display_name || '').toLowerCase();
-    if (uname === 'fank1ng' || uname === 'ceci') $['inviteMenuBtn'].classList.remove('hidden');
+    $['inviteMenuBtn'].classList.toggle('hidden', uname !== 'fank1ng' && uname !== 'ceci');
   } else {
     $['nameInput'].value = user.user_metadata?.display_name || user.email?.split('@')[0] || '';
     nameOverlay.classList.add('open');

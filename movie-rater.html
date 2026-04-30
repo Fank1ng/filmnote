@@ -561,6 +561,7 @@
           <option value="date-asc">最早添加</option>
           <option value="score-desc">评分最高</option>
           <option value="score-asc">评分最低</option>
+          <option value="count-desc">评价数量</option>
           <option value="title">按片名 A-Z</option>
         </select>
         <select id="ownerFilter">
@@ -1744,6 +1745,7 @@ function renderList() {
     switch(sort) {
       case 'score-desc': return b._avgScore-a._avgScore;
       case 'score-asc': return a._avgScore-b._avgScore;
+      case 'count-desc': return b.length-a.length;
       case 'date-desc': return new Date(b[0].created_at)-new Date(a[0].created_at);
       case 'date-asc': return new Date(a[0].created_at)-new Date(b[0].created_at);
       case 'title': return a[0].title.localeCompare(b[0].title,'zh');
@@ -1798,10 +1800,10 @@ function renderList() {
         for (const dim of Object.keys(WEIGHTS)) {
           avgDims[dim] = Math.round(entries.reduce((s,e)=>s+(e.ratings[dim]||5),0)/entries.length);
         }
-        scoreBadges += `<div class="mc-score-sm mc-score-friend" title="其他人平均">
-          <span class="mc-score-label">其他人均</span>${avgTotal.toFixed(1)}</div>`;
+        scoreBadges += `<div class="mc-score-sm mc-score-friend" title="平均">
+          <span class="mc-score-label">平均</span>${avgTotal.toFixed(1)}</div>`;
         dimRowsHtml += `<div class="mc-dim-row-user" style="display:flex;align-items:center;gap:6px;padding:2px 0">
-          <span class="mc-dim-user" style="color:var(--friend)">其他人平均</span><span class="mc-dim-dots">${dimTags({ratings:avgDims},{key:'friend'})}</span><span class="mc-dim-total" style="color:var(--friend)">总分 ${avgTotal.toFixed(1)}</span></div>`;
+          <span class="mc-dim-user" style="color:var(--friend)">平均</span><span class="mc-dim-dots">${dimTags({ratings:avgDims},{key:'friend'})}</span><span class="mc-dim-total" style="color:var(--friend)">总分 ${avgTotal.toFixed(1)}</span></div>`;
       }
 
       if (isPrivileged) {
@@ -2088,7 +2090,7 @@ function renderDist(dist, c) {
   return dist.map((c2,i)=>`
     <div class="score-dist-bar">
       <span class="score-dist-count" style="color:${mc}">${c2||''}</span>
-      <div class="score-dist-fill" style="height:${(c2/maxDist)*100}%;background:${mc}"></div>
+      <div class="score-dist-fill" style="height:${c2?Math.max((c2/maxDist)*100,8):0}%;background:${mc}"></div>
       <span class="score-dist-label">${i+1}分</span>
     </div>
   `).join('');
@@ -2164,7 +2166,7 @@ function renderStats() {
 
   } else if (statsFilter==='compare') {
     const myName = currentProfile?.display_name||'我';
-    const otherLabel = statsOtherUser ? (allProfiles[statsOtherUser]?.display_name||'对方') : (otherEntries.length>1?'其他人平均':(otherEntries.length>0?allProfiles[otherEntries[0].user_id]?.display_name||'对方':'对方'));
+    const otherLabel = statsOtherUser ? (allProfiles[statsOtherUser]?.display_name||'对方') : (otherEntries.length>1?'平均':(otherEntries.length>0?allProfiles[otherEntries[0].user_id]?.display_name||'对方':'对方'));
     html += `<div class="stats-grid">
       <div class="stat-card"><div class="stat-value" style="color:${myColor.main}">${myStats?myStats.avgTotal.toFixed(1):'-'}</div><div class="stat-label">${esc(myName)}均分${typeSuffix}</div></div>
       <div class="stat-card"><div class="stat-value" style="color:${otherColor.main}">${otherStats?otherStats.avgTotal.toFixed(1):'-'}</div><div class="stat-label">${esc(otherLabel)}均分${typeSuffix}</div></div>

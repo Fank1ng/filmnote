@@ -1493,6 +1493,11 @@ $['movieForm'].addEventListener('submit', async e=>{
       // Verify session before insert
       const {data:{session}} = await db.auth.getSession();
       if (!session) { toast('登录已过期，请重新登录'); return; }
+      // Prevent duplicate: same user rating same movie
+      const dupKey = getGroupKey({tmdb_id: entryData.tmdb_id, title: entryData.title, year: entryData.year});
+      if (allEntries.some(e=>e.user_id===currentUser.id && getGroupKey(e)===dupKey)) {
+        toast('你已评价过该作品'); btn.textContent=origText; btn.disabled=false; return;
+      }
       const {data:inserted, error: insertErr} = await db.from('entries').insert(entryData).select('id').single();
       if (insertErr) {
         toast('保存失败: '+insertErr.message+' (code:'+insertErr.code+')');
@@ -1621,6 +1626,12 @@ async function deleteEntry(id) {
 function addMyRating(entryId) {
   const entry = allEntries.find(e=>e.id===entryId);
   if (!entry) return;
+  // Prevent duplicate: same user cannot rate the same movie/series twice
+  const gkey = getGroupKey(entry);
+  if (allEntries.some(e=>e.user_id===currentUser.id && e.id!==entryId && getGroupKey(e)===gkey)) {
+    toast('你已评价过该作品');
+    return;
+  }
   editingEntryId = null;
   $['editId'].value = '';
   $['title'].value = entry.title;
@@ -1753,8 +1764,9 @@ function renderList() {
     const merged = uniqueUsers.size > 1;
     const seasonCount = main.type==='series' ? allSeasonRatings.filter(s=>s.entry_id===main.id&&s.user_id===main.user_id).length : 0;
 
-    const dimTags = (entry, uc) => Object.entries(entry.ratings||{}).map(([dim,score])=>
-      `<span class="mc-dim-item" style="border-color:${uc.main}"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${uc.main}">${score}</span></span>`
+    const dimOrder = Object.keys(WEIGHTS);
+    const dimTags = (entry, uc) => dimOrder.map(dim=>
+      `<span class="mc-dim-item" style="border-color:${uc.main}"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${uc.main}">${(entry.ratings||{})[dim]||5}</span></span>`
     ).join('');
 
     if (merged) {
@@ -1884,7 +1896,7 @@ function renderList() {
             </div>
             <div class="mc-dim-scores">
               <span class="mc-dim-user" style="color:${getUserColor(main.user_id).main}">${esc(ownerName)}</span>
-              <span class="mc-dim-dots">${Object.entries(main.ratings||{}).map(([dim,score])=>`<span class="mc-dim-item" style="border-color:${getUserColor(main.user_id).main}"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${getUserColor(main.user_id).main}">${score}</span></span>`).join('')}</span>
+              <span class="mc-dim-dots">${dimOrder.map(dim=>`<span class="mc-dim-item" style="border-color:${getUserColor(main.user_id).main}"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${getUserColor(main.user_id).main}">${(main.ratings||{})[dim]||5}</span></span>`).join('')}</span>
               <span class="mc-dim-total" style="color:${getUserColor(main.user_id).main}">总分 ${getEntryScore(main).toFixed(1)}</span>
             </div>
             ${main.comment ? `<div class="mc-comment">${esc(main.comment)}</div>` : ''}
@@ -1964,10 +1976,10 @@ async function showDetail(id) {
       </div>
     </div>
     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
-      ${Object.entries(entry.ratings||{}).map(([dim,score])=>`
+      ${Object.keys(WEIGHTS).map(dim=>`
         <div style="display:flex;justify-content:space-between;font-size:0.85rem">
           <span>${DIM_LABELS[dim]} <span style="color:var(--text2);font-size:0.7rem">(×${(WEIGHTS[dim]*100).toFixed(0)}%)</span></span>
-          <strong style="color:var(--gold)">${score}</strong>
+          <strong style="color:var(--gold)">${(entry.ratings||{})[dim]||5}</strong>
         </div>
       `).join('')}
     </div>
@@ -1993,7 +2005,7 @@ async function showDetail(id) {
               <span class="fr-score" style="color:${getUserColor(f.user_id).main}">${getEntryScore(f).toFixed(1)} / 10</span>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:0.75rem;color:var(--text2)">
-              ${Object.entries(f.ratings||{}).map(([dim,score])=>`<span class="mc-dim-item"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val">${score}</span></span>`).join('')}
+              ${Object.keys(WEIGHTS).map(dim=>`<span class="mc-dim-item"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val">${(f.ratings||{})[dim]||5}</span></span>`).join('')}
             </div>
             ${f.comment ? `<p style="font-size:0.8rem;color:var(--text2);font-style:italic;margin-top:4px">"${esc(f.comment)}"</p>` : ''}
           </div>

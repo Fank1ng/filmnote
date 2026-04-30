@@ -1838,11 +1838,6 @@ function renderList() {
         if (myEntry) renderOneRow(myEntry, true);
         if (fank1ngEntry && fank1ngEntry.user_id!==currentUser.id) renderOneRow(fank1ngEntry, false);
         if (ceciEntry && ceciEntry.user_id!==currentUser.id) renderOneRow(ceciEntry, false);
-        const remaining = group.filter(e=>{
-          const n=(allProfiles[e.user_id]?.display_name||'').toLowerCase();
-          return n!=='fank1ng' && n!=='ceci' && e.user_id!==currentUser.id;
-        });
-        remaining.forEach(e => renderOneRow(e, false));
         if (!currentUserInGroup) {
           const anyNonMe = group.find(e=>e.user_id!==currentUser.id);
           if (anyNonMe) addBtnHtml = `<div style="text-align:right;padding-top:4px"><button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();addMyRating('${anyNonMe.id}')" aria-label="添加我的评分">＋我的评分</button></div>`;

@@ -52,6 +52,20 @@
   .logo .ce { color: var(--ceci); }
   .header-right { display: flex; align-items: center; gap: 12px; }
   .user-badge { font-size: 0.8rem; color: var(--gold); }
+  .user-menu { position: relative; display: flex; align-items: center; gap: 2px; cursor: pointer; user-select: none; }
+  .user-arrow { font-size: 0.65rem; color: var(--text2); transition: var(--t); }
+  .user-menu.open .user-arrow { transform: rotate(180deg); }
+  .user-dropdown {
+    position: absolute; top: 100%; right: 0; margin-top: 8px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 4px; min-width: 120px; display: none; z-index: 30;
+  }
+  .user-menu.open .user-dropdown { display: block; }
+  .user-dropdown button {
+    display: block; width: 100%; padding: 8px 12px; border: none; background: none;
+    color: var(--text); font-size: 0.85rem; cursor: pointer; border-radius: 6px; text-align: left;
+  }
+  .user-dropdown button:hover { background: rgba(255,255,255,0.05); color: var(--gold); }
 
   /* ── Tabs ── */
   nav { display: flex; gap: 4px; padding: 16px 24px 0; }
@@ -414,10 +428,15 @@
   <header>
     <div class="logo"><span class="fd">FD</span>&amp;<span class="ce">Ceci</span></div>
     <div class="header-right">
-      <span class="user-badge" id="headerUser"></span>
+      <div class="user-menu" id="userMenu">
+        <span class="user-badge" id="headerUser" style="cursor:pointer"></span>
+        <span class="user-arrow">▾</span>
+        <div class="user-dropdown" id="userDropdown">
+          <button id="changePwBtn">修改密码</button>
+          <button id="logoutBtn">退出</button>
+        </div>
+      </div>
       <span id="headerCount" style="font-size:0.85rem;color:var(--text2)"></span>
-      <button class="btn btn-sm btn-secondary" id="changePwBtn">修改密码</button>
-        <button class="btn btn-sm btn-secondary" id="logoutBtn">退出</button>
     </div>
   </header>
 
@@ -656,6 +675,8 @@ const $ = {
   get tmdbSearch() { return document.getElementById('tmdbSearch'); },
   get toast() { return document.getElementById('toast'); },
   get totalScorePreview() { return document.getElementById('totalScorePreview'); },
+  get userMenu() { return document.getElementById('userMenu'); },
+  get userDropdown() { return document.getElementById('userDropdown'); },
   get year() { return document.getElementById('year'); },
 };
 
@@ -744,6 +765,7 @@ $['updatePwBtn'].addEventListener('click', async ()=>{
 
 // Change password (logged in)
 $['changePwBtn'].addEventListener('click', ()=>{
+  $['userMenu'].classList.remove('open');
   $['changePwInput'].value = '';
   $['changePwOverlay'].classList.add('open');
 });
@@ -873,8 +895,18 @@ $['loginBtn'].addEventListener('click', async ()=>{
 });
 
 $['logoutBtn'].addEventListener('click', async ()=>{
+  $['userMenu'].classList.remove('open');
   await db.auth.signOut();
   doLogout();
+});
+
+// User menu dropdown toggle
+$['userMenu'].addEventListener('click', (e)=>{
+  e.stopPropagation();
+  $['userMenu'].classList.toggle('open');
+});
+document.addEventListener('click', ()=>{
+  $['userMenu'].classList.remove('open');
 });
 
 // Name setup
@@ -1662,7 +1694,7 @@ function renderList() {
         if (otherPriv) renderOneRow(otherPriv, false);
         if (rest.length > 0) renderAvgRow(rest);
         if (!currentUserInGroup && rest.length > 0) {
-          addBtnHtml = `<div style="text-align:right;padding-top:4px"><button class="btn btn-sm btn-secondary" onclick="addMyRating('${rest[0].id}')" aria-label="添加我的评分">＋我的评分</button></div>`;
+          addBtnHtml = `<div style="text-align:right;padding-top:4px"><button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();addMyRating('${rest[0].id}')" aria-label="添加我的评分">＋我的评分</button></div>`;
         }
       } else {
         // Other user: self + Fank1ng + ceci
@@ -1675,7 +1707,7 @@ function renderList() {
         if (ceciEntry && ceciEntry.user_id!==currentUser.id) renderOneRow(ceciEntry, false);
         if (!currentUserInGroup) {
           const anyNonMe = group.find(e=>e.user_id!==currentUser.id);
-          if (anyNonMe) addBtnHtml = `<div style="text-align:right;padding-top:4px"><button class="btn btn-sm btn-secondary" onclick="addMyRating('${anyNonMe.id}')" aria-label="添加我的评分">＋我的评分</button></div>`;
+          if (anyNonMe) addBtnHtml = `<div style="text-align:right;padding-top:4px"><button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();addMyRating('${anyNonMe.id}')" aria-label="添加我的评分">＋我的评分</button></div>`;
         }
       }
 

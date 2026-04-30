@@ -1960,8 +1960,10 @@ async function showDetail(id) {
   const isMine = entry.user_id===currentUser.id;
   const ownerName = allProfiles[entry.user_id]?.display_name||'未知';
 
-  // Find friend ratings (same tmdb_id or same title)
-  const friendEntries = allEntries.filter(e=>e.id!==id && (e.tmdb_id&&entry.tmdb_id?e.tmdb_id===entry.tmdb_id:e.title===entry.title));
+  // Find friend ratings using same group key as renderList
+  const getGroupKey = e => e.tmdb_id ? 'tmdb_'+e.tmdb_id : 'title_'+e.title.toLowerCase().trim()+'_'+(e.year||0);
+  const entryKey = getGroupKey(entry);
+  const friendEntries = allEntries.filter(e=>e.id!==id && getGroupKey(e)===entryKey);
 
   // Season ratings for this entry
   const seasons = allSeasonRatings.filter(s=>s.entry_id===id);

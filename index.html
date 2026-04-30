@@ -293,15 +293,20 @@
   .score-dist-count { font-size: 0.85rem; font-weight: 700; color: var(--gold); }
 
   /* ── Compare Distribution ── */
-  .compare-dist { display: flex; gap: 6px; align-items: flex-end; height: 140px; padding: 0 2px; }
-  .cd-bar-group { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; }
+  .compare-dist { display: flex; gap: 6px; align-items: flex-end; height: 160px; padding: 0 2px; position: relative; }
+  .compare-dist::before {
+    content: ''; position: absolute; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 31px, var(--border) 31px, var(--border) 32px);
+    opacity: 0.5; pointer-events: none; border-radius: 4px;
+  }
+  .cd-bar-group { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; height: 100%; z-index: 1; }
   .cd-bars { display: flex; gap: 3px; align-items: flex-end; flex: 1; width: 100%; justify-content: center; }
   .cd-bar { width: 14px; border-radius: 3px 3px 0 0; min-height: 3px; position: relative; transition: height 0.5s ease; }
   .cd-bar:hover { filter: brightness(1.3); }
   .cd-mine { background: var(--gold); }
   .cd-friend { background: var(--friend); }
   .cd-ceci { background: var(--ceci); }
-  .cd-count { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); font-size: 0.6rem; font-weight: 700; white-space: nowrap; color: var(--text); }
+  .cd-count { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); font-size: 0.75rem; font-weight: 700; white-space: nowrap; color: var(--text); }
   .cd-label { font-size: 0.68rem; color: var(--text2); }
 
   /* ── Modal ── */
@@ -1837,7 +1842,7 @@ function renderList() {
           const n=(allProfiles[e.user_id]?.display_name||'').toLowerCase();
           return n!=='fank1ng' && n!=='ceci' && e.user_id!==currentUser.id;
         });
-        remaining.forEach(e => renderOneRow(e, false));
+        if (remaining.length > 0) renderAvgRow(remaining);
         if (!currentUserInGroup) {
           const anyNonMe = group.find(e=>e.user_id!==currentUser.id);
           if (anyNonMe) addBtnHtml = `<div style="text-align:right;padding-top:4px"><button class="btn btn-sm btn-secondary" onclick="event.stopPropagation();addMyRating('${anyNonMe.id}')" aria-label="添加我的评分">＋我的评分</button></div>`;

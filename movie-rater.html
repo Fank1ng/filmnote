@@ -2650,14 +2650,15 @@ async function loadTopRated() {
 
   const results = [];
   try {
-    for (let page=1; page<=5; page++) {
+    // Fetch enough pages to reach 100 after vote_count filter
+    for (let page=1; page<=10 && results.length<100; page++) {
       const res = await fetch(`https://api.themoviedb.org/3/movie/top_rated?api_key=${TMDB_KEY}&language=zh-CN&page=${page}`);
       const data = await res.json();
-      if (data.results) {
+      if (data.results && data.results.length) {
         data.results.forEach(r=>{
           if ((r.vote_count||0)>=500) results.push(r);
         });
-      }
+      } else break; // no more pages
     }
   } catch(e) { return []; }
 

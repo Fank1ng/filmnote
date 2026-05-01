@@ -2369,11 +2369,11 @@ async function renderDiscover() {
     return;
   }
 
-  // Build lookup map
+  // Build lookup map (TMDB uses 'id', not 'tmdb_id')
   discoverMovieMap = {};
-  movies.forEach(m=>{ if(m.tmdb_id) discoverMovieMap[m.tmdb_id]=m; });
+  movies.forEach(m=>{ if(m.id) discoverMovieMap[m.id]=m; });
 
-  const ratedTmdbIds = new Set(allEntries.filter(e=>e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
+  const ratedTmdbIds = new Set(allEntries.filter(e=>e.user_id===currentUser.id && e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
 
   // ── Week: show all 32, no pagination ──
   if (discoverTab === 'week') {
@@ -2459,7 +2459,9 @@ function bindPagination(page, totalPages) {
 }
 
 function renderDiscoverCard(m, ratedTmdbIds) {
-  const key = m.tmdb_id ? 'tmdb_'+m.tmdb_id : '';
+  // TMDB uses 'id', our DB uses 'tmdb_id' — both map to the same key format
+  const tmdbId = m.id || m.tmdb_id;
+  const key = tmdbId ? 'tmdb_'+tmdbId : '';
   const isRated = key && ratedTmdbIds.has(key);
   const poster = m.poster_path ? posterUrl(m.poster_path) : '';
   const year = (m.release_date||'').slice(0,4);
@@ -2476,7 +2478,7 @@ function renderDiscoverCard(m, ratedTmdbIds) {
         <div class="dc-meta">${year||'未知'}${m.original_language ? ' · ' + m.original_language.toUpperCase() : ''}</div>
         ${genres.length ? `<div class="dc-genres">${genres.map(g=>`<span class="dc-genre">${g}</span>`).join('')}</div>` : ''}
         <div class="dc-action">
-          ${isRated ? '<div class="dc-rated-badge">已评价 ✓</div>' : `<button class="btn btn-sm btn-secondary dc-rate-btn" data-tmdb-id="${m.tmdb_id}">＋我的评分</button>`}
+          ${isRated ? '<div class="dc-rated-badge">已评价 ✓</div>' : `<button class="btn btn-sm btn-secondary dc-rate-btn" data-tmdb-id="${tmdbId}">＋我的评分</button>`}
         </div>
       </div>
     </div>
@@ -2533,7 +2535,7 @@ async function loadRecommendations() {
   // ── 3-route candidate collection ──
   const allRecs = [];
   const seen = new Set();
-  const ratedKeys = new Set(allEntries.filter(e=>e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
+  const ratedKeys = new Set(allEntries.filter(e=>e.user_id===currentUser.id && e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
   const addRecs = (results, sourceEntry) => {
     for (const r of results) {
       const key = 'tmdb_'+r.id;
@@ -2624,7 +2626,7 @@ async function loadRecommendations() {
 async function loadTrending() {
   if (discoverCache.week) return discoverCache.week;
 
-  const ratedKeys = new Set(allEntries.filter(e=>e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
+  const ratedKeys = new Set(allEntries.filter(e=>e.user_id===currentUser.id && e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
   try {
     const res = await fetch(`https://api.themoviedb.org/3/trending/movie/week?api_key=${TMDB_KEY}&language=zh-CN`);
     const data = await res.json();

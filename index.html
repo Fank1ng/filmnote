@@ -348,6 +348,7 @@
   .discover-subtabs button:hover { border-color: var(--gold); color: var(--text); }
   .discover-subtabs button.active { color: var(--gold); background: var(--gold-dim); border-color: var(--gold); }
   .discover-subtabs button.active.ceci-tab { color: var(--ceci); background: var(--ceci-dim); border-color: var(--ceci); }
+  .discover-subtabs button.active.fd-tab { color: var(--gold); background: var(--gold-dim); border-color: var(--gold); }
   .discover-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
   .discover-card {
     background: var(--surface); border: 1px solid var(--border);
@@ -674,7 +675,7 @@
     <section class="tab-panel" id="panel-discover">
       <h2 class="section-title">发现好片</h2>
       <div class="discover-subtabs" id="discoverSubtabs">
-        <button class="active ceci-tab" data-dt="recommend">Ceci为你推荐</button>
+        <button class="active" data-dt="recommend" id="discoverRecTab">Ceci为你推荐</button>
         <button data-dt="week">本周热门</button>
         <button data-dt="toprated">Top100</button>
       </div>
@@ -1118,6 +1119,7 @@ async function initApp(user) {
     currentProfile = pref;
     $['headerUser'].textContent = pref.display_name;
     nameOverlay.classList.remove('open');
+    updateRecTabLabel();
     checkMigration();
     await loadAllData();
     subscribeToRealtime();
@@ -1721,34 +1723,19 @@ async function deleteEntry(id) {
 function addMyRating(entryId) {
   const entry = allEntries.find(e=>e.id===entryId);
   if (!entry) return;
-  // Prevent duplicate: same user cannot rate the same movie/series twice
+  // Prevent duplicate
   const gkey = getGroupKey(entry);
-  if (allEntries.some(e=>e.user_id===currentUser.id && e.id!==entryId && getGroupKey(e)===gkey)) {
+  if (allEntries.some(e=>e.user_id===currentUser.id && getGroupKey(e)===gkey)) {
     toast('你已评价过该作品');
     return;
   }
-  editingEntryId = null;
-  $['editId'].value = '';
-  $['title'].value = entry.title;
-  $['year'].value = entry.year||'';
-  $['director'].value = entry.director||'';
-  $['tmdbId'].value = entry.tmdb_id||'';
-  $['posterPath'].value = entry.poster_path||'';
-  $['comment'].value = '';
-  $['seasonList'].innerHTML = '';
-  $['submitBtn'].textContent = '保存评价';
-  $['cancelEditBtn'].classList.add('hidden');
-  entryType = entry.type;
-  document.querySelectorAll('#typeToggle button').forEach(b=>b.classList.remove('active'));
-  const typeBtn = document.querySelector(`#typeToggle button[data-type="${entry.type}"]`);
-  if (typeBtn) typeBtn.classList.add('active');
-  $['seasonSection'].classList.toggle('hidden', entry.type!=='series');
-  $['formTitle'].textContent = entry.type==='series'?'记录一部剧集（补充评分）':'记录一部电影（补充评分）';
-  $['mainDims'].innerHTML = buildDimSliders('main', {});
-  bindDimSliders('main');
-  updateTotalPreview();
-  switchTab('rate');
-  window.scrollTo({top:0,behavior:'smooth'});
+  // Open quick rate modal (same as discover cards)
+  openQuickRate({
+    id: entry.tmdb_id,
+    title: entry.title,
+    release_date: entry.year ? String(entry.year)+'-01-01' : '',
+    poster_path: entry.poster_path
+  });
 }
 
 // ===== USER COLOR =====
@@ -2324,6 +2311,20 @@ let topratedFilterUnwatched = false;
 let discoverMovieMap = {};
 let quickRateMovie = null;
 
+function updateRecTabLabel() {
+  const btn = document.getElementById('discoverRecTab');
+  if (!btn) return;
+  const uname = getUserName(currentUser?.id);
+  btn.classList.remove('ceci-tab','fd-tab');
+  if (uname === 'ceci') {
+    btn.textContent = 'FD为你推荐';
+    btn.classList.add('fd-tab');
+  } else {
+    btn.textContent = 'Ceci为你推荐';
+    btn.classList.add('ceci-tab');
+  }
+}
+
 document.querySelectorAll('#discoverSubtabs button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     document.querySelectorAll('#discoverSubtabs button').forEach(b=>b.classList.remove('active'));
@@ -2666,7 +2667,8 @@ async function loadTopRated() {
 
 // ===== QUICK RATE =====
 function openQuickRate(movie) {
-  quickRateMovie = { tmdb_id: movie.tmdb_id, title: movie.title, year: (movie.release_date||'').slice(0,4)||null, poster_path: movie.poster_path };
+  const year = movie.year || (movie.release_date||'').slice(0,4) || null;
+  quickRateMovie = { tmdb_id: movie.id||movie.tmdb_id, title: movie.title, year, poster_path: movie.poster_path };
   $['qrTitle'].textContent = '评价 ' + movie.title;
   $['qrDims'].innerHTML = buildDimSliders('qr', {});
   $['qrTotalScore'].textContent = '5.0';

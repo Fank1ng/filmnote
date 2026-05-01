@@ -339,8 +339,45 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
+  /* ── Discover ── */
+  .discover-subtabs { display: flex; gap: 8px; margin-bottom: 20px; }
+  .discover-subtabs button {
+    background: none; border: 1px solid var(--border); color: var(--text2);
+    padding: 6px 16px; cursor: pointer; font-size: 0.85rem; border-radius: 20px; transition: var(--t);
+  }
+  .discover-subtabs button:hover { border-color: var(--gold); color: var(--text); }
+  .discover-subtabs button.active { color: var(--gold); background: var(--gold-dim); border-color: var(--gold); }
+  .discover-subtabs button.active.ceci-tab { color: var(--ceci); background: var(--ceci-dim); border-color: var(--ceci); }
+  .discover-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+  .discover-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden; transition: var(--t);
+    display: flex; flex-direction: column;
+  }
+  .discover-card:hover { border-color: var(--gold); transform: translateY(-2px); }
+  .dc-poster-wrap { position: relative; width: 100%; padding-top: 150%; overflow: hidden; background: var(--border); }
+  .dc-poster-wrap img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+  .dc-no-poster { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 2rem; color: var(--text2); }
+  .dc-tmdb-score {
+    position: absolute; top: 6px; right: 6px;
+    background: rgba(0,0,0,0.75); color: var(--gold);
+    font-size: 0.75rem; font-weight: 700; padding: 2px 8px; border-radius: 10px;
+  }
+  .dc-info { padding: 10px 12px; flex: 1; display: flex; flex-direction: column; gap: 4px; }
+  .dc-title { font-weight: 600; font-size: 0.85rem; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .dc-meta { font-size: 0.72rem; color: var(--text2); }
+  .dc-genres { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
+  .dc-genre { font-size: 0.62rem; padding: 1px 6px; border-radius: 4px; background: rgba(255,255,255,0.06); color: var(--text2); }
+  .dc-action { margin-top: auto; padding-top: 8px; }
+  .dc-action .btn { width: 100%; }
+  .dc-rated-badge { text-align: center; font-size: 0.75rem; color: var(--text2); padding: 6px 0; }
+  .discover-load-more { text-align: center; margin-bottom: 20px; }
+  .discover-spinner { text-align: center; padding: 40px; }
+
   /* ── Responsive ── */
   @media (max-width: 640px) {
+    .discover-grid { grid-template-columns: 1fr; }
+    .dc-poster-wrap { padding-top: 120%; }
     .form-row, .form-row-3 { grid-template-columns: 1fr; }
     .movie-card { flex-wrap: wrap; padding: 10px 12px; gap: 8px; }
     .mc-actions { flex-shrink: 1; }
@@ -479,6 +516,7 @@
     <button class="active" data-tab="rate" role="tab" aria-selected="true" aria-label="添加评价">添加评价</button>
     <button data-tab="list" role="tab" aria-selected="false" aria-label="影单">影单</button>
     <button data-tab="stats" role="tab" aria-selected="false" aria-label="统计分析">统计分析</button>
+    <button data-tab="discover" role="tab" aria-selected="false" aria-label="发现好片">发现</button>
   </nav>
 
   <main>
@@ -615,12 +653,43 @@
         </div>
       </div>
     </section>
+
+    <!-- ═══ 发现 ═══ -->
+    <section class="tab-panel" id="panel-discover">
+      <h2 class="section-title">发现好片</h2>
+      <div class="discover-subtabs" id="discoverSubtabs">
+        <button class="active ceci-tab" data-dt="recommend">Ceci为你推荐</button>
+        <button data-dt="week">本周热门</button>
+        <button data-dt="month">本月热门</button>
+      </div>
+      <div id="discoverContent"></div>
+    </section>
   </main>
 </div>
 
 <!-- Detail Modal -->
 <div class="modal-overlay" id="detailModal">
   <div class="modal" id="modalContent"></div>
+</div>
+
+<!-- Quick Rate Modal -->
+<div class="modal-overlay" id="quickRateModal">
+  <div class="modal" style="max-width:480px">
+    <h3 id="qrTitle">评价</h3>
+    <div class="dim-list" id="qrDims"></div>
+    <div class="total-preview">
+      <span class="total-label">加权总分</span>
+      <span class="total-value" id="qrTotalScore">5.0</span>
+    </div>
+    <div class="form-group">
+      <label>短评（可选）</label>
+      <textarea id="qrComment" rows="2" placeholder="一句话记录感受..."></textarea>
+    </div>
+    <div class="btn-group" style="justify-content:flex-end">
+      <button class="btn btn-secondary btn-sm" id="qrCancel">取消</button>
+      <button class="btn btn-primary btn-sm" id="qrSubmit">提交评价</button>
+    </div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -727,6 +796,15 @@ const $ = {
   get userMenu() { return document.getElementById('userMenu'); },
   get userDropdown() { return document.getElementById('userDropdown'); },
   get year() { return document.getElementById('year'); },
+  // Discover
+  get discoverContent() { return document.getElementById('discoverContent'); },
+  get qrTitle() { return document.getElementById('qrTitle'); },
+  get qrDims() { return document.getElementById('qrDims'); },
+  get qrComment() { return document.getElementById('qrComment'); },
+  get qrTotalScore() { return document.getElementById('qrTotalScore'); },
+  get qrCancel() { return document.getElementById('qrCancel'); },
+  get qrSubmit() { return document.getElementById('qrSubmit'); },
+  get quickRateModal() { return document.getElementById('quickRateModal'); },
 };
 
 // ===== AUTH UI =====
@@ -1167,6 +1245,7 @@ function renderActiveTab() {
   const tab = getActiveTab();
   if (tab==='list') renderList();
   if (tab==='stats') renderStats();
+  if (tab==='discover') { discoverCache = { recommend: null, week: null, month: null }; renderDiscover(); }
 }
 
 function updateHeaderCount() {
@@ -2220,6 +2299,278 @@ function renderStats() {
   container.innerHTML = html;
 }
 
+// ===== DISCOVER =====
+let discoverTab = 'recommend';
+let discoverPage = { recommend: 1, week: 1, month: 1 };
+let discoverCache = { recommend: null, week: null, month: null };
+let discoverMovieMap = {};
+let quickRateMovie = null;
+
+document.querySelectorAll('#discoverSubtabs button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    document.querySelectorAll('#discoverSubtabs button').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    discoverTab = btn.dataset.dt;
+    renderDiscover();
+  });
+});
+
+// Delegated click for +我的评分 buttons in discover grid
+$['discoverContent'].addEventListener('click', e=>{
+  const btn = e.target.closest('.dc-rate-btn');
+  if (!btn) return;
+  const tmdbId = parseInt(btn.dataset.tmdbId);
+  const movie = discoverMovieMap[tmdbId];
+  if (movie) openQuickRate(movie);
+});
+
+async function renderDiscover() {
+  const container = $['discoverContent'];
+  container.innerHTML = '<div class="discover-spinner"><div class="spinner"></div></div>';
+
+  let movies = [];
+  try {
+    if (discoverTab === 'recommend') {
+      movies = await loadRecommendations();
+    } else if (discoverTab === 'week') {
+      movies = await loadTrending('week');
+    } else {
+      movies = await loadTrending('month');
+    }
+  } catch(e) {
+    container.innerHTML = '<div class="empty-state"><p>加载失败，请稍后重试</p></div>';
+    return;
+  }
+
+  if (movies === null) {
+    container.innerHTML = `<div class="empty-state"><p style="font-size:2rem">🎬</p><p>评价 ${25} 部以上电影后</p><p>Ceci 会为你生成个性化推荐</p><p style="font-size:0.8rem;color:var(--text2);margin-top:8px">当前已评价 ${allEntries.filter(e=>e.user_id===currentUser.id && e.type==='movie').length} 部</p></div>`;
+    return;
+  }
+  if (!movies.length) {
+    container.innerHTML = '<div class="empty-state"><p>暂无推荐，试试热门标签吧</p></div>';
+    return;
+  }
+
+  // Build lookup map
+  discoverMovieMap = {};
+  movies.forEach(m=>{ if(m.tmdb_id) discoverMovieMap[m.tmdb_id]=m; });
+
+  const page = discoverPage[discoverTab] || 1;
+  const pageSize = 20;
+  const start = (page - 1) * pageSize;
+  const pageMovies = movies.slice(start, start + pageSize);
+
+  // Collect rated tmdb_ids for quick lookup
+  const ratedTmdbIds = new Set(allEntries.filter(e=>e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
+
+  container.innerHTML = `
+    <div class="discover-grid">
+      ${pageMovies.map(m=>renderDiscoverCard(m, ratedTmdbIds)).join('')}
+    </div>
+    ${movies.length > start + pageSize ? `
+      <div class="discover-load-more">
+        <button class="btn btn-secondary" id="discoverLoadMore">加载更多 (${movies.length - (start + pageSize)} 部)</button>
+      </div>` : ''}
+  `;
+
+  const loadMoreBtn = document.getElementById('discoverLoadMore');
+  if (loadMoreBtn) {
+    loadMoreBtn.addEventListener('click', ()=>{
+      discoverPage[discoverTab] = (discoverPage[discoverTab]||1) + 1;
+      renderDiscover();
+      window.scrollTo({top: (container.offsetTop||0)-80, behavior: 'smooth'});
+    });
+  }
+}
+
+function renderDiscoverCard(m, ratedTmdbIds) {
+  const key = m.tmdb_id ? 'tmdb_'+m.tmdb_id : '';
+  const isRated = key && ratedTmdbIds.has(key);
+  const poster = m.poster_path ? posterUrl(m.poster_path) : '';
+  const year = (m.release_date||'').slice(0,4);
+  const genres = (m.genre_ids||[]).slice(0,3).map(id=>genreMap[id]||'').filter(Boolean);
+
+  return `
+    <div class="discover-card">
+      <div class="dc-poster-wrap">
+        ${poster ? `<img src="${poster}" alt="${esc(m.title)}" loading="lazy">` : '<div class="dc-no-poster">🎬</div>'}
+        ${m.vote_average ? `<span class="dc-tmdb-score">⭐ ${m.vote_average.toFixed(1)}</span>` : ''}
+      </div>
+      <div class="dc-info">
+        <div class="dc-title">${esc(m.title)}</div>
+        <div class="dc-meta">${year||'未知'}${m.original_language ? ' · ' + m.original_language.toUpperCase() : ''}</div>
+        ${genres.length ? `<div class="dc-genres">${genres.map(g=>`<span class="dc-genre">${g}</span>`).join('')}</div>` : ''}
+        <div class="dc-action">
+          ${isRated ? '<div class="dc-rated-badge">已评价 ✓</div>' : `<button class="btn btn-sm btn-secondary dc-rate-btn" data-tmdb-id="${m.tmdb_id}">＋我的评分</button>`}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// Genre map (TMDB genre IDs → Chinese)
+const genreMap = {
+  28:'动作',12:'冒险',16:'动画',35:'喜剧',80:'犯罪',99:'纪录',18:'剧情',10751:'家庭',
+  14:'奇幻',36:'历史',27:'恐怖',10402:'音乐',9648:'悬疑',10749:'爱情',878:'科幻',
+  10770:'电视电影',53:'惊悚',10752:'战争',37:'西部'
+};
+
+async function loadRecommendations() {
+  if (discoverCache.recommend) return discoverCache.recommend;
+
+  // Get user's top 5 rated movies (score ≥ 7)
+  const myEntries = allEntries.filter(e=>e.user_id===currentUser.id && e.tmdb_id && e.type==='movie');
+  const topRated = myEntries.filter(e=>getEntryScore(e)>=7).sort((a,b)=>getEntryScore(b)-getEntryScore(a)).slice(0,5);
+
+  // Need at least enough rated movies for quality recommendations
+  const minRated = 25;
+  const totalRated = allEntries.filter(e=>e.user_id===currentUser.id && e.type==='movie').length;
+  if (totalRated < minRated) {
+    discoverCache.recommend = null;
+    return null;
+  }
+  if (topRated.length === 0) {
+    discoverCache.recommend = [];
+    return [];
+  }
+
+  // Fetch recommendations for each top-rated movie
+  const allRecs = [];
+  const seen = new Set();
+  const ratedKeys = new Set(allEntries.filter(e=>e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
+
+  for (const entry of topRated) {
+    try {
+      const res = await fetch(`https://api.themoviedb.org/3/movie/${entry.tmdb_id}/recommendations?api_key=${TMDB_KEY}&language=zh-CN&page=1`);
+      const data = await res.json();
+      if (data.results) {
+        for (const r of data.results) {
+          const key = 'tmdb_'+r.id;
+          if (seen.has(key) || ratedKeys.has(key)) continue;
+          seen.add(key);
+          allRecs.push({...r, title: r.title||r.name});
+        }
+      }
+    } catch(e) { /* skip failed fetches */ }
+  }
+
+  // Sort by vote_average desc, take top 60 for pagination
+  allRecs.sort((a,b)=>(b.vote_average||0)-(a.vote_average||0));
+  discoverCache.recommend = allRecs.slice(0, 60);
+  return discoverCache.recommend;
+}
+
+async function loadTrending(period) {
+  const cacheKey = period;
+  if (discoverCache[cacheKey]) return discoverCache[cacheKey];
+
+  const ratedKeys = new Set(allEntries.filter(e=>e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
+  let results = [];
+
+  try {
+    if (period === 'week') {
+      const res = await fetch(`https://api.themoviedb.org/3/trending/movie/week?api_key=${TMDB_KEY}&language=zh-CN`);
+      const data = await res.json();
+      results = (data.results||[]).filter(r=>!ratedKeys.has('tmdb_'+r.id)).map(r=>({...r, title: r.title||r.name}));
+    } else {
+      // "本月热门" — discover popular movies from recent months
+      const now = new Date();
+      const gte = new Date(now.getFullYear(), now.getMonth()-1, 1).toISOString().slice(0,10);
+      const lte = now.toISOString().slice(0,10);
+      const res = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&language=zh-CN&sort_by=popularity.desc&primary_release_date.gte=${gte}&primary_release_date.lte=${lte}&page=1`);
+      const data = await res.json();
+      results = (data.results||[]).filter(r=>!ratedKeys.has('tmdb_'+r.id)).map(r=>({...r, title: r.title||r.name}));
+    }
+  } catch(e) { return []; }
+
+  discoverCache[cacheKey] = results.slice(0, 60);
+  return discoverCache[cacheKey];
+}
+
+// ===== QUICK RATE =====
+function openQuickRate(movie) {
+  quickRateMovie = { tmdb_id: movie.tmdb_id, title: movie.title, year: (movie.release_date||'').slice(0,4)||null, poster_path: movie.poster_path };
+  $['qrTitle'].textContent = '评价 ' + movie.title;
+  $['qrDims'].innerHTML = buildDimSliders('qr', {});
+  $['qrTotalScore'].textContent = '5.0';
+  $['qrComment'].value = '';
+  bindDimSliders('qr');
+  updateQrTotal();
+  $['quickRateModal'].classList.add('open');
+}
+
+function updateQrTotal() {
+  const ratings = {};
+  document.querySelectorAll('input[type="range"][data-prefix="qr"]').forEach(s=>{
+    ratings[s.dataset.dim] = parseInt(s.value);
+  });
+  $['qrTotalScore'].textContent = calcTotal(ratings).toFixed(1);
+}
+
+// Hook QR slider changes to update total
+document.addEventListener('input', e=>{
+  if (e.target.matches('input[type="range"][data-prefix="qr"]')) updateQrTotal();
+});
+
+$['qrCancel'].addEventListener('click', ()=>{
+  $['quickRateModal'].classList.remove('open');
+  quickRateMovie = null;
+});
+
+$['quickRateModal'].addEventListener('click', e=>{
+  if (e.target===e.currentTarget) { $['quickRateModal'].classList.remove('open'); quickRateMovie = null; }
+});
+
+$['qrSubmit'].addEventListener('click', async ()=>{
+  if (!quickRateMovie) return;
+  const ratings = {};
+  document.querySelectorAll('input[type="range"][data-prefix="qr"]').forEach(s=>{
+    ratings[s.dataset.dim] = parseInt(s.value);
+  });
+  const comment = $['qrComment'].value.trim();
+  const total = calcTotal(ratings);
+
+  // Duplicate check
+  const dupKey = getGroupKey({tmdb_id: quickRateMovie.tmdb_id, title: quickRateMovie.title, year: quickRateMovie.year});
+  if (allEntries.some(e=>e.user_id===currentUser.id && getGroupKey(e)===dupKey)) {
+    toast('你已评价过该作品');
+    return;
+  }
+
+  const btn = $['qrSubmit'];
+  const origText = btn.textContent;
+  btn.textContent = '保存中...'; btn.disabled = true;
+
+  const entryData = {
+    user_id: currentUser.id,
+    type: 'movie',
+    tmdb_id: quickRateMovie.tmdb_id || null,
+    title: quickRateMovie.title,
+    year: quickRateMovie.year || null,
+    poster_path: quickRateMovie.poster_path || '',
+    ratings,
+    total_score: total,
+    comment,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+
+  const {error} = await db.from('entries').insert(entryData);
+  if (error) {
+    toast('保存失败: ' + error.message);
+    btn.textContent = origText; btn.disabled = false;
+    return;
+  }
+
+  toast('评价已保存！');
+  $['quickRateModal'].classList.remove('open');
+  quickRateMovie = null;
+  btn.textContent = origText; btn.disabled = false;
+  await loadAllData();
+  discoverCache = { recommend: null, week: null, month: null };
+  renderDiscover();
+});
+
 // ===== TABS =====
 function switchTab(name) {
   document.querySelectorAll('nav button').forEach(b=>{ b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
@@ -2229,6 +2580,7 @@ function switchTab(name) {
   document.getElementById(`panel-${name}`)?.classList.add('active');
   if (name==='list') { listPageNum = 1; renderList(); scrollToHighlight(); }
   if (name==='stats') { renderStats(); }
+  if (name==='discover') { renderDiscover(); }
 }
 
 function scrollToHighlight() {

@@ -2627,13 +2627,21 @@ async function loadTrending() {
   if (discoverCache.week) return discoverCache.week;
 
   const ratedKeys = new Set(allEntries.filter(e=>e.user_id===currentUser.id && e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
+  const results = [];
   try {
-    const res = await fetch(`https://api.themoviedb.org/3/trending/movie/week?api_key=${TMDB_KEY}&language=zh-CN`);
-    const data = await res.json();
-    const results = (data.results||[]).filter(r=>!ratedKeys.has('tmdb_'+r.id));
-    discoverCache.week = results.slice(0, 32);
-    return discoverCache.week;
+    // Fetch 2 pages to have enough after filtering
+    for (let page=1; page<=2; page++) {
+      const res = await fetch(`https://api.themoviedb.org/3/trending/movie/week?api_key=${TMDB_KEY}&language=zh-CN&page=${page}`);
+      const data = await res.json();
+      if (data.results) {
+        data.results.forEach(r=>{
+          if (!ratedKeys.has('tmdb_'+r.id)) results.push(r);
+        });
+      }
+    }
   } catch(e) { return []; }
+  discoverCache.week = results.slice(0, 32);
+  return discoverCache.week;
 }
 
 async function loadTopRated() {
@@ -2641,7 +2649,7 @@ async function loadTopRated() {
 
   const results = [];
   try {
-    for (let page=1; page<=3; page++) {
+    for (let page=1; page<=5; page++) {
       const res = await fetch(`https://api.themoviedb.org/3/movie/top_rated?api_key=${TMDB_KEY}&language=zh-CN&page=${page}`);
       const data = await res.json();
       if (data.results) {

@@ -373,6 +373,22 @@
   .dc-rated-badge { text-align: center; font-size: 0.75rem; color: var(--text2); padding: 6px 0; }
   .discover-load-more { text-align: center; margin-bottom: 20px; }
   .discover-spinner { text-align: center; padding: 40px; }
+  .discover-pages { display: flex; justify-content: center; gap: 4px; margin: 20px 0; align-items: center; }
+  .discover-pages button {
+    min-width: 32px; height: 32px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text); cursor: pointer; font-size: 0.85rem; transition: var(--t);
+  }
+  .discover-pages button:hover { border-color: var(--gold); color: var(--gold); }
+  .discover-pages button.active { background: var(--gold-dim); border-color: var(--gold); color: var(--gold); }
+  .discover-pages button:disabled { opacity: 0.3; cursor: default; }
+  .discover-topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .discover-topbar .toggle-pill {
+    font-size: 0.78rem; padding: 4px 12px; border-radius: 14px; cursor: pointer;
+    border: 1px solid var(--border); background: none; color: var(--text2); transition: var(--t);
+  }
+  .discover-topbar .toggle-pill:hover { border-color: var(--gold); color: var(--text); }
+  .discover-topbar .toggle-pill.active { background: var(--gold-dim); border-color: var(--gold); color: var(--gold); }
+  .discover-topbar .topbar-count { font-size: 0.8rem; color: var(--text2); }
 
   /* ── Responsive ── */
   @media (max-width: 640px) {
@@ -660,7 +676,7 @@
       <div class="discover-subtabs" id="discoverSubtabs">
         <button class="active ceci-tab" data-dt="recommend">Ceci为你推荐</button>
         <button data-dt="week">本周热门</button>
-        <button data-dt="toprated">高分电影Top100</button>
+        <button data-dt="toprated">Top100</button>
       </div>
       <div id="discoverContent"></div>
     </section>
@@ -2301,9 +2317,10 @@ function renderStats() {
 
 // ===== DISCOVER =====
 let discoverTab = 'recommend';
-let discoverPage = { recommend: 1, week: 1, toprated: 1 };
+let discoverPage = { recommend: 1, toprated: 1 };
 let discoverCache = { recommend: null, week: null, toprated: null };
 let discoverVisitCount = { recommend: 0 };
+let topratedFilterUnwatched = false;
 let discoverMovieMap = {};
 let quickRateMovie = null;
 
@@ -2356,32 +2373,89 @@ async function renderDiscover() {
   discoverMovieMap = {};
   movies.forEach(m=>{ if(m.tmdb_id) discoverMovieMap[m.tmdb_id]=m; });
 
-  const page = discoverPage[discoverTab] || 1;
-  const pageSize = 20;
-  const start = (page - 1) * pageSize;
-  const pageMovies = movies.slice(start, start + pageSize);
-
-  // Collect rated tmdb_ids for quick lookup
   const ratedTmdbIds = new Set(allEntries.filter(e=>e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
+
+  // ── Week: show all 32, no pagination ──
+  if (discoverTab === 'week') {
+    container.innerHTML = `
+      <div class="discover-topbar"><span class="topbar-count">共 ${movies.length} 部</span></div>
+      <div class="discover-grid">
+        ${movies.map(m=>renderDiscoverCard(m, ratedTmdbIds)).join('')}
+      </div>
+    `;
+    return;
+  }
+
+  // ── TopRated: default show full list + toggle filter ──
+  if (discoverTab === 'toprated') {
+    const filteredMovies = topratedFilterUnwatched ? movies.filter(m=>!ratedTmdbIds.has('tmdb_'+m.id)) : movies;
+    const page = discoverPage.toprated || 1;
+    const pageSize = 20;
+    const totalPages = Math.ceil(filteredMovies.length / pageSize);
+    const start = (page-1)*pageSize;
+    const pageMovies = filteredMovies.slice(start, start+pageSize);
+
+    container.innerHTML = `
+      <div class="discover-topbar">
+        <span class="topbar-count">${topratedFilterUnwatched ? '未看 ' : '共 '}${filteredMovies.length} 部</span>
+        <button class="toggle-pill ${topratedFilterUnwatched?'active':''}" id="topratedToggle">只看未看</button>
+      </div>
+      <div class="discover-grid">
+        ${pageMovies.map(m=>renderDiscoverCard(m, ratedTmdbIds)).join('')}
+      </div>
+      ${filteredMovies.length ? renderPagination(page, totalPages) : '<div class="empty-state"><p>全部已看过</p></div>'}
+    `;
+
+    const toggleBtn = document.getElementById('topratedToggle');
+    if (toggleBtn) {
+      toggleBtn.addEventListener('click', ()=>{
+        topratedFilterUnwatched = !topratedFilterUnwatched;
+        discoverPage.toprated = 1;
+        renderDiscover();
+      });
+    }
+    bindPagination(page, totalPages);
+    return;
+  }
+
+  // ── Recommend: 3-page pagination ──
+  const page = discoverPage.recommend || 1;
+  const pageSize = 20;
+  const totalPages = 3; // fixed 3 pages max (60 movies)
+  const start = (page-1)*pageSize;
+  const pageMovies = movies.slice(start, start+pageSize);
 
   container.innerHTML = `
     <div class="discover-grid">
       ${pageMovies.map(m=>renderDiscoverCard(m, ratedTmdbIds)).join('')}
     </div>
-    ${movies.length > start + pageSize ? `
-      <div class="discover-load-more">
-        <button class="btn btn-secondary" id="discoverLoadMore">加载更多 (${movies.length - (start + pageSize)} 部)</button>
-      </div>` : ''}
+    ${renderPagination(page, totalPages)}
   `;
+  bindPagination(page, totalPages);
+}
 
-  const loadMoreBtn = document.getElementById('discoverLoadMore');
-  if (loadMoreBtn) {
-    loadMoreBtn.addEventListener('click', ()=>{
-      discoverPage[discoverTab] = (discoverPage[discoverTab]||1) + 1;
-      renderDiscover();
-      window.scrollTo({top: (container.offsetTop||0)-80, behavior: 'smooth'});
-    });
+function renderPagination(page, totalPages) {
+  if (totalPages <= 1) return '';
+  let html = '<div class="discover-pages">';
+  html += `<button data-pg="${page-1}" ${page<=1?'disabled':''}>◀</button>`;
+  for (let i=1; i<=totalPages; i++) {
+    html += `<button data-pg="${i}" class="${i===page?'active':''}">${i}</button>`;
   }
+  html += `<button data-pg="${page+1}" ${page>=totalPages?'disabled':''}>▶</button>`;
+  html += '</div>';
+  return html;
+}
+
+function bindPagination(page, totalPages) {
+  document.querySelectorAll('.discover-pages button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const pg = parseInt(btn.dataset.pg);
+      if (isNaN(pg) || pg<1 || pg>totalPages) return;
+      discoverPage[discoverTab] = pg;
+      renderDiscover();
+      window.scrollTo({top: ($['discoverContent'].offsetTop||0)-80, behavior: 'smooth'});
+    });
+  });
 }
 
 function renderDiscoverCard(m, ratedTmdbIds) {
@@ -2555,7 +2629,7 @@ async function loadTrending() {
     const res = await fetch(`https://api.themoviedb.org/3/trending/movie/week?api_key=${TMDB_KEY}&language=zh-CN`);
     const data = await res.json();
     const results = (data.results||[]).filter(r=>!ratedKeys.has('tmdb_'+r.id));
-    discoverCache.week = results.slice(0, 60);
+    discoverCache.week = results.slice(0, 32);
     return discoverCache.week;
   } catch(e) { return []; }
 }
@@ -2563,18 +2637,14 @@ async function loadTrending() {
 async function loadTopRated() {
   if (discoverCache.toprated) return discoverCache.toprated;
 
-  const ratedKeys = new Set(allEntries.filter(e=>e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
   const results = [];
   try {
-    // Fetch 3 pages to build top 100
     for (let page=1; page<=3; page++) {
       const res = await fetch(`https://api.themoviedb.org/3/movie/top_rated?api_key=${TMDB_KEY}&language=zh-CN&page=${page}`);
       const data = await res.json();
       if (data.results) {
         data.results.forEach(r=>{
-          if ((r.vote_count||0)>=500 && !ratedKeys.has('tmdb_'+r.id)) {
-            results.push(r);
-          }
+          if ((r.vote_count||0)>=500) results.push(r);
         });
       }
     }

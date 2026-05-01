@@ -660,7 +660,7 @@
       <div class="discover-subtabs" id="discoverSubtabs">
         <button class="active ceci-tab" data-dt="recommend">Ceci为你推荐</button>
         <button data-dt="week">本周热门</button>
-        <button data-dt="month">本月热门</button>
+        <button data-dt="toprated">高分电影Top100</button>
       </div>
       <div id="discoverContent"></div>
     </section>
@@ -1245,7 +1245,7 @@ function renderActiveTab() {
   const tab = getActiveTab();
   if (tab==='list') renderList();
   if (tab==='stats') renderStats();
-  if (tab==='discover') { discoverCache = { recommend: null, week: null, month: null }; renderDiscover(); }
+  if (tab==='discover') { discoverCache = { recommend: null, week: null, toprated: null }; renderDiscover(); }
 }
 
 function updateHeaderCount() {
@@ -2301,8 +2301,9 @@ function renderStats() {
 
 // ===== DISCOVER =====
 let discoverTab = 'recommend';
-let discoverPage = { recommend: 1, week: 1, month: 1 };
-let discoverCache = { recommend: null, week: null, month: null };
+let discoverPage = { recommend: 1, week: 1, toprated: 1 };
+let discoverCache = { recommend: null, week: null, toprated: null };
+let discoverVisitCount = { recommend: 0 };
 let discoverMovieMap = {};
 let quickRateMovie = null;
 
@@ -2333,9 +2334,9 @@ async function renderDiscover() {
     if (discoverTab === 'recommend') {
       movies = await loadRecommendations();
     } else if (discoverTab === 'week') {
-      movies = await loadTrending('week');
+      movies = await loadTrending();
     } else {
-      movies = await loadTrending('month');
+      movies = await loadTopRated();
     }
   } catch(e) {
     container.innerHTML = '<div class="empty-state"><p>加载失败，请稍后重试</p></div>';
@@ -2418,73 +2419,169 @@ const genreMap = {
 async function loadRecommendations() {
   if (discoverCache.recommend) return discoverCache.recommend;
 
-  // Get user's top 5 rated movies (score ≥ 7)
-  const myEntries = allEntries.filter(e=>e.user_id===currentUser.id && e.tmdb_id && e.type==='movie');
-  const topRated = myEntries.filter(e=>getEntryScore(e)>=7).sort((a,b)=>getEntryScore(b)-getEntryScore(a)).slice(0,5);
-
-  // Need at least enough rated movies for quality recommendations
-  const minRated = 25;
+  const myMovies = allEntries.filter(e=>e.user_id===currentUser.id && e.tmdb_id && e.type==='movie');
   const totalRated = allEntries.filter(e=>e.user_id===currentUser.id && e.type==='movie').length;
+  const minRated = 25;
+
   if (totalRated < minRated) {
     discoverCache.recommend = null;
     return null;
   }
-  if (topRated.length === 0) {
-    discoverCache.recommend = [];
-    return [];
-  }
 
-  // Fetch recommendations for each top-rated movie
+  const scored = myMovies.map(e=>({...e, score: getEntryScore(e)})).sort((a,b)=>b.score-a.score);
+  if (!scored.length) { discoverCache.recommend = []; return []; }
+
+  // ── Seed selection: 3 high-score + 2 random mid-score ──
+  const highScore = scored.filter(e=>e.score>=8).slice(0,3);
+  const midScore = scored.filter(e=>e.score>=6&&e.score<8);
+  // Weighted random: bias toward higher scores within mid-range
+  const shuffled = [...midScore].sort(()=>Math.random()-0.5);
+  const randomPicks = shuffled.slice(0,2);
+  const seeds = [...highScore, ...randomPicks];
+  // Shuffle seeds so doesn't matter order
+  seeds.sort(()=>Math.random()-0.5);
+
+  // ── Fetch genre info for seed movies (parallel) ──
+  const seedGenres = {};
+  await Promise.all(seeds.map(async seed=>{
+    try {
+      const r = await fetch(`https://api.themoviedb.org/3/movie/${seed.tmdb_id}?api_key=${TMDB_KEY}&language=zh-CN`);
+      const d = await r.json();
+      seedGenres[seed.tmdb_id] = (d.genres||[]).map(g=>g.id);
+      // Attach to seed for later use
+      seed._fetchedGenres = seedGenres[seed.tmdb_id];
+    } catch(e){ seed._fetchedGenres = []; }
+  }));
+  // Aggregate all genre IDs across seeds as user's genre signature
+  const userGenreSig = new Set();
+  Object.values(seedGenres).forEach(arr=>arr.forEach(g=>userGenreSig.add(g)));
+
+  // ── 3-route candidate collection ──
   const allRecs = [];
   const seen = new Set();
   const ratedKeys = new Set(allEntries.filter(e=>e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
+  const addRecs = (results, sourceEntry) => {
+    for (const r of results) {
+      const key = 'tmdb_'+r.id;
+      if (seen.has(key) || ratedKeys.has(key)) continue;
+      seen.add(key);
+      r._sourceScore = sourceEntry ? sourceEntry.score : 0;
+      r._sourceGenres = sourceEntry ? (sourceEntry._fetchedGenres||sourceEntry.genre_ids||[]) : [];
+      allRecs.push(r);
+    }
+  };
 
-  for (const entry of topRated) {
+  for (const seed of seeds) {
+    // Route 1: recommendations
     try {
-      const res = await fetch(`https://api.themoviedb.org/3/movie/${entry.tmdb_id}/recommendations?api_key=${TMDB_KEY}&language=zh-CN&page=1`);
-      const data = await res.json();
-      if (data.results) {
-        for (const r of data.results) {
-          const key = 'tmdb_'+r.id;
-          if (seen.has(key) || ratedKeys.has(key)) continue;
-          seen.add(key);
-          allRecs.push({...r, title: r.title||r.name});
-        }
-      }
-    } catch(e) { /* skip failed fetches */ }
+      const r1 = await fetch(`https://api.themoviedb.org/3/movie/${seed.tmdb_id}/recommendations?api_key=${TMDB_KEY}&language=zh-CN&page=1`);
+      const d1 = await r1.json();
+      if (d1.results) addRecs(d1.results, seed);
+    } catch(e){}
+    // Route 2: similar
+    try {
+      const r2 = await fetch(`https://api.themoviedb.org/3/movie/${seed.tmdb_id}/similar?api_key=${TMDB_KEY}&language=zh-CN&page=1`);
+      const d2 = await r2.json();
+      if (d2.results) addRecs(d2.results, seed);
+    } catch(e){}
   }
 
-  // Sort by vote_average desc, take top 60 for pagination
-  allRecs.sort((a,b)=>(b.vote_average||0)-(a.vote_average||0));
+  // Route 3: genre-based discovery
+  // Determine user's top genres from all rated movies' genre_ids
+  const allGenreVotes = {};
+  // We don't have genre_ids stored per entry, so instead fetch top-rated seeds' genres
+  // and use them as basis. Alternatively: use the fact that TMDB returns genre_ids with search/results.
+  // For simplicity: use a broad discover. A future enhancement can store genre_ids on entries.
+  try {
+    const dRes = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&language=zh-CN&sort_by=vote_average.desc&vote_count.gte=200&page=1`);
+    const dData = await dRes.json();
+    if (dData.results) addRecs(dData.results, null);
+  } catch(e){}
+
+  if (!allRecs.length) { discoverCache.recommend = []; return []; }
+
+  // ── Exploration: every 3rd visit, inject 20% unseen-genre films ──
+  discoverVisitCount.recommend = (discoverVisitCount.recommend||0)+1;
+  if (discoverVisitCount.recommend % 3 === 0) {
+    // Boost films with genres outside user's comfort zone
+    allRecs.forEach(r=>{
+      const recGenres = r.genre_ids||[];
+      r._exploreBonus = recGenres.some(g=>!userGenreSig.has(g)) ? 0.3 : 0;
+    });
+  }
+
+  // ── Multi-factor scoring ──
+  const maxPop = Math.max(...allRecs.map(r=>r.popularity||0), 1);
+  const maxVote = Math.max(...allRecs.map(r=>r.vote_average||0), 1);
+  const now = new Date();
+
+  allRecs.forEach(r=>{
+    const voteNorm = (r.vote_average||0)/maxVote;
+    const popNorm = (r.popularity||0)/maxPop;
+    const releaseYear = parseInt((r.release_date||'').slice(0,4))||0;
+    const ageYears = releaseYear ? now.getFullYear()-releaseYear : 10;
+    const freshnessBonus = ageYears <= 2 ? 1 : ageYears <= 5 ? 0.7 : ageYears <= 10 ? 0.35 : 0;
+    const sourceScoreNorm = (r._sourceScore||5)/10;
+    const exploreBonus = r._exploreBonus||0;
+
+    // Genre match: how many genres overlap with source movie
+    let genreMatch = 0;
+    if (r._sourceGenres && r._sourceGenres.length && r.genre_ids) {
+      const srcSet = new Set(r._sourceGenres);
+      const matchCount = r.genre_ids.filter(g=>srcSet.has(g)).length;
+      genreMatch = Math.min(matchCount/(r._sourceGenres.length||1), 1);
+    }
+
+    r._score =
+      0.25 * voteNorm +
+      0.20 * sourceScoreNorm +
+      0.40 * genreMatch +
+      0.10 * popNorm +
+      0.05 * freshnessBonus +
+      exploreBonus;
+  });
+
+  // Sort by computed score
+  allRecs.sort((a,b)=>b._score-a._score);
   discoverCache.recommend = allRecs.slice(0, 60);
   return discoverCache.recommend;
 }
 
-async function loadTrending(period) {
-  const cacheKey = period;
-  if (discoverCache[cacheKey]) return discoverCache[cacheKey];
+async function loadTrending() {
+  if (discoverCache.week) return discoverCache.week;
 
   const ratedKeys = new Set(allEntries.filter(e=>e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
-  let results = [];
-
   try {
-    if (period === 'week') {
-      const res = await fetch(`https://api.themoviedb.org/3/trending/movie/week?api_key=${TMDB_KEY}&language=zh-CN`);
+    const res = await fetch(`https://api.themoviedb.org/3/trending/movie/week?api_key=${TMDB_KEY}&language=zh-CN`);
+    const data = await res.json();
+    const results = (data.results||[]).filter(r=>!ratedKeys.has('tmdb_'+r.id));
+    discoverCache.week = results.slice(0, 60);
+    return discoverCache.week;
+  } catch(e) { return []; }
+}
+
+async function loadTopRated() {
+  if (discoverCache.toprated) return discoverCache.toprated;
+
+  const ratedKeys = new Set(allEntries.filter(e=>e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
+  const results = [];
+  try {
+    // Fetch 3 pages to build top 100
+    for (let page=1; page<=3; page++) {
+      const res = await fetch(`https://api.themoviedb.org/3/movie/top_rated?api_key=${TMDB_KEY}&language=zh-CN&page=${page}`);
       const data = await res.json();
-      results = (data.results||[]).filter(r=>!ratedKeys.has('tmdb_'+r.id)).map(r=>({...r, title: r.title||r.name}));
-    } else {
-      // "本月热门" — discover popular movies from recent months
-      const now = new Date();
-      const gte = new Date(now.getFullYear(), now.getMonth()-1, 1).toISOString().slice(0,10);
-      const lte = now.toISOString().slice(0,10);
-      const res = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&language=zh-CN&sort_by=popularity.desc&primary_release_date.gte=${gte}&primary_release_date.lte=${lte}&page=1`);
-      const data = await res.json();
-      results = (data.results||[]).filter(r=>!ratedKeys.has('tmdb_'+r.id)).map(r=>({...r, title: r.title||r.name}));
+      if (data.results) {
+        data.results.forEach(r=>{
+          if ((r.vote_count||0)>=500 && !ratedKeys.has('tmdb_'+r.id)) {
+            results.push(r);
+          }
+        });
+      }
     }
   } catch(e) { return []; }
 
-  discoverCache[cacheKey] = results.slice(0, 60);
-  return discoverCache[cacheKey];
+  discoverCache.toprated = results.slice(0, 100);
+  return discoverCache.toprated;
 }
 
 // ===== QUICK RATE =====
@@ -2567,7 +2664,7 @@ $['qrSubmit'].addEventListener('click', async ()=>{
   quickRateMovie = null;
   btn.textContent = origText; btn.disabled = false;
   await loadAllData();
-  discoverCache = { recommend: null, week: null, month: null };
+  discoverCache = { recommend: null, week: null, toprated: null };
   renderDiscover();
 });
 

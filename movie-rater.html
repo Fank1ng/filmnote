@@ -2432,6 +2432,8 @@ let discoverPage = { recommend: 1, toprated: 1 };
 let discoverCache = { recommend: null, week: null, toprated: null };
 let discoverVisitCount = { recommend: 0 };
 let topratedFilterUnwatched = false;
+let discoverLastRefresh = 0;
+let discoverCooldownTimer = null;
 let discoverMovieMap = {};
 let quickRateMovie = null;
 
@@ -2449,6 +2451,49 @@ function updateRecTabLabel() {
   }
 }
 
+
+function bindDiscoverRefresh() {
+  const btn = document.getElementById('discoverRefreshBtn');
+  if (!btn) return;
+  btn.addEventListener('click', ()=>{
+    discoverCache.recommend = null;
+    discoverPage.recommend = 1;
+    discoverLastRefresh = Date.now();
+    updateRefreshUI();
+    renderDiscover();
+  });
+}
+
+function updateRefreshUI() {
+  const btn = document.getElementById('discoverRefreshBtn');
+  const hint = document.getElementById('discoverRefreshHint');
+  if (!btn || !hint) return;
+  const elapsed = Math.floor((Date.now() - discoverLastRefresh) / 1000);
+  const cooldown = 15;
+  if (elapsed < cooldown) {
+    btn.disabled = true;
+    const remain = cooldown - elapsed;
+    hint.textContent = `${remain}s 后可刷新`;
+    if (!discoverCooldownTimer) {
+      discoverCooldownTimer = setInterval(()=>{
+        const e = Math.floor((Date.now() - discoverLastRefresh) / 1000);
+        if (e >= cooldown) {
+          clearInterval(discoverCooldownTimer);
+          discoverCooldownTimer = null;
+          updateRefreshUI();
+        } else {
+          const r = cooldown - e;
+          const h = document.getElementById('discoverRefreshHint');
+          if (h) h.textContent = `${r}s 后可刷新`;
+        }
+      }, 1000);
+    }
+  } else {
+    btn.disabled = false;
+    hint.textContent = '';
+    if (discoverCooldownTimer) { clearInterval(discoverCooldownTimer); discoverCooldownTimer = null; }
+  }
+}
 
 document.querySelectorAll('#discoverSubtabs button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
@@ -2559,11 +2604,17 @@ async function renderDiscover() {
   const pageMovies = movies.slice(start, start+pageSize);
 
   container.innerHTML = `
+    <div class="discover-topbar">
+      <button class="btn btn-sm btn-secondary" id="discoverRefreshBtn">🔄 刷新推荐</button>
+      <span id="discoverRefreshHint" style="font-size:0.75rem;color:var(--text2)"></span>
+    </div>
     <div class="discover-grid">
       ${pageMovies.map(m=>renderDiscoverCard(m, ratedTmdbIds)).join('')}
     </div>
     ${discoverPaginationHTML(page, totalPages)}
   `;
+  bindDiscoverRefresh();
+  updateRefreshUI();
 }
 
 let discoverPageDebounce = null;

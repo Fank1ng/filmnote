@@ -7,6 +7,9 @@
 - skipListRender 防止 loadAllData 触发的双重渲染
 - 刷新按钮仅"Ceci为你推荐"子标签可见，本周热门/Top100 不显示
 - 分页按钮加大至40×40px，改用委托事件+data-pg属性+300ms防抖，提升点击稳定性
+- **提取 getFilteredSortedGroups 共享函数**：renderList 和 locateAndGoToList 使用完全一致的分组/筛选/排序逻辑，消除合并卡片定位页码偏差
+- 列表分页改用委托事件+data-lp-pg属性+300ms防抖，与发现页分页模式统一
+- 发现页快捷评分后跳转影单并定位到新记录
 
 ---
 

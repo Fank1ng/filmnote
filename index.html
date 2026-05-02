@@ -374,15 +374,15 @@
   .dc-rated-badge { text-align: center; font-size: 0.75rem; color: var(--text2); padding: 6px 0; }
   .discover-load-more { text-align: center; margin-bottom: 20px; }
   .discover-spinner { text-align: center; padding: 40px; }
-  .discover-pages { display: flex; justify-content: center; gap: 8px; margin: 20px 0; align-items: center; }
-  .discover-pages button {
+  .discover-pages, .list-pages { display: flex; justify-content: center; gap: 8px; margin: 20px 0; align-items: center; }
+  .discover-pages button, .list-pages button {
     min-width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--border);
     background: var(--surface); color: var(--text); cursor: pointer; font-size: 0.9rem; transition: var(--t);
     display: flex; align-items: center; justify-content: center;
   }
-  .discover-pages button:hover { border-color: var(--gold); color: var(--gold); }
-  .discover-pages button.active { background: var(--gold-dim); border-color: var(--gold); color: var(--gold); font-weight: 700; }
-  .discover-pages button:disabled { opacity: 0.25; cursor: default; pointer-events: none; }
+  .discover-pages button:hover, .list-pages button:hover { border-color: var(--gold); color: var(--gold); }
+  .discover-pages button.active, .list-pages button.active { background: var(--gold-dim); border-color: var(--gold); color: var(--gold); font-weight: 700; }
+  .discover-pages button:disabled, .list-pages button:disabled { opacity: 0.25; cursor: default; pointer-events: none; }
   .discover-topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
   .discover-topbar .toggle-pill {
     font-size: 0.78rem; padding: 4px 12px; border-radius: 14px; cursor: pointer;
@@ -1771,15 +1771,12 @@ $['searchInput'].addEventListener('input', ()=>{ listPageNum = 1; renderList(); 
 $['sortBy'].addEventListener('change', ()=>{ listPageNum = 1; renderList(); });
 $['scoreFilter'].addEventListener('change', ()=>{ listPageNum = 1; renderList(); });
 
-function renderList() {
-  const container = $['movieList'];
-  const empty = $['emptyState'];
-  const loading = $['loadingState'];
-  const query = $['searchInput'].value.toLowerCase();
+// Shared: build filtered, grouped, scored, and sorted groups from current list controls
+function getFilteredSortedGroups() {
+  const query = ($['searchInput'].value||'').toLowerCase();
   const sort = $['sortBy'].value;
-
   const scoreFilterVal = $['scoreFilter'].value;
-  // Filter without score — score filtering happens after grouping
+
   let filtered = allEntries.filter(e=>{
     if (e.type!==listType) return false;
     if (ownerFilter==='me' && e.user_id!==currentUser.id) return false;
@@ -1790,13 +1787,7 @@ function renderList() {
     return true;
   });
 
-  loading.classList.add('hidden');
-  if (!filtered.length) {
-    container.innerHTML = '';
-    empty.style.display = '';
-    return;
-  }
-  empty.style.display = 'none';
+  if (!filtered.length) return [];
 
   // Group entries by tmdb_id or title+year
   const groups = [];
@@ -1806,8 +1797,7 @@ function renderList() {
     if (seen.has(gkey)) return;
     seen.add(gkey);
     const group = filtered.filter(f=>getGroupKey(f)===gkey);
-    // Attach group average score
-    group._avgScore = group.reduce((s,e)=>s+getEntryScore(e),0)/group.length;
+    group._avgScore = group.reduce((s,x)=>s+getEntryScore(x),0)/group.length;
     groups.push(group);
   });
 
@@ -1815,12 +1805,6 @@ function renderList() {
   let scoredGroups = groups;
   if (scoreFilterVal!=='all') {
     scoredGroups = groups.filter(g=>Math.floor(g._avgScore)===parseInt(scoreFilterVal));
-  }
-
-  if (!scoredGroups.length) {
-    container.innerHTML = '';
-    empty.style.display = '';
-    return;
   }
 
   // Sort groups
@@ -1836,9 +1820,27 @@ function renderList() {
     }
   });
 
+  return scoredGroups;
+}
+
+function renderList() {
+  const container = $['movieList'];
+  const empty = $['emptyState'];
+  const loading = $['loadingState'];
+
+  loading.classList.add('hidden');
+  const groups = getFilteredSortedGroups();
+
+  if (!groups.length) {
+    container.innerHTML = '';
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+
   // Pagination: slice groups for current page
   const start = (listPageNum - 1) * listPageSize;
-  const pageGroups = scoredGroups.slice(start, start + listPageSize);
+  const pageGroups = groups.slice(start, start + listPageSize);
   container.innerHTML = pageGroups.map(group=>{
     const main = group.find(e=>e.user_id===currentUser.id) || group[0];
     const others = group.filter(e=>e.user_id!==currentUser.id);
@@ -1996,8 +1998,8 @@ function renderList() {
       `;
     }
   }).join('');
-  // Pagination
-  const totalPages = Math.ceil(scoredGroups.length / listPageSize);
+  // ── Pagination
+  const totalPages = Math.ceil(groups.length / listPageSize);
   if (totalPages > 1) {
     let pagesHtml = '';
     let pageNums = [];
@@ -2013,21 +2015,21 @@ function renderList() {
       pageNums.push(totalPages);
     }
     if (listPageNum > 1) {
-      pagesHtml += `<button class="btn btn-sm btn-secondary" onclick="listPageNum--;renderList();window.scrollTo({top:0,behavior:'smooth'})">‹ 上一页</button>`;
+      pagesHtml += `<button class="btn btn-sm btn-secondary" data-lp-pg="${listPageNum-1}">‹ 上一页</button>`;
     }
     pageNums.forEach(p => {
       if (p === '...') {
         pagesHtml += '<span style="color:var(--text2);padding:0 6px">…</span>';
       } else if (p === listPageNum) {
-        pagesHtml += `<button class="btn btn-sm" style="background:var(--gold);color:#000;font-weight:700;min-width:32px">${p}</button>`;
+        pagesHtml += `<button class="btn btn-sm" style="background:var(--gold);color:#000;font-weight:700;min-width:40px;height:40px" disabled>${p}</button>`;
       } else {
-        pagesHtml += `<button class="btn btn-sm btn-secondary" onclick="listPageNum=${p};renderList();window.scrollTo({top:0,behavior:'smooth'})" style="min-width:32px">${p}</button>`;
+        pagesHtml += `<button class="btn btn-sm btn-secondary" data-lp-pg="${p}" style="min-width:40px;height:40px">${p}</button>`;
       }
     });
     if (listPageNum < totalPages) {
-      pagesHtml += `<button class="btn btn-sm btn-secondary" onclick="listPageNum++;renderList();window.scrollTo({top:0,behavior:'smooth'})">下一页 ›</button>`;
+      pagesHtml += `<button class="btn btn-sm btn-secondary" data-lp-pg="${listPageNum+1}">下一页 ›</button>`;
     }
-    container.innerHTML += `<div style="text-align:center;padding:16px;display:flex;gap:6px;justify-content:center;align-items:center;flex-wrap:wrap">${pagesHtml}</div>`;
+    container.innerHTML += `<div class="list-pages">${pagesHtml}</div>`;
   }
 }
 
@@ -2479,6 +2481,7 @@ async function renderDiscover() {
 }
 
 let discoverPageDebounce = null;
+let listPageDebounce = null;
 
 function goDiscoverPage(n) {
   if (discoverPageDebounce) return;
@@ -2495,6 +2498,19 @@ $['discoverContent'].addEventListener('click', e=>{
   const pg = parseInt(btn.dataset.pg);
   if (isNaN(pg) || pg<1) return;
   goDiscoverPage(pg);
+});
+
+// Delegated click for list pagination
+$['movieList'].addEventListener('click', e=>{
+  const btn = e.target.closest('.list-pages button');
+  if (!btn || btn.disabled) return;
+  const pg = parseInt(btn.dataset.lpPg);
+  if (isNaN(pg) || pg<1) return;
+  if (listPageDebounce) return;
+  listPageDebounce = setTimeout(()=>{ listPageDebounce = null; }, 300);
+  listPageNum = pg;
+  renderList();
+  window.scrollTo({top:0,behavior:'smooth'});
 });
 
 function discoverPaginationHTML(page, totalPages) {
@@ -2798,19 +2814,16 @@ $['qrSubmit'].addEventListener('click', async ()=>{
   quickRateMovie = null;
   btn.textContent = origText; btn.disabled = false;
   const wasOnDiscover = getActiveTab()==='discover';
+  skipListRender = true;
+  await loadAllData();
+  skipListRender = false;
   if (wasOnDiscover) {
-    await loadAllData();
     discoverCache = { recommend: null, week: null, toprated: null };
-    renderDiscover();
-  } else {
-    skipListRender = true;
-    await loadAllData();
-    skipListRender = false;
-    const dk = getGroupKey({tmdb_id: savedMovie.tmdb_id, title: savedMovie.title, year: savedMovie.year});
-    const newEntry = allEntries.find(e=>e.user_id===currentUser.id && getGroupKey(e)===dk);
-    if (newEntry) locateAndGoToList(newEntry.id);
-    switchTab('list');
   }
+  const dk = getGroupKey({tmdb_id: savedMovie.tmdb_id, title: savedMovie.title, year: savedMovie.year});
+  const newEntry = allEntries.find(e=>e.user_id===currentUser.id && getGroupKey(e)===dk);
+  if (newEntry) locateAndGoToList(newEntry.id);
+  switchTab('list');
 });
 
 // ===== TABS =====
@@ -2870,45 +2883,10 @@ function locateAndGoToList(entryId) {
     $['searchInput'].value = '';
   }
 
-  // Replicate renderList filtering/sorting to find entry's group position
-  const entries = allEntries.filter(e=>e.type===listType);
-  const groupsMap = {};
-  entries.forEach(e=>{ const k=getGroupKey(e); if(!groupsMap[k]) groupsMap[k]=[]; groupsMap[k].push(e); });
-  let groups = Object.values(groupsMap);
-
-  if (ownerFilter==='me') groups = groups.filter(g=>g.some(e=>e.user_id===currentUser.id));
-
-  const sf = $['scoreFilter'].value;
-  if (sf!=='all') {
-    const target = parseInt(sf);
-    groups = groups.filter(g=>{
-      const best = g.reduce((a,b)=>getEntryScore(a)>getEntryScore(b)?a:b);
-      return Math.round(getEntryScore(best))===target;
-    });
-  }
-
-  const q = ($['searchInput'].value||'').trim().toLowerCase();
-  if (q) {
-    groups = groups.filter(g=>g.some(e=>(e.title||'').toLowerCase().includes(q)||(e.director||'').toLowerCase().includes(q)));
-  }
-
-  // Sort same as renderList
-  const sortBy = $['sortBy'].value;
-  groups.sort((a,b)=>{
-    const bestA = a.reduce((x,y)=>getEntryScore(x)>getEntryScore(y)?x:y);
-    const bestB = b.reduce((x,y)=>getEntryScore(x)>getEntryScore(y)?x:y);
-    switch(sortBy) {
-      case 'date-asc': return new Date(bestA.created_at)-new Date(bestB.created_at);
-      case 'score-desc': return getEntryScore(bestB)-getEntryScore(bestA);
-      case 'score-asc': return getEntryScore(bestA)-getEntryScore(bestB);
-      case 'count-desc': return b.length-a.length;
-      case 'title': return (bestA.title||'').localeCompare(bestB.title||'');
-      default: return new Date(bestB.created_at)-new Date(bestA.created_at);
-    }
-  });
-
+  // Use shared function — guarantees identical filtering/sorting to renderList
+  const groups = getFilteredSortedGroups();
   const groupIndex = groups.findIndex(g=>g.some(e=>e.id===entryId));
-  listPageNum = groupIndex >= 0 ? Math.ceil((groupIndex+1)/20) : 1;
+  listPageNum = groupIndex >= 0 ? Math.ceil((groupIndex+1)/listPageSize) : 1;
   highlightEntryId = entryId;
 }
 document.querySelectorAll('nav button').forEach(btn=>{ btn.addEventListener('click', ()=>switchTab(btn.dataset.tab)); });

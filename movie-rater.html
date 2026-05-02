@@ -374,13 +374,20 @@
   .dc-rated-badge { text-align: center; font-size: 0.75rem; color: var(--text2); padding: 6px 0; }
   .discover-load-more { text-align: center; margin-bottom: 20px; }
   .discover-spinner { text-align: center; padding: 40px; }
-  .discover-pages, .list-pages { display: flex; justify-content: center; gap: 8px; margin: 20px 0; align-items: center; }
-  .discover-pages button, .list-pages button {
-    min-width: 40px; height: 40px; border-radius: 8px; border: 1px solid var(--border);
-    background: var(--surface); color: var(--text); cursor: pointer; font-size: 0.9rem; transition: var(--t);
-    display: flex; align-items: center; justify-content: center;
+  .discover-pages, .list-pages {
+    display: flex; justify-content: center; gap: 8px; margin: 24px 0; align-items: center;
+    position: relative; z-index: 2;
   }
-  .discover-pages button:hover, .list-pages button:hover { border-color: var(--gold); color: var(--gold); }
+  .discover-pages button, .list-pages button {
+    min-width: 44px; height: 44px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--surface);
+    color: var(--text); cursor: pointer; font-size: 0.95rem; font-weight: 600;
+    transition: var(--t); display: flex; align-items: center; justify-content: center;
+    user-select: none; -webkit-user-select: none;
+    touch-action: manipulation; box-sizing: border-box;
+    position: relative; z-index: 1; padding: 0;
+  }
+  .discover-pages button:hover, .list-pages button:hover { border-color: var(--gold); color: var(--gold); background: rgba(212,168,83,0.08); }
   .discover-pages button.active, .list-pages button.active { background: var(--gold-dim); border-color: var(--gold); color: var(--gold); font-weight: 700; }
   .discover-pages button:disabled, .list-pages button:disabled { opacity: 0.25; cursor: default; pointer-events: none; }
   .discover-topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
@@ -2015,19 +2022,19 @@ function renderList() {
       pageNums.push(totalPages);
     }
     if (listPageNum > 1) {
-      pagesHtml += `<button class="btn btn-sm btn-secondary" data-lp-pg="${listPageNum-1}">‹ 上一页</button>`;
+      pagesHtml += `<button data-lp-pg="${listPageNum-1}">‹</button>`;
     }
     pageNums.forEach(p => {
       if (p === '...') {
         pagesHtml += '<span style="color:var(--text2);padding:0 6px">…</span>';
       } else if (p === listPageNum) {
-        pagesHtml += `<button class="btn btn-sm" style="background:var(--gold);color:#000;font-weight:700;min-width:40px;height:40px" disabled>${p}</button>`;
+        pagesHtml += `<button class="active" disabled>${p}</button>`;
       } else {
-        pagesHtml += `<button class="btn btn-sm btn-secondary" data-lp-pg="${p}" style="min-width:40px;height:40px">${p}</button>`;
+        pagesHtml += `<button data-lp-pg="${p}">${p}</button>`;
       }
     });
     if (listPageNum < totalPages) {
-      pagesHtml += `<button class="btn btn-sm btn-secondary" data-lp-pg="${listPageNum+1}">下一页 ›</button>`;
+      pagesHtml += `<button data-lp-pg="${listPageNum+1}">›</button>`;
     }
     container.innerHTML += `<div class="list-pages">${pagesHtml}</div>`;
   }

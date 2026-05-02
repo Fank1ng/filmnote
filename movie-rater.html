@@ -679,6 +679,10 @@
         <button data-dt="week">本周热门</button>
         <button data-dt="toprated">Top100</button>
       </div>
+      <div id="discoverRefreshBar" style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <button class="btn btn-sm btn-secondary" id="discoverRefreshBtn">🔄 刷新推荐</button>
+        <span id="discoverRefreshHint" style="font-size:0.75rem;color:var(--text2)"></span>
+      </div>
       <div id="discoverContent"></div>
     </section>
   </main>
@@ -1263,7 +1267,6 @@ function renderActiveTab() {
   const tab = getActiveTab();
   if (tab==='list') renderList();
   if (tab==='stats') renderStats();
-  if (tab==='discover') { discoverCache = { recommend: null, week: null, toprated: null }; renderDiscover(); }
 }
 
 function updateHeaderCount() {
@@ -1626,13 +1629,10 @@ $['movieForm'].addEventListener('submit', async e=>{
     }
 
     toast(editingEntryId ? '评价已更新' : '评价已保存');
-    highlightEntryId = entryId;
     resetForm();
-    const prevSort = $['sortBy'].value;
-    $['sortBy'].value = 'date-desc';
     await loadAllData();
+    locateAndGoToList(entryId);
     switchTab('list');
-    setTimeout(() => { $['sortBy'].value = prevSort; }, 800);
   } catch(err) {
     toast('保存出错: ' + (err.message||err));
     console.error('Save error:', err);
@@ -2308,6 +2308,8 @@ let discoverPage = { recommend: 1, toprated: 1 };
 let discoverCache = { recommend: null, week: null, toprated: null };
 let discoverVisitCount = { recommend: 0 };
 let topratedFilterUnwatched = false;
+let discoverLastRefresh = 0;
+let discoverCooldownTimer = null;
 let discoverMovieMap = {};
 let quickRateMovie = null;
 
@@ -2324,6 +2326,47 @@ function updateRecTabLabel() {
     btn.classList.add('ceci-tab');
   }
 }
+
+// Refresh button with 15s cooldown
+function updateRefreshUI() {
+  const btn = document.getElementById('discoverRefreshBtn');
+  const hint = document.getElementById('discoverRefreshHint');
+  if (!btn || !hint) return;
+  const elapsed = Math.floor((Date.now() - discoverLastRefresh) / 1000);
+  const cooldown = 15;
+  if (elapsed < cooldown) {
+    btn.disabled = true;
+    const remain = cooldown - elapsed;
+    hint.textContent = `${remain}s 后可刷新`;
+    if (!discoverCooldownTimer) {
+      discoverCooldownTimer = setInterval(()=>{
+        const e = Math.floor((Date.now() - discoverLastRefresh) / 1000);
+        if (e >= cooldown) {
+          clearInterval(discoverCooldownTimer);
+          discoverCooldownTimer = null;
+          updateRefreshUI();
+        } else {
+          const r = cooldown - e;
+          const h = document.getElementById('discoverRefreshHint');
+          if (h) h.textContent = `${r}s 后可刷新`;
+        }
+      }, 1000);
+    }
+  } else {
+    btn.disabled = false;
+    hint.textContent = '';
+    if (discoverCooldownTimer) { clearInterval(discoverCooldownTimer); discoverCooldownTimer = null; }
+  }
+}
+
+document.getElementById('discoverRefreshBtn')?.addEventListener('click', ()=>{
+  discoverCache = { recommend: null, week: null, toprated: null };
+  discoverPage.recommend = 1;
+  discoverPage.toprated = 1;
+  discoverLastRefresh = Date.now();
+  updateRefreshUI();
+  renderDiscover();
+});
 
 document.querySelectorAll('#discoverSubtabs button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
@@ -2344,6 +2387,7 @@ $['discoverContent'].addEventListener('click', e=>{
 });
 
 async function renderDiscover() {
+  updateRefreshUI();
   const container = $['discoverContent'];
   container.innerHTML = '<div class="discover-spinner"><div class="spinner"></div></div>';
 
@@ -2399,30 +2443,20 @@ async function renderDiscover() {
     container.innerHTML = `
       <div class="discover-topbar">
         <span class="topbar-count">${topratedFilterUnwatched ? '未看 ' : '共 '}${filteredMovies.length} 部</span>
-        <button class="toggle-pill ${topratedFilterUnwatched?'active':''}" id="topratedToggle">只看未看</button>
+        <button class="toggle-pill ${topratedFilterUnwatched?'active':''}" onclick="topratedFilterUnwatched=!topratedFilterUnwatched;discoverPage.toprated=1;renderDiscover()">只看未看</button>
       </div>
       <div class="discover-grid">
         ${pageMovies.map(m=>renderDiscoverCard(m, ratedTmdbIds)).join('')}
       </div>
-      ${filteredMovies.length ? renderPagination(page, totalPages) : '<div class="empty-state"><p>全部已看过</p></div>'}
+      ${filteredMovies.length ? discoverPaginationHTML(page, totalPages) : '<div class="empty-state"><p>全部已看过</p></div>'}
     `;
-
-    const toggleBtn = document.getElementById('topratedToggle');
-    if (toggleBtn) {
-      toggleBtn.addEventListener('click', ()=>{
-        topratedFilterUnwatched = !topratedFilterUnwatched;
-        discoverPage.toprated = 1;
-        renderDiscover();
-      });
-    }
-    bindPagination(page, totalPages);
     return;
   }
 
   // ── Recommend: 3-page pagination ──
   const page = discoverPage.recommend || 1;
   const pageSize = 20;
-  const totalPages = 3; // fixed 3 pages max (60 movies)
+  const totalPages = 3;
   const start = (page-1)*pageSize;
   const pageMovies = movies.slice(start, start+pageSize);
 
@@ -2430,33 +2464,26 @@ async function renderDiscover() {
     <div class="discover-grid">
       ${pageMovies.map(m=>renderDiscoverCard(m, ratedTmdbIds)).join('')}
     </div>
-    ${renderPagination(page, totalPages)}
+    ${discoverPaginationHTML(page, totalPages)}
   `;
-  bindPagination(page, totalPages);
 }
 
-function renderPagination(page, totalPages) {
+function goDiscoverPage(n) {
+  discoverPage[discoverTab] = n;
+  renderDiscover();
+  window.scrollTo({top: ($['discoverContent'].offsetTop||0)-80, behavior: 'smooth'});
+}
+
+function discoverPaginationHTML(page, totalPages) {
   if (totalPages <= 1) return '';
   let html = '<div class="discover-pages">';
-  html += `<button data-pg="${page-1}" ${page<=1?'disabled':''}>◀</button>`;
+  html += `<button onclick="goDiscoverPage(${page-1})" ${page<=1?'disabled':''}>◀</button>`;
   for (let i=1; i<=totalPages; i++) {
-    html += `<button data-pg="${i}" class="${i===page?'active':''}">${i}</button>`;
+    html += `<button onclick="goDiscoverPage(${i})" class="${i===page?'active':''}">${i}</button>`;
   }
-  html += `<button data-pg="${page+1}" ${page>=totalPages?'disabled':''}>▶</button>`;
+  html += `<button onclick="goDiscoverPage(${page+1})" ${page>=totalPages?'disabled':''}>▶</button>`;
   html += '</div>';
   return html;
-}
-
-function bindPagination(page, totalPages) {
-  document.querySelectorAll('.discover-pages button').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      const pg = parseInt(btn.dataset.pg);
-      if (isNaN(pg) || pg<1 || pg>totalPages) return;
-      discoverPage[discoverTab] = pg;
-      renderDiscover();
-      window.scrollTo({top: ($['discoverContent'].offsetTop||0)-80, behavior: 'smooth'});
-    });
-  });
 }
 
 function renderDiscoverCard(m, ratedTmdbIds) {
@@ -2744,11 +2771,20 @@ $['qrSubmit'].addEventListener('click', async ()=>{
 
   toast('评价已保存！');
   $['quickRateModal'].classList.remove('open');
+  const savedMovie = quickRateMovie; // save before nulling
   quickRateMovie = null;
   btn.textContent = origText; btn.disabled = false;
   await loadAllData();
-  discoverCache = { recommend: null, week: null, toprated: null };
-  renderDiscover();
+  const wasOnDiscover = getActiveTab()==='discover';
+  if (wasOnDiscover) {
+    discoverCache = { recommend: null, week: null, toprated: null };
+    renderDiscover();
+  } else {
+    const dk = getGroupKey({tmdb_id: savedMovie.tmdb_id, title: savedMovie.title, year: savedMovie.year});
+    const newEntry = allEntries.find(e=>e.user_id===currentUser.id && getGroupKey(e)===dk);
+    if (newEntry) locateAndGoToList(newEntry.id);
+    switchTab('list');
+  }
 });
 
 // ===== TABS =====
@@ -2758,7 +2794,7 @@ function switchTab(name) {
   const tabBtn = document.querySelector(`nav button[data-tab="${name}"]`);
   if (tabBtn) { tabBtn.classList.add('active'); tabBtn.setAttribute('aria-selected','true'); }
   document.getElementById(`panel-${name}`)?.classList.add('active');
-  if (name==='list') { listPageNum = 1; renderList(); scrollToHighlight(); }
+  if (name==='list') { if (!highlightEntryId) listPageNum = 1; renderList(); scrollToHighlight(); }
   if (name==='stats') { renderStats(); }
   if (name==='discover') { renderDiscover(); }
 }
@@ -2774,6 +2810,84 @@ function scrollToHighlight() {
     }
     highlightEntryId = null;
   }, 100);
+}
+
+// Find which page an entry will appear on given current list filters, then navigate there
+function locateAndGoToList(entryId) {
+  const entry = allEntries.find(e=>e.id===entryId);
+  if (!entry) return;
+
+  // Clear search text so the entry isn't hidden
+  $['searchInput'].value = '';
+
+  // Determine listType from entry type
+  const entryListType = entry.type==='series' ? 'series' : 'movie';
+  if (listType !== entryListType) {
+    listType = entryListType;
+    document.querySelectorAll('#listSubtabs button').forEach(b=>b.classList.remove('active'));
+    const tabBtn = document.querySelector(`#listSubtabs button[data-ltype="${listType}"]`);
+    if (tabBtn) tabBtn.classList.add('active');
+  }
+
+  // Ensure ownerFilter includes this entry
+  if (ownerFilter === 'me' && entry.user_id !== currentUser.id) {
+    ownerFilter = 'all';
+    $['ownerFilter'].value = 'all';
+  }
+
+  // Clear score filter to ensure entry is visible (renderList re-evaluates)
+  $['scoreFilter'].value = 'all';
+
+  // Replicate renderList filtering/sorting to find entry's group position
+  const entries = allEntries.filter(e=>e.type===listType);
+  const byType = entries;
+  const groupsMap = {};
+  byType.forEach(e=>{ const k=getGroupKey(e); if(!groupsMap[k]) groupsMap[k]=[]; groupsMap[k].push(e); });
+  let groups = Object.values(groupsMap);
+
+  // Apply owner filter
+  if (ownerFilter==='me') groups = groups.filter(g=>g.some(e=>e.user_id===currentUser.id));
+
+  // Apply score filter (cleared above, but handle just in case)
+  const scoreF = $['scoreFilter'].value;
+  if (scoreF!=='all') {
+    const target = parseInt(scoreF);
+    groups = groups.filter(g=>{
+      const best = g.reduce((a,b)=>getEntryScore(a)>getEntryScore(b)?a:b);
+      return getEntryScore(best)===target;
+    });
+  }
+
+  // Apply search
+  const search = $['searchInput'].value.trim().toLowerCase();
+  if (search) {
+    groups = groups.filter(g=>g.some(e=>(e.title||'').toLowerCase().includes(search)||(e.director||'').toLowerCase().includes(search)));
+  }
+
+  // Sort groups (same logic as renderList)
+  const sortBy = $['sortBy'].value;
+  groups.sort((a,b)=>{
+    const bestA = a.reduce((x,y)=>getEntryScore(x)>getEntryScore(y)?x:y);
+    const bestB = b.reduce((x,y)=>getEntryScore(x)>getEntryScore(y)?x:y);
+    switch(sortBy) {
+      case 'date-asc': return new Date(bestA.created_at)-new Date(bestB.created_at);
+      case 'score-desc': return getEntryScore(bestB)-getEntryScore(bestA);
+      case 'score-asc': return getEntryScore(bestA)-getEntryScore(bestB);
+      case 'count-desc': return b.length-a.length;
+      case 'title': return (bestA.title||'').localeCompare(bestB.title||'');
+      default: return new Date(bestB.created_at)-new Date(bestA.created_at); // date-desc
+    }
+  });
+
+  // Find which group contains our entry
+  const groupIndex = groups.findIndex(g=>g.some(e=>e.id===entryId));
+  if (groupIndex >= 0) {
+    listPageNum = Math.ceil((groupIndex+1)/20);
+  } else {
+    listPageNum = 1;
+  }
+
+  highlightEntryId = entryId;
 }
 document.querySelectorAll('nav button').forEach(btn=>{ btn.addEventListener('click', ()=>switchTab(btn.dataset.tab)); });
 

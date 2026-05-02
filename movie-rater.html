@@ -320,6 +320,16 @@
   .friend-rating .fr-name { font-size: 0.8rem; color: var(--gold); }
   .friend-rating .fr-score { font-weight: 700; color: var(--gold); }
 
+  /* ── TMDB Detail Section ── */
+  .tmdb-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .tmdb-section h4 { font-size: 0.85rem; color: var(--text2); margin-bottom: 8px; }
+  .tmdb-overview { font-size: 0.82rem; color: var(--text2); line-height: 1.7; margin-bottom: 12px; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .tmdb-overview.expanded { -webkit-line-clamp: unset; display: block; }
+  .tmdb-expand { font-size: 0.72rem; color: var(--gold); cursor: pointer; margin-left: 4px; }
+  .tmdb-cast { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .cast-chip { font-size: 0.72rem; padding: 2px 8px; border-radius: 10px; background: rgba(255,255,255,0.04); color: var(--text2); border: 1px solid var(--border); }
+  .detail-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--gold); border-radius: 50%; animation: spin 0.6s linear infinite; vertical-align: middle; margin-right: 4px; }
+
   .settings-section { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
 
   /* ── Toast ── */
@@ -1754,6 +1764,29 @@ function getUserColor(userId) {
   return { key:'friend', main:'#5b9db0', dim:'#1a2a30' };
 }
 
+// ===== TMDB DETAIL FETCH (shared cache) =====
+const tmdbDetailCache = {};
+
+async function fetchTmdbDetail(tmdbId) {
+  if (!tmdbId) return null;
+  if (tmdbDetailCache[tmdbId]) return tmdbDetailCache[tmdbId];
+  try {
+    const [detailRes, creditRes] = await Promise.all([
+      fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${TMDB_KEY}&language=zh-CN`),
+      fetch(`https://api.themoviedb.org/3/movie/${tmdbId}/credits?api_key=${TMDB_KEY}&language=zh-CN`)
+    ]);
+    if (!detailRes.ok) { tmdbDetailCache[tmdbId] = null; return null; }
+    const details = await detailRes.json();
+    const credits = await creditRes.json();
+    const result = { details, credits };
+    tmdbDetailCache[tmdbId] = result;
+    return result;
+  } catch(e) {
+    tmdbDetailCache[tmdbId] = null;
+    return null;
+  }
+}
+
 // ===== RENDER LIST =====
 let listType = 'movie';
 let ownerFilter = 'all';
@@ -2104,12 +2137,89 @@ async function showDetail(id) {
         `).join('')}
       </div>
     ` : ''}
+    ${entry.tmdb_id ? `<div class="tmdb-section" id="tmdbDetail-${entry.id}"><div class="detail-spinner"></div> 加载电影详情...</div>` : ''}
     <div class="btn-group" style="justify-content:flex-end">
       ${isMine ? `<button class="btn btn-secondary btn-sm" onclick="editEntry('${entry.id}');closeModal()">编辑</button>` : ''}
       <button class="btn btn-secondary btn-sm" onclick="closeModal()">关闭</button>
     </div>
   `;
   modal.classList.add('open');
+
+  // Async load TMDB detail if available
+  if (entry.tmdb_id) {
+    const tmdbSection = document.getElementById('tmdbDetail-' + entry.id);
+    const data = await fetchTmdbDetail(entry.tmdb_id);
+    if (!data || !tmdbSection) return;
+    const { details, credits } = data;
+    const overview = details.overview || '';
+    const director = (credits.crew||[]).find(c => c.job === 'Director');
+    const cast = (credits.cast||[]).slice(0, 6);
+    if (overview || director || cast.length) {
+      tmdbSection.innerHTML = `
+        ${overview ? `<h4>📖 简介</h4><div class="tmdb-overview" id="tmdbOv-${entry.id}">${esc(overview)}</div>${overview.length > 150 ? `<span class="tmdb-expand" onclick="document.getElementById('tmdbOv-${entry.id}').classList.toggle('expanded');this.textContent=this.textContent==='展开全部'?'收起':'展开全部'">展开全部</span>` : ''}` : ''}
+        ${director ? `<h4 style="margin-top:8px">🎬 导演</h4><div class="tmdb-cast"><span class="cast-chip">${esc(director.name)}</span></div>` : ''}
+        ${cast.length ? `<h4 style="margin-top:8px">👥 演员</h4><div class="tmdb-cast">${cast.map(c=>`<span class="cast-chip">${esc(c.name)}</span>`).join('')}</div>` : ''}
+      `;
+    } else {
+      tmdbSection.innerHTML = '';
+    }
+  }
+}
+
+// ── Movie detail from discover page (TMDB data focused) ──
+async function showMovieDetail(tmdbId) {
+  const movie = discoverMovieMap[tmdbId];
+  if (!movie) return;
+  const ratedTmdbIds = new Set(allEntries.filter(e=>e.user_id===currentUser.id && e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
+  const isRated = ratedTmdbIds.has('tmdb_'+tmdbId);
+  const myEntry = isRated ? allEntries.find(e=>e.user_id===currentUser.id && e.tmdb_id===tmdbId) : null;
+
+  const year = (movie.release_date||'').slice(0,4);
+  const poster = movie.poster_path ? posterUrl(movie.poster_path) : '';
+  const genres = (movie.genre_ids||[]).slice(0,4).map(id=>genreMap[id]||'').filter(Boolean);
+
+  const content = $['modalContent'];
+  content.innerHTML = `
+    <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px">
+      ${poster ? `<img src="${poster}" style="width:100px;border-radius:8px" alt="">` : ''}
+      <div>
+        <h3 style="margin-bottom:4px">${esc(movie.title)} ${year?'('+year+')':''}</h3>
+        ${movie.original_language ? `<p style="color:var(--text2);font-size:0.8rem">${movie.original_language.toUpperCase()}</p>` : ''}
+        <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
+          ${movie.vote_average ? `<span style="font-size:1.3rem;font-weight:800;color:var(--gold)">⭐ ${movie.vote_average.toFixed(1)}</span>` : ''}
+          ${genres.length ? genres.map(g=>`<span style="font-size:0.7rem;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,0.06);color:var(--text2)">${g}</span>`).join('') : ''}
+        </div>
+        ${isRated && myEntry ? `<p style="font-size:0.85rem;color:var(--gold);margin-top:4px">已评价 · 你的评分 ${getEntryScore(myEntry).toFixed(1)}</p>` : ''}
+      </div>
+    </div>
+    <div class="tmdb-section" id="tmdbDiscoverDetail">
+      <div class="detail-spinner"></div> 加载电影详情...
+    </div>
+    <div class="btn-group" style="justify-content:flex-end;margin-top:8px">
+      ${!isRated ? `<button class="btn btn-primary btn-sm" onclick="closeModal();openQuickRate({id:${tmdbId},title:'${esc(movie.title).replace(/'/g,"\\'")}',release_date:'${movie.release_date||''}',poster_path:'${movie.poster_path||''}'})">＋我的评分</button>` : ''}
+      <button class="btn btn-secondary btn-sm" onclick="closeModal()">关闭</button>
+    </div>
+  `;
+  $['detailModal'].classList.add('open');
+
+  // Async load TMDB detail
+  const tmdbSection = document.getElementById('tmdbDiscoverDetail');
+  const data = await fetchTmdbDetail(tmdbId);
+  if (!data || !tmdbSection) return;
+  const { details, credits } = data;
+  const overview = details.overview || '';
+  const director = (credits.crew||[]).find(c => c.job === 'Director');
+  const cast = (credits.cast||[]).slice(0, 6);
+  if (overview || director || cast.length) {
+    const uid = tmdbId; // unique enough for DOM id
+    tmdbSection.innerHTML = `
+      ${overview ? `<h4>📖 简介</h4><div class="tmdb-overview" id="tmdbOv-d-${uid}">${esc(overview)}</div>${overview.length > 150 ? `<span class="tmdb-expand" onclick="document.getElementById('tmdbOv-d-${uid}').classList.toggle('expanded');this.textContent=this.textContent==='展开全部'?'收起':'展开全部'">展开全部</span>` : ''}` : ''}
+      ${director ? `<h4 style="margin-top:8px">🎬 导演</h4><div class="tmdb-cast"><span class="cast-chip">${esc(director.name)}</span></div>` : ''}
+      ${cast.length ? `<h4 style="margin-top:8px">👥 演员</h4><div class="tmdb-cast">${cast.map(c=>`<span class="cast-chip">${esc(c.name)}</span>`).join('')}</div>` : ''}
+    `;
+  } else {
+    tmdbSection.innerHTML = '<p style="font-size:0.8rem;color:var(--text2)">暂无详细信息</p>';
+  }
 }
 
 function closeModal() { $['detailModal'].classList.remove('open'); }
@@ -2394,9 +2504,21 @@ document.querySelectorAll('#discoverSubtabs button').forEach(btn=>{
 $['discoverContent'].addEventListener('click', e=>{
   const btn = e.target.closest('.dc-rate-btn');
   if (!btn) return;
+  e.stopPropagation();
   const tmdbId = parseInt(btn.dataset.tmdbId);
   const movie = discoverMovieMap[tmdbId];
   if (movie) openQuickRate(movie);
+});
+
+// Delegated click for discover cards → movie detail
+$['discoverContent'].addEventListener('click', e=>{
+  // Ignore clicks on buttons or inside rate-btn
+  if (e.target.closest('button')) return;
+  const card = e.target.closest('.discover-card');
+  if (!card) return;
+  const tmdbId = parseInt(card.dataset.tmdbId);
+  if (!tmdbId) return;
+  showMovieDetail(tmdbId);
 });
 
 async function renderDiscover() {
@@ -2547,7 +2669,7 @@ function renderDiscoverCard(m, ratedTmdbIds) {
   const genres = (m.genre_ids||[]).slice(0,3).map(id=>genreMap[id]||'').filter(Boolean);
 
   return `
-    <div class="discover-card">
+    <div class="discover-card" data-tmdb-id="${tmdbId||''}">
       <div class="dc-poster-wrap">
         ${poster ? `<img src="${poster}" alt="${esc(m.title)}" loading="lazy">` : '<div class="dc-no-poster">🎬</div>'}
         ${m.vote_average ? `<span class="dc-tmdb-score">⭐ ${m.vote_average.toFixed(1)}</span>` : ''}

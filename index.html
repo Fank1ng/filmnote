@@ -1267,10 +1267,27 @@ async function loadAllData() {
 
     updateHeaderCount();
     renderActiveTab();
+    // Background: warm original_title cache for English search
+    warmOriginalTitleCache();
   } catch(e) {
     console.error('loadAllData error:', e);
     if (!cachedEntries) toast('加载数据失败: ' + (e.message||e));
   }
+}
+
+let warmTitleTimer = null;
+function warmOriginalTitleCache() {
+  clearTimeout(warmTitleTimer);
+  const uncached = allEntries.filter(e => e.tmdb_id && !originalTitleCache[e.tmdb_id]);
+  if (!uncached.length) return;
+  let i = 0;
+  function next() {
+    if (i >= uncached.length) return;
+    fetchTmdbDetail(uncached[i].tmdb_id);
+    i++;
+    warmTitleTimer = setTimeout(next, 500);
+  }
+  next();
 }
 
 function getActiveTab() {

@@ -693,7 +693,7 @@
     <section class="tab-panel" id="panel-discover">
       <h2 class="section-title">发现好片</h2>
       <div class="discover-subtabs" id="discoverSubtabs">
-        <button class="active" data-dt="recommend" id="discoverRecTab">Ceci为你推荐</button>
+        <button class="active" data-dt="recommend" id="discoverRecTab">Ceci推荐</button>
         <button data-dt="week">本周热门</button>
         <button data-dt="toprated">Top100</button>
       </div>
@@ -1267,6 +1267,9 @@ async function loadAllData() {
 
     updateHeaderCount();
     renderActiveTab();
+    // Init discover refresh state
+    discoverRatedCount = allEntries.filter(e=>e.user_id===currentUser?.id && e.type==='movie').length;
+    updateRecTabLabel();
     // Background: warm original_title cache for English search
     warmOriginalTitleCache();
   } catch(e) {
@@ -2453,17 +2456,24 @@ let discoverLastRefresh = 0;
 let discoverCooldownTimer = null;
 let discoverMovieMap = {};
 let quickRateMovie = null;
+let discoverRatedCount = 0;
+let discoverRefreshStreak = 0;
+let discoverLastShownIds = [];
+let discoverHistoryBatches = [];
 
 function updateRecTabLabel() {
   const btn = document.getElementById('discoverRecTab');
   if (!btn) return;
+  const ratedCount = allEntries.filter(e=>e.user_id===currentUser?.id && e.type==='movie').length;
   const uname = getUserName(currentUser?.id);
   btn.classList.remove('ceci-tab','fd-tab');
+  btn.style.display = '';
+  const advanced = ratedCount >= 100;
   if (uname === 'ceci') {
-    btn.textContent = 'FD为你推荐';
+    btn.textContent = advanced ? 'FD精心推荐' : 'FD推荐';
     btn.classList.add('fd-tab');
   } else {
-    btn.textContent = 'Ceci为你推荐';
+    btn.textContent = advanced ? 'Ceci精心推荐' : 'Ceci推荐';
     btn.classList.add('ceci-tab');
   }
 }
@@ -2473,8 +2483,24 @@ function bindDiscoverRefresh() {
   const btn = document.getElementById('discoverRefreshBtn');
   if (!btn) return;
   btn.addEventListener('click', ()=>{
+    const currentCount = allEntries.filter(e=>e.user_id===currentUser.id && e.type==='movie').length;
+
+    if (currentCount === discoverRatedCount) {
+      discoverRefreshStreak++;
+    } else {
+      discoverRatedCount = currentCount;
+      discoverRefreshStreak = 0;
+      discoverHistoryBatches = [];
+      discoverLastShownIds = [];
+    }
+
+    if (discoverRefreshStreak >= 3) {
+      discoverRefreshStreak = 0;
+      discoverHistoryBatches = [];
+      discoverLastShownIds = [];
+    }
+
     discoverCache.recommend = null;
-    discoverPage.recommend = 1;
     discoverLastRefresh = Date.now();
     updateRefreshUI();
     renderDiscover();
@@ -2507,7 +2533,14 @@ function updateRefreshUI() {
     }
   } else {
     btn.disabled = false;
-    hint.textContent = '';
+    const ratedCount = allEntries.filter(e=>e.user_id===currentUser?.id && e.type==='movie').length;
+    const uname = getUserName(currentUser?.id);
+    const targetName = uname === 'ceci' ? 'FD' : 'ceci';
+    if (ratedCount < 100 && ratedCount >= 25) {
+      hint.textContent = `评价100部，${targetName}将为你精心推荐`;
+    } else {
+      hint.textContent = '';
+    }
     if (discoverCooldownTimer) { clearInterval(discoverCooldownTimer); discoverCooldownTimer = null; }
   }
 }
@@ -2541,6 +2574,24 @@ $['discoverContent'].addEventListener('click', e=>{
   if (!tmdbId) return;
   showMovieDetail(tmdbId);
 });
+
+function selectWithFreshness(candidates, count, lastShownIds, minNewRatio) {
+  if (!lastShownIds.length) return candidates.slice(0, count);
+  const lastSet = new Set(lastShownIds);
+  const newFaces = candidates.filter(m => !lastSet.has(m.id));
+  const oldFaces = candidates.filter(m => lastSet.has(m.id));
+  const minNew = Math.ceil(count * minNewRatio);
+  if (newFaces.length >= count) {
+    return newFaces.slice(0, count);
+  }
+  // Not enough new faces — fill with old faces but ensure >= minNew new
+  const result = [...newFaces];
+  const needed = count - result.length;
+  const newNeeded = Math.max(0, minNew - result.length);
+  result.push(...oldFaces.slice(0, needed));
+  // If still short on new faces, just return what we have (extreme case)
+  return result.slice(0, count);
+}
 
 async function renderDiscover() {
   const container = $['discoverContent'];
@@ -2613,12 +2664,18 @@ async function renderDiscover() {
     return;
   }
 
-  // ── Recommend: 3-page pagination ──
-  const page = discoverPage.recommend || 1;
-  const pageSize = 20;
-  const totalPages = 3;
-  const start = (page-1)*pageSize;
-  const pageMovies = movies.slice(start, start+pageSize);
+  // ── Recommend: no pagination, dynamic count ──
+  const ratedCount = allEntries.filter(e=>e.user_id===currentUser.id && e.type==='movie').length;
+  const advanced = ratedCount >= 100;
+  const pageSize = advanced ? 24 : 12;
+
+  // Select movies ensuring freshness on refresh, or top N on first load
+  const displayMovies = discoverLastShownIds.length
+    ? selectWithFreshness(movies, pageSize, discoverLastShownIds, 0.75)
+    : movies.slice(0, pageSize);
+
+  // Track shown tmdb_ids for next refresh freshness check
+  discoverLastShownIds = displayMovies.map(m=>m.id);
 
   container.innerHTML = `
     <div class="discover-topbar">
@@ -2626,9 +2683,8 @@ async function renderDiscover() {
       <span id="discoverRefreshHint" style="font-size:0.75rem;color:var(--text2)"></span>
     </div>
     <div class="discover-grid">
-      ${pageMovies.map(m=>renderDiscoverCard(m, ratedTmdbIds)).join('')}
+      ${displayMovies.map(m=>renderDiscoverCard(m, ratedTmdbIds)).join('')}
     </div>
-    ${discoverPaginationHTML(page, totalPages)}
   `;
   bindDiscoverRefresh();
   updateRefreshUI();
@@ -2728,24 +2784,38 @@ async function loadRecommendations() {
   const scored = myMovies.map(e=>({...e, score: getEntryScore(e)})).sort((a,b)=>b.score-a.score);
   if (!scored.length) { discoverCache.recommend = []; return []; }
 
-  // ── Seed selection: 3 high-score + 2 random mid-score ──
-  const highScore = scored.filter(e=>e.score>=8).slice(0,3);
-  const midScore = scored.filter(e=>e.score>=6&&e.score<8);
-  // Weighted random: bias toward higher scores within mid-range
-  const shuffled = [...midScore].sort(()=>Math.random()-0.5);
-  const randomPicks = shuffled.slice(0,2);
-  const seeds = [...highScore, ...randomPicks];
-  // Shuffle seeds so doesn't matter order
+  const advanced = totalRated >= 100;
+
+  // ── Seed selection ──
+  let seeds, avoidSeeds = [];
+  if (advanced) {
+    // 10 seeds: 5 high-score + 3 mid-score + 2 avoid (score < 4)
+    const highScore = scored.filter(e=>e.score>=8).slice(0,5);
+    const midScore = scored.filter(e=>e.score>=6&&e.score<8);
+    const shuffledMid = [...midScore].sort(()=>Math.random()-0.5);
+    const midPicks = shuffledMid.slice(0,3);
+    const lowScore = scored.filter(e=>e.score<4);
+    const shuffledLow = [...lowScore].sort(()=>Math.random()-0.5);
+    avoidSeeds = shuffledLow.slice(0,2);
+    seeds = [...highScore, ...midPicks];
+  } else {
+    // 5 seeds: 3 high-score + 2 random mid-score (original logic)
+    const highScore = scored.filter(e=>e.score>=8).slice(0,3);
+    const midScore = scored.filter(e=>e.score>=6&&e.score<8);
+    const shuffled = [...midScore].sort(()=>Math.random()-0.5);
+    const randomPicks = shuffled.slice(0,2);
+    seeds = [...highScore, ...randomPicks];
+  }
   seeds.sort(()=>Math.random()-0.5);
 
-  // ── Fetch genre info for seed movies (parallel) ──
+  // ── Fetch genre info for all seeds (parallel) ──
   const seedGenres = {};
-  await Promise.all(seeds.map(async seed=>{
+  const allSeeds = [...seeds, ...avoidSeeds];
+  await Promise.all(allSeeds.map(async seed=>{
     try {
       const r = await fetch(`https://api.themoviedb.org/3/movie/${seed.tmdb_id}?api_key=${TMDB_KEY}&language=zh-CN`);
       const d = await r.json();
       seedGenres[seed.tmdb_id] = (d.genres||[]).map(g=>g.id);
-      // Attach to seed for later use
       seed._fetchedGenres = seedGenres[seed.tmdb_id];
     } catch(e){ seed._fetchedGenres = []; }
   }));
@@ -2753,7 +2823,45 @@ async function loadRecommendations() {
   const userGenreSig = new Set();
   Object.values(seedGenres).forEach(arr=>arr.forEach(g=>userGenreSig.add(g)));
 
-  // ── 3-route candidate collection ──
+  // Build avoid-seed genre set (movies similar to these get penalized)
+  const avoidGenreSet = new Set();
+  avoidSeeds.forEach(s=>{ if(s._fetchedGenres) s._fetchedGenres.forEach(g=>avoidGenreSet.add(g)); });
+
+  // ── Advanced: build user profile from all rated movies ──
+  let topDirectors = [], decadeProfile = {};
+  if (advanced) {
+    // Fetch genre info for a sample of top-rated movies to build profile
+    const topRated = scored.filter(e=>e.tmdb_id).slice(0, 30);
+    const directorCount = {};
+    const decadeScores = {};
+    await Promise.all(topRated.map(async e=>{
+      try {
+        const r = await fetch(`https://api.themoviedb.org/3/movie/${e.tmdb_id}?api_key=${TMDB_KEY}&language=zh-CN`);
+        const d = await r.json();
+        // Track directors
+        if (d.credits?.crew) {
+          const dirs = d.credits.crew.filter(c=>c.job==='Director').map(c=>c.name);
+          dirs.forEach(name=>{ directorCount[name] = (directorCount[name]||0) + 1; });
+        }
+        // Track decade preferences
+        const yr = parseInt((d.release_date||'').slice(0,4));
+        if (yr) {
+          const decade = Math.floor(yr/10)*10;
+          if (!decadeScores[decade]) decadeScores[decade] = { total: 0, count: 0 };
+          decadeScores[decade].total += e.score;
+          decadeScores[decade].count++;
+        }
+        // Also aggregate genre info from more movies for richer userGenreSig
+        (d.genres||[]).forEach(g=>userGenreSig.add(g.id));
+      } catch(e){}
+    }));
+    topDirectors = Object.entries(directorCount).sort((a,b)=>b[1]-a[1]).slice(0,5).map(e=>e[0]);
+    for (const [dec, v] of Object.entries(decadeScores)) {
+      decadeProfile[dec] = v.count ? v.total / v.count : 5;
+    }
+  }
+
+  // ── Candidate collection ──
   const allRecs = [];
   const seen = new Set();
   const ratedKeys = new Set(allEntries.filter(e=>e.user_id===currentUser.id && e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
@@ -2769,12 +2877,19 @@ async function loadRecommendations() {
   };
 
   for (const seed of seeds) {
-    // Route 1: recommendations
+    // Route 1: recommendations (2 pages in advanced mode)
     try {
       const r1 = await fetch(`https://api.themoviedb.org/3/movie/${seed.tmdb_id}/recommendations?api_key=${TMDB_KEY}&language=zh-CN&page=1`);
       const d1 = await r1.json();
       if (d1.results) addRecs(d1.results, seed);
     } catch(e){}
+    if (advanced) {
+      try {
+        const r1b = await fetch(`https://api.themoviedb.org/3/movie/${seed.tmdb_id}/recommendations?api_key=${TMDB_KEY}&language=zh-CN&page=2`);
+        const d1b = await r1b.json();
+        if (d1b.results) addRecs(d1b.results, seed);
+      } catch(e){}
+    }
     // Route 2: similar
     try {
       const r2 = await fetch(`https://api.themoviedb.org/3/movie/${seed.tmdb_id}/similar?api_key=${TMDB_KEY}&language=zh-CN&page=1`);
@@ -2784,23 +2899,28 @@ async function loadRecommendations() {
   }
 
   // Route 3: genre-based discovery
-  // Determine user's top genres from all rated movies' genre_ids
-  const allGenreVotes = {};
-  // We don't have genre_ids stored per entry, so instead fetch top-rated seeds' genres
-  // and use them as basis. Alternatively: use the fact that TMDB returns genre_ids with search/results.
-  // For simplicity: use a broad discover. A future enhancement can store genre_ids on entries.
   try {
     const dRes = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&language=zh-CN&sort_by=vote_average.desc&vote_count.gte=200&page=1`);
     const dData = await dRes.json();
     if (dData.results) addRecs(dData.results, null);
   } catch(e){}
 
+  // Route 4 (advanced): director filmography discovery
+  if (advanced && topDirectors.length) {
+    for (const dir of topDirectors.slice(0, 3)) {
+      try {
+        const sr = await fetch(`https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&language=zh-CN&query=${encodeURIComponent(dir)}&page=1`);
+        const sd = await sr.json();
+        if (sd.results) addRecs(sd.results, null);
+      } catch(e){}
+    }
+  }
+
   if (!allRecs.length) { discoverCache.recommend = []; return []; }
 
-  // ── Exploration: every 3rd visit, inject 20% unseen-genre films ──
+  // ── Exploration bonus ──
   discoverVisitCount.recommend = (discoverVisitCount.recommend||0)+1;
   if (discoverVisitCount.recommend % 3 === 0) {
-    // Boost films with genres outside user's comfort zone
     allRecs.forEach(r=>{
       const recGenres = r.genre_ids||[];
       r._exploreBonus = recGenres.some(g=>!userGenreSig.has(g)) ? 0.3 : 0;
@@ -2829,18 +2949,56 @@ async function loadRecommendations() {
       genreMatch = Math.min(matchCount/(r._sourceGenres.length||1), 1);
     }
 
-    r._score =
-      0.25 * voteNorm +
-      0.20 * sourceScoreNorm +
-      0.40 * genreMatch +
-      0.10 * popNorm +
-      0.05 * freshnessBonus +
-      exploreBonus;
+    if (advanced) {
+      // Decade preference
+      let decadeBonus = 0;
+      if (releaseYear) {
+        const decade = Math.floor(releaseYear/10)*10;
+        if (decadeProfile[decade] !== undefined) {
+          decadeBonus = Math.min(decadeProfile[decade] / 10, 1);
+        } else {
+          decadeBonus = 0.3;
+        }
+      }
+
+      // Avoid penalty: penalize if similar to disliked movies
+      let avoidPenalty = 0;
+      if (avoidSeeds.length && r.genre_ids) {
+        for (const as of avoidSeeds) {
+          if (!as._fetchedGenres || !as._fetchedGenres.length) continue;
+          const avoidSet = new Set(as._fetchedGenres);
+          const overlap = r.genre_ids.filter(g=>avoidSet.has(g)).length;
+          const overlapRatio = overlap / (as._fetchedGenres.length||1);
+          if (overlapRatio > 0.5) {
+            avoidPenalty = Math.max(avoidPenalty, 0.15 * overlapRatio);
+          }
+        }
+      }
+
+      r._score =
+        0.35 * genreMatch +
+        0.20 * voteNorm +
+        0.15 * sourceScoreNorm +
+        0.15 * decadeBonus +
+        0.10 * popNorm +
+        0.05 * freshnessBonus +
+        exploreBonus -
+        avoidPenalty;
+    } else {
+      r._score =
+        0.40 * genreMatch +
+        0.25 * voteNorm +
+        0.20 * sourceScoreNorm +
+        0.10 * popNorm +
+        0.05 * freshnessBonus +
+        exploreBonus;
+    }
   });
 
   // Sort by computed score
   allRecs.sort((a,b)=>b._score-a._score);
-  discoverCache.recommend = allRecs.slice(0, 60);
+  const poolSize = advanced ? 60 : 30;
+  discoverCache.recommend = allRecs.slice(0, poolSize);
   return discoverCache.recommend;
 }
 

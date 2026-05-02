@@ -2401,21 +2401,26 @@ $['discoverContent'].addEventListener('click', e=>{
 
 async function renderDiscover() {
   const container = $['discoverContent'];
+  const tab = discoverTab; // snapshot — prevents mid-load tab switch from corrupting output
   container.innerHTML = '<div class="discover-spinner"><div class="spinner"></div></div>';
 
   let movies = [];
   try {
-    if (discoverTab === 'recommend') {
+    if (tab === 'recommend') {
       movies = await loadRecommendations();
-    } else if (discoverTab === 'week') {
+    } else if (tab === 'week') {
       movies = await loadTrending();
     } else {
       movies = await loadTopRated();
     }
   } catch(e) {
-    container.innerHTML = '<div class="empty-state"><p>加载失败，请稍后重试</p></div>';
+    // Only render error if tab hasn't changed since we started
+    if (discoverTab === tab) container.innerHTML = '<div class="empty-state"><p>加载失败，请稍后重试</p></div>';
     return;
   }
+
+  // Discard stale result if user already switched to a different sub-tab
+  if (discoverTab !== tab) return;
 
   if (movies === null) {
     container.innerHTML = `<div class="empty-state"><p style="font-size:2rem">🎬</p><p>评价 ${25} 部以上电影后</p><p>Ceci 会为你生成个性化推荐</p><p style="font-size:0.8rem;color:var(--text2);margin-top:8px">当前已评价 ${allEntries.filter(e=>e.user_id===currentUser.id && e.type==='movie').length} 部</p></div>`;
@@ -2433,7 +2438,7 @@ async function renderDiscover() {
   const ratedTmdbIds = new Set(allEntries.filter(e=>e.user_id===currentUser.id && e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
 
   // ── Week: show all 32, no pagination ──
-  if (discoverTab === 'week') {
+  if (tab === 'week') {
     container.innerHTML = `
       <div class="discover-topbar"><span class="topbar-count">共 ${movies.length} 部</span></div>
       <div class="discover-grid">
@@ -2444,7 +2449,7 @@ async function renderDiscover() {
   }
 
   // ── TopRated: default show full list + toggle filter ──
-  if (discoverTab === 'toprated') {
+  if (tab === 'toprated') {
     const filteredMovies = topratedFilterUnwatched ? movies.filter(m=>!ratedTmdbIds.has('tmdb_'+m.id)) : movies;
     const page = discoverPage.toprated || 1;
     const pageSize = 20;

@@ -411,7 +411,7 @@
 
   /* ── Responsive ── */
   @media (max-width: 640px) {
-    .discover-grid { grid-template-columns: 1fr; }
+    .discover-grid { grid-template-columns: repeat(2, 1fr); }
     .dc-poster-wrap { padding-top: 120%; }
     .form-row, .form-row-3 { grid-template-columns: 1fr; }
     .movie-card { flex-wrap: wrap; padding: 10px 12px; gap: 8px; }
@@ -550,8 +550,8 @@
   <nav role="tablist" aria-label="主导航">
     <button class="active" data-tab="rate" role="tab" aria-selected="true" aria-label="添加评价">添加评价</button>
     <button data-tab="list" role="tab" aria-selected="false" aria-label="影单">影单</button>
-    <button data-tab="stats" role="tab" aria-selected="false" aria-label="统计分析">统计分析</button>
     <button data-tab="discover" role="tab" aria-selected="false" aria-label="发现好片">发现</button>
+    <button data-tab="stats" role="tab" aria-selected="false" aria-label="统计分析">统计分析</button>
   </nav>
 
   <main>
@@ -662,6 +662,17 @@
       </div>
     </section>
 
+    <!-- ═══ 发现 ═══ -->
+    <section class="tab-panel" id="panel-discover">
+      <h2 class="section-title">发现好片</h2>
+      <div class="discover-subtabs" id="discoverSubtabs">
+        <button class="active" data-dt="recommend" id="discoverRecTab">Ceci推荐</button>
+        <button data-dt="week">本周热门</button>
+        <button data-dt="toprated">Top100</button>
+      </div>
+      <div id="discoverContent"></div>
+    </section>
+
     <!-- ═══ 统计 ═══ -->
     <section class="tab-panel" id="panel-stats">
       <h2 class="section-title">统计概览</h2>
@@ -687,17 +698,6 @@
           <input type="file" id="importFile" accept=".json" style="display:none">
         </div>
       </div>
-    </section>
-
-    <!-- ═══ 发现 ═══ -->
-    <section class="tab-panel" id="panel-discover">
-      <h2 class="section-title">发现好片</h2>
-      <div class="discover-subtabs" id="discoverSubtabs">
-        <button class="active" data-dt="recommend" id="discoverRecTab">Ceci推荐</button>
-        <button data-dt="week">本周热门</button>
-        <button data-dt="toprated">Top100</button>
-      </div>
-      <div id="discoverContent"></div>
     </section>
   </main>
 </div>
@@ -1121,6 +1121,7 @@ $['nameSaveBtn'].addEventListener('click', async ()=>{
   currentProfile = { user_id: currentUser.id, display_name: name };
   nameOverlay.classList.remove('open');
   $['headerUser'].textContent = name;
+  $['headerUser'].style.color = getUserColor(currentUser.id).main;
   await loadAllData();
   subscribeToRealtime();
   $['inviteMenuBtn'].classList.toggle('hidden', name.toLowerCase() !== 'fank1ng' && name.toLowerCase() !== 'ceci');
@@ -1136,6 +1137,7 @@ async function initApp(user) {
   if (pref) {
     currentProfile = pref;
     $['headerUser'].textContent = pref.display_name;
+    $['headerUser'].style.color = getUserColor(user.id).main;
     nameOverlay.classList.remove('open');
     updateRecTabLabel();
     checkMigration();
@@ -1148,6 +1150,7 @@ async function initApp(user) {
     $['nameInput'].value = user.user_metadata?.display_name || user.email?.split('@')[0] || '';
     nameOverlay.classList.add('open');
     $['headerUser'].textContent = '...';
+    $['headerUser'].style.color = getUserColor(user.id).main;
   }
 }
 
@@ -1935,7 +1938,7 @@ function renderList() {
         let act = '';
         if (showActions) {
           act = `<div class="mc-actions" onclick="event.stopPropagation()" style="margin-left:auto">
-            <button class="btn btn-sm btn-secondary" onclick="editEntry('${e.id}')" aria-label="编辑 ${esc(allProfiles[e.user_id]?.display_name||'')} 的评价">编辑</button>
+            <button class="btn btn-sm btn-secondary" onclick="${e.type==='series' ? `editEntry('${e.id}')` : `openQuickEdit('${e.id}')`}" aria-label="编辑 ${esc(allProfiles[e.user_id]?.display_name||'')} 的评价">编辑</button>
             <button class="btn btn-sm btn-danger" onclick="deleteEntry('${e.id}')" aria-label="删除 ${esc(allProfiles[e.user_id]?.display_name||'')} 的评价">删除</button>
           </div>`;
         }
@@ -1997,7 +2000,7 @@ function renderList() {
       let cardActionsHtml = '';
       const myEntryInGroup = group.find(e=>e.user_id===currentUser.id);
       if (myEntryInGroup) {
-        cardActionsHtml = `<div class="mc-actions-mobile" onclick="event.stopPropagation()"><button class="btn btn-sm btn-secondary" onclick="editEntry('${myEntryInGroup.id}')" aria-label="编辑我的评价">编辑</button><button class="btn btn-sm btn-danger" onclick="deleteEntry('${myEntryInGroup.id}')" aria-label="删除我的评价">删除</button></div>`;
+        cardActionsHtml = `<div class="mc-actions-mobile" onclick="event.stopPropagation()"><button class="btn btn-sm btn-secondary" onclick="${myEntryInGroup.type==='series' ? `editEntry('${myEntryInGroup.id}')` : `openQuickEdit('${myEntryInGroup.id}')`}" aria-label="编辑我的评价">编辑</button><button class="btn btn-sm btn-danger" onclick="deleteEntry('${myEntryInGroup.id}')" aria-label="删除我的评价">删除</button></div>`;
       } else {
         const firstOther = group.find(e=>e.user_id!==currentUser.id);
         if (firstOther) cardActionsHtml = `<div class="mc-actions-mobile" onclick="event.stopPropagation()"><button class="btn btn-sm btn-secondary" onclick="addMyRating('${firstOther.id}')" aria-label="添加我的评分">＋我的评分</button></div>`;
@@ -2059,7 +2062,7 @@ function renderList() {
           </div>
           ${isMine ? `
           <div class="mc-actions-mobile" onclick="event.stopPropagation()">
-            <button class="btn btn-sm btn-secondary" onclick="editEntry('${main.id}')" aria-label="编辑 ${esc(ownerName)} 的评价">编辑</button>
+            <button class="btn btn-sm btn-secondary" onclick="${main.type==='series' ? `editEntry('${main.id}')` : `openQuickEdit('${main.id}')`}" aria-label="编辑 ${esc(ownerName)} 的评价">编辑</button>
             <button class="btn btn-sm btn-danger" onclick="deleteEntry('${main.id}')" aria-label="删除 ${esc(ownerName)} 的评价">删除</button>
           </div>` : `
           <div class="mc-actions-mobile" onclick="event.stopPropagation()">
@@ -2170,7 +2173,7 @@ async function showDetail(id) {
     ` : ''}
     ${entry.tmdb_id ? `<div class="tmdb-section" id="tmdbDetail-${entry.id}"><div class="detail-spinner"></div> 加载电影详情...</div>` : ''}
     <div class="btn-group" style="justify-content:flex-end">
-      ${isMine ? `<button class="btn btn-secondary btn-sm" onclick="editEntry('${entry.id}');closeModal()">编辑</button>` : ''}
+      ${isMine ? `<button class="btn btn-secondary btn-sm" onclick="${entry.type==='series' ? `editEntry('${entry.id}');closeModal()` : `openQuickEdit('${entry.id}');closeModal()`}">编辑</button>` : ''}
       <button class="btn btn-secondary btn-sm" onclick="closeModal()">关闭</button>
     </div>
   `;
@@ -2463,6 +2466,7 @@ let discoverLastRefresh = 0;
 let discoverCooldownTimer = null;
 let discoverMovieMap = {};
 let quickRateMovie = null;
+let quickEditEntryId = null;
 let discoverRatedCount = 0;
 let discoverRefreshStreak = 0;
 let discoverLastShownIds = [];
@@ -3055,10 +3059,27 @@ async function loadTopRated() {
 function openQuickRate(movie) {
   const year = movie.year || (movie.release_date||'').slice(0,4) || null;
   quickRateMovie = { tmdb_id: movie.id||movie.tmdb_id, title: movie.title, year, poster_path: movie.poster_path };
+  quickEditEntryId = null;
   $['qrTitle'].textContent = '评价 ' + movie.title;
   $['qrDims'].innerHTML = buildDimSliders('qr', {});
   $['qrTotalScore'].textContent = '5.0';
   $['qrComment'].value = '';
+  $['qrSubmit'].textContent = '提交评价';
+  bindDimSliders('qr');
+  updateQrTotal();
+  $['quickRateModal'].classList.add('open');
+}
+
+function openQuickEdit(id) {
+  const entry = allEntries.find(e=>e.id===id);
+  if (!entry) return;
+  quickEditEntryId = id;
+  quickRateMovie = { tmdb_id: entry.tmdb_id, title: entry.title, year: entry.year, poster_path: entry.poster_path };
+  $['qrTitle'].textContent = '编辑 ' + entry.title;
+  $['qrDims'].innerHTML = buildDimSliders('qr', entry.ratings||{});
+  $['qrTotalScore'].textContent = getEntryScore(entry).toFixed(1);
+  $['qrComment'].value = entry.comment||'';
+  $['qrSubmit'].textContent = '更新评价';
   bindDimSliders('qr');
   updateQrTotal();
   $['quickRateModal'].classList.add('open');
@@ -3094,43 +3115,56 @@ $['qrSubmit'].addEventListener('click', async ()=>{
   });
   const comment = $['qrComment'].value.trim();
   const total = calcTotal(ratings);
+  const isEdit = !!quickEditEntryId;
 
-  // Duplicate check
-  const dupKey = getGroupKey({tmdb_id: quickRateMovie.tmdb_id, title: quickRateMovie.title, year: quickRateMovie.year});
-  if (allEntries.some(e=>e.user_id===currentUser.id && getGroupKey(e)===dupKey)) {
-    toast('你已评价过该作品');
-    return;
+  // Duplicate check (skip in edit mode — editing own entry is always allowed)
+  if (!isEdit) {
+    const dupKey = getGroupKey({tmdb_id: quickRateMovie.tmdb_id, title: quickRateMovie.title, year: quickRateMovie.year});
+    if (allEntries.some(e=>e.user_id===currentUser.id && getGroupKey(e)===dupKey)) {
+      toast('你已评价过该作品');
+      return;
+    }
   }
 
   const btn = $['qrSubmit'];
   const origText = btn.textContent;
   btn.textContent = '保存中...'; btn.disabled = true;
 
-  const entryData = {
-    user_id: currentUser.id,
-    type: 'movie',
-    tmdb_id: quickRateMovie.tmdb_id || null,
-    title: quickRateMovie.title,
-    year: quickRateMovie.year || null,
-    poster_path: quickRateMovie.poster_path || '',
-    ratings,
-    total_score: total,
-    comment,
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString()
-  };
+  let error;
+  if (isEdit) {
+    const {error: updateErr} = await db.from('entries').update({
+      ratings, total_score: total, comment,
+      updated_at: new Date().toISOString()
+    }).eq('id', quickEditEntryId);
+    error = updateErr;
+  } else {
+    const entryData = {
+      user_id: currentUser.id,
+      type: 'movie',
+      tmdb_id: quickRateMovie.tmdb_id || null,
+      title: quickRateMovie.title,
+      year: quickRateMovie.year || null,
+      poster_path: quickRateMovie.poster_path || '',
+      ratings,
+      total_score: total,
+      comment,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    const {error: insertErr} = await db.from('entries').insert(entryData);
+    error = insertErr;
+  }
 
-  const {error} = await db.from('entries').insert(entryData);
   if (error) {
     toast('保存失败: ' + error.message);
     btn.textContent = origText; btn.disabled = false;
     return;
   }
 
-  toast('评价已保存！');
+  toast(isEdit ? '评价已更新！' : '评价已保存！');
   $['quickRateModal'].classList.remove('open');
-  const savedMovie = quickRateMovie;
   quickRateMovie = null;
+  quickEditEntryId = null;
   btn.textContent = origText; btn.disabled = false;
   const wasOnDiscover = getActiveTab()==='discover';
   skipListRender = true;
@@ -3138,11 +3172,10 @@ $['qrSubmit'].addEventListener('click', async ()=>{
   skipListRender = false;
   if (wasOnDiscover) {
     discoverCache = { recommend: null, week: null, toprated: null };
+    renderActiveTab();
+  } else {
+    renderActiveTab();
   }
-  const dk = getGroupKey({tmdb_id: savedMovie.tmdb_id, title: savedMovie.title, year: savedMovie.year});
-  const newEntry = allEntries.find(e=>e.user_id===currentUser.id && getGroupKey(e)===dk);
-  if (newEntry) locateAndGoToList(newEntry.id);
-  switchTab('list');
 });
 
 // ===== TABS =====

@@ -970,7 +970,7 @@ function toast(msg) {
 
 // ── Shared helpers ──
 function getGroupKey(e) { return e.tmdb_id ? 'tmdb_'+e.tmdb_id : 'title_'+e.title.toLowerCase().trim()+'_'+(e.year||0); }
-function getUserName(uid) { return (allProfiles[uid]?.display_name||'').toLowerCase(); }
+function getUserName(uid) { return (allProfiles[uid]?.display_name||currentProfile?.user_id===uid&&currentProfile?.display_name||'').toLowerCase(); }
 const isPrivileged = () => ['fank1ng','ceci'].includes((currentProfile?.display_name||'').toLowerCase());
 
 // ===== AUTH BUTTONS =====

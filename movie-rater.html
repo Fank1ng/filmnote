@@ -2074,37 +2074,7 @@ function renderList() {
   }).join('');
   // ── Pagination
   const totalPages = Math.ceil(groups.length / listPageSize);
-  if (totalPages > 1) {
-    let pagesHtml = '';
-    let pageNums = [];
-    if (totalPages <= 7) {
-      for (let i = 1; i <= totalPages; i++) pageNums.push(i);
-    } else {
-      pageNums.push(1);
-      if (listPageNum > 3) pageNums.push('...');
-      for (let i = Math.max(2, listPageNum - 1); i <= Math.min(totalPages - 1, listPageNum + 1); i++) {
-        pageNums.push(i);
-      }
-      if (listPageNum < totalPages - 2) pageNums.push('...');
-      pageNums.push(totalPages);
-    }
-    if (listPageNum > 1) {
-      pagesHtml += `<button data-lp-pg="${listPageNum-1}">‹</button>`;
-    }
-    pageNums.forEach(p => {
-      if (p === '...') {
-        pagesHtml += '<span style="color:var(--text2);padding:0 6px">…</span>';
-      } else if (p === listPageNum) {
-        pagesHtml += `<button class="active" disabled>${p}</button>`;
-      } else {
-        pagesHtml += `<button data-lp-pg="${p}">${p}</button>`;
-      }
-    });
-    if (listPageNum < totalPages) {
-      pagesHtml += `<button data-lp-pg="${listPageNum+1}">›</button>`;
-    }
-    container.innerHTML += `<div class="list-pages">${pagesHtml}</div>`;
-  }
+  container.innerHTML += buildPaginationHTML(listPageNum, totalPages, 'data-lp-pg', 'list-pages');
 }
 
 // ===== DETAIL MODAL =====
@@ -2734,16 +2704,38 @@ $['movieList'].addEventListener('click', e=>{
   window.scrollTo({top:0,behavior:'smooth'});
 });
 
-function discoverPaginationHTML(page, totalPages) {
-  if (totalPages <= 1) return '';
-  let html = '<div class="discover-pages">';
-  html += `<button data-pg="${page-1}" ${page<=1?'disabled':''}>◀</button>`;
-  for (let i=1; i<=totalPages; i++) {
-    html += `<button data-pg="${i}" class="${i===page?'active':''}">${i}</button>`;
+function buildPaginationHTML(cp, total, attr, cls) {
+  // attr: button data attribute (e.g. 'data-lp-pg' or 'data-pg')
+  // cls: container class (e.g. 'list-pages' or 'discover-pages')
+  if (total <= 1) return '';
+  const nums = [];
+  if (total <= 5) {
+    for (let i=1; i<=total; i++) nums.push(i);
+  } else {
+    nums.push(1);
+    let start, end;
+    if (cp <= 3) { start=2; end=4; }
+    else if (cp >= total-2) { start=total-3; end=total-1; }
+    else { start=cp-1; end=cp+1; }
+    if (start > 2) nums.push('...');
+    for (let i=start; i<=end; i++) nums.push(i);
+    if (end < total-1) nums.push('...');
+    nums.push(total);
   }
-  html += `<button data-pg="${page+1}" ${page>=totalPages?'disabled':''}>▶</button>`;
+  let html = `<div class="${cls}">`;
+  html += `<button ${attr}="${cp-1}" ${cp<=1?'disabled':''}>‹</button>`;
+  nums.forEach(n=>{
+    if (n==='...') html += '<span style="color:var(--text2);padding:0 4px">…</span>';
+    else if (n===cp) html += `<button class="active" disabled>${n}</button>`;
+    else html += `<button ${attr}="${n}">${n}</button>`;
+  });
+  html += `<button ${attr}="${cp+1}" ${cp>=total?'disabled':''}>›</button>`;
   html += '</div>';
   return html;
+}
+
+function discoverPaginationHTML(page, totalPages) {
+  return buildPaginationHTML(page, totalPages, 'data-pg', 'discover-pages');
 }
 
 function renderDiscoverCard(m, ratedTmdbIds) {
@@ -3016,21 +3008,15 @@ async function loadRecommendations() {
 async function loadTrending() {
   if (discoverCache.week) return discoverCache.week;
 
-  const ratedKeys = new Set(allEntries.filter(e=>e.user_id===currentUser.id && e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
   const results = [];
   try {
-    // Fetch 2 pages to have enough after filtering
-    for (let page=1; page<=2; page++) {
-      const res = await fetch(`https://api.themoviedb.org/3/trending/movie/week?api_key=${TMDB_KEY}&language=zh-CN&page=${page}`);
-      const data = await res.json();
-      if (data.results) {
-        data.results.forEach(r=>{
-          if (!ratedKeys.has('tmdb_'+r.id)) results.push(r);
-        });
-      }
-    }
+    const res = await fetch(`https://api.themoviedb.org/3/trending/movie/week?api_key=${TMDB_KEY}&language=zh-CN`);
+    const data = await res.json();
+    if (data.results) results.push(...data.results);
   } catch(e) { return []; }
-  discoverCache.week = results.slice(0, 32);
+  // Sort by popularity descending, take top 12
+  results.sort((a,b)=>(b.popularity||0)-(a.popularity||0));
+  discoverCache.week = results.slice(0, 12);
   return discoverCache.week;
 }
 

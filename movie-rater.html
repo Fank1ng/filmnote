@@ -2056,6 +2056,7 @@ function renderList() {
                 <span class="mc-dim-user" style="color:${uc.main}">${esc(ownerName)}</span>
                 <span class="mc-dim-dots">${dimTags(main, uc)}</span>
                 <span class="mc-dim-total" style="color:${uc.main}">总分 ${getEntryScore(main).toFixed(1)}</span>
+                ${isMine ? `<div class="mc-actions" onclick="event.stopPropagation()" style="margin-left:auto"><button class="btn btn-sm btn-secondary" onclick="${main.type==='series' ? `editEntry('${main.id}')` : `openQuickEdit('${main.id}')`}" aria-label="编辑 ${esc(ownerName)} 的评价">编辑</button><button class="btn btn-sm btn-danger" onclick="deleteEntry('${main.id}')" aria-label="删除 ${esc(ownerName)} 的评价">删除</button></div>` : `<div class="mc-actions" onclick="event.stopPropagation()" style="margin-left:auto"><button class="btn btn-sm btn-secondary" onclick="addMyRating('${main.id}')" aria-label="添加我对 ${esc(main.title)} 的评分">＋我的评分</button></div>`}
               </div>
             </div>
             ${main.comment ? `<div class="mc-comment">${esc(main.comment)}</div>` : ''}

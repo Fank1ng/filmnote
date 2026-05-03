@@ -35,6 +35,14 @@
 - **手机端发现页双列布局**
 - **Realtime CLOSED 自动重连**：断线3秒重试
 
+### 分页 & 本周热门优化
+- **页码最多显示5个**：提取共享 `buildPaginationHTML` 函数，滑动窗口+省略号，影单和发现页统一
+- **本周热门改为热度Top12**：取 trending API 第1页，按 popularity 降序排列，不过滤已评价电影
+
+### Bug 修复
+- 修复单条目卡片桌面端编辑/删除/＋我的评分按钮缺失（仅 .mc-actions-mobile 在桌面端被隐藏）
+- 修复 initApp 阶段 getUserName 查不到当前用户导致右上角用户名显示为普通色（增加 currentProfile 回退）
+
 ---
 
 ## 2026-05-02

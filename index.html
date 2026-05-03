@@ -1332,7 +1332,7 @@ function subscribeToRealtime() {
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') console.log('Realtime: connected');
         if (status === 'CHANNEL_ERROR') { console.warn('Realtime error, retrying...'); realtimeChannel = null; setTimeout(subscribeToRealtime, 3000); }
-        if (status === 'CLOSED') { realtimeChannel = null; }
+        if (status === 'CLOSED') { realtimeChannel = null; setTimeout(subscribeToRealtime, 3000); }
       });
   } catch(e) {
     console.warn('Realtime subscription failed:', e.message);
@@ -2026,12 +2026,17 @@ function renderList() {
         </div>
       `;
     } else {
-      // Single entry
+      // Single entry — use same component styles as merged card
       const ownerName = allProfiles[main.user_id]?.display_name||'未知';
+      const uc = getUserColor(main.user_id);
       return `
         <div class="movie-card" id="entry-${main.id}" onclick="showDetail('${main.id}')" aria-label="${esc(main.title)} - ${esc(ownerName)} ${getEntryScore(main).toFixed(1)}分">
           ${main.poster_path ? `<img class="mc-poster" src="${posterUrl(main.poster_path)}" alt="">` : '<div class="mc-poster"></div>'}
-          <div class="mc-scores-compare"><div class="mc-score" style="border-color:${getUserColor(main.user_id).main};background:${getUserColor(main.user_id).dim};color:${getUserColor(main.user_id).main}">${getEntryScore(main).toFixed(1)}</div></div>
+          <div class="mc-scores-compare">
+            <div class="mc-score-sm mc-score-${uc.key}" title="${esc(ownerName)}">
+              <span class="mc-score-label">${esc(ownerName)}</span>${getEntryScore(main).toFixed(1)}
+            </div>
+          </div>
           <div class="mc-info">
             <div class="mc-title">
               ${esc(main.title)}
@@ -2040,22 +2045,24 @@ function renderList() {
             </div>
             <div class="mc-meta">
               ${main.director ? esc(main.director)+' · ':''}${fmtDate(main.created_at)}
-              ${!isMine ? `<span class="mc-owner" style="color:${getUserColor(main.user_id).main};background:${getUserColor(main.user_id).dim}">${esc(ownerName)}</span>` : ''}
+              ${!isMine ? `<span class="mc-owner" style="color:${uc.main};background:${uc.dim}">${esc(ownerName)}</span>` : ''}
               ${seasonCount>0 ? `<span class="mc-season-badge">S1-S${seasonCount}</span>` : ''}
             </div>
-            <div class="mc-dim-scores">
-              <span class="mc-dim-user" style="color:${getUserColor(main.user_id).main}">${esc(ownerName)}</span>
-              <span class="mc-dim-dots">${dimOrder.map(dim=>`<span class="mc-dim-item" style="border-color:${getUserColor(main.user_id).main}"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${getUserColor(main.user_id).main}">${(main.ratings||{})[dim]||5}</span></span>`).join('')}</span>
-              <span class="mc-dim-total" style="color:${getUserColor(main.user_id).main}">总分 ${getEntryScore(main).toFixed(1)}</span>
+            <div class="mc-dim-scores" style="flex-direction:column;gap:2px">
+              <div class="mc-dim-row-user" style="display:flex;align-items:center;gap:6px;padding:2px 0">
+                <span class="mc-dim-user" style="color:${uc.main}">${esc(ownerName)}</span>
+                <span class="mc-dim-dots">${dimTags(main, uc)}</span>
+                <span class="mc-dim-total" style="color:${uc.main}">总分 ${getEntryScore(main).toFixed(1)}</span>
+              </div>
             </div>
             ${main.comment ? `<div class="mc-comment">${esc(main.comment)}</div>` : ''}
           </div>
           ${isMine ? `
-          <div class="mc-actions" onclick="event.stopPropagation()">
+          <div class="mc-actions-mobile" onclick="event.stopPropagation()">
             <button class="btn btn-sm btn-secondary" onclick="editEntry('${main.id}')" aria-label="编辑 ${esc(ownerName)} 的评价">编辑</button>
             <button class="btn btn-sm btn-danger" onclick="deleteEntry('${main.id}')" aria-label="删除 ${esc(ownerName)} 的评价">删除</button>
           </div>` : `
-          <div class="mc-actions" onclick="event.stopPropagation()">
+          <div class="mc-actions-mobile" onclick="event.stopPropagation()">
             <button class="btn btn-sm btn-secondary" onclick="addMyRating('${main.id}')" aria-label="添加我对 ${esc(main.title)} 的评分">＋我的评分</button>
           </div>`}
         </div>
@@ -2107,7 +2114,12 @@ async function showDetail(id) {
 
   // Find friend ratings using same group key as renderList
   const entryKey = getGroupKey(entry);
-  const friendEntries = allEntries.filter(e=>e.id!==id && getGroupKey(e)===entryKey);
+  let friendEntries = allEntries.filter(e=>e.id!==id && getGroupKey(e)===entryKey);
+  // Fallback: if no tmdb_id match, try title+year for manually-added entries
+  if (!friendEntries.length && entry.tmdb_id) {
+    const titleKey = 'title_'+entry.title.toLowerCase().trim()+'_'+(entry.year||0);
+    friendEntries = allEntries.filter(e=>e.id!==id && getGroupKey(e)===titleKey);
+  }
 
   // Season ratings for this entry
   const seasons = allSeasonRatings.filter(s=>s.entry_id===id);
@@ -2121,16 +2133,11 @@ async function showDetail(id) {
         <h3 style="margin-bottom:4px">${esc(entry.title)} ${entry.year?'('+entry.year+')':''}</h3>
         ${entry.director ? `<p style="color:var(--text2);font-size:0.85rem">${esc(entry.director)}</p>` : ''}
         <p style="color:var(--text2);font-size:0.8rem">${ownerName} · ${fmtDate(entry.created_at)} ${entry.type==='series'?'· 剧集':''}</p>
-        <p style="font-size:1.8rem;font-weight:800;color:var(--gold);margin-top:4px">${getEntryScore(entry).toFixed(1)} / 10</p>
+        <p style="font-size:1.8rem;font-weight:800;color:${getUserColor(entry.user_id).main};margin-top:4px">${getEntryScore(entry).toFixed(1)} / 10</p>
       </div>
     </div>
-    <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
-      ${Object.keys(WEIGHTS).map(dim=>`
-        <div style="display:flex;justify-content:space-between;font-size:0.85rem">
-          <span>${DIM_LABELS[dim]} <span style="color:var(--text2);font-size:0.7rem">(×${(WEIGHTS[dim]*100).toFixed(0)}%)</span></span>
-          <strong style="color:var(--gold)">${(entry.ratings||{})[dim]||5}</strong>
-        </div>
-      `).join('')}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+      ${Object.keys(WEIGHTS).map(dim=>`<span class="mc-dim-item" style="border-color:${getUserColor(entry.user_id).main}"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${getUserColor(entry.user_id).main}">${(entry.ratings||{})[dim]||5}</span></span>`).join('')}
     </div>
     ${entry.comment ? `<p style="font-style:italic;color:var(--text2);margin-bottom:12px">"${esc(entry.comment)}"</p>` : ''}
     ${seasons.length ? `
@@ -2153,8 +2160,8 @@ async function showDetail(id) {
               <span class="fr-name" style="color:${getUserColor(f.user_id).main}">${esc(allProfiles[f.user_id]?.display_name||'未知')}</span>
               <span class="fr-score" style="color:${getUserColor(f.user_id).main}">${getEntryScore(f).toFixed(1)} / 10</span>
             </div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:0.75rem;color:var(--text2)">
-              ${Object.keys(WEIGHTS).map(dim=>`<span class="mc-dim-item"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val">${(f.ratings||{})[dim]||5}</span></span>`).join('')}
+            <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:0.75rem">
+              ${Object.keys(WEIGHTS).map(dim=>`<span class="mc-dim-item" style="border-color:${getUserColor(f.user_id).main}"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${getUserColor(f.user_id).main}">${(f.ratings||{})[dim]||5}</span></span>`).join('')}
             </div>
             ${f.comment ? `<p style="font-size:0.8rem;color:var(--text2);font-style:italic;margin-top:4px">"${esc(f.comment)}"</p>` : ''}
           </div>

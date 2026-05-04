@@ -2791,6 +2791,22 @@ async function loadRecommendations() {
     return null;
   }
 
+  // Worker path: offload TMDB fetching to Cloudflare edge
+  if (TMDB_PROXY) {
+    try {
+      const res = await fetch(TMDB_PROXY + '/recommend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entries: allEntries, userId: currentUser.id }),
+      });
+      const data = await res.json();
+      if (data.movies) {
+        discoverCache.recommend = data.movies;
+        return discoverCache.recommend;
+      }
+    } catch(e) { console.warn('Worker recommend fallback, using local:', e.message); }
+  }
+
   const scored = myMovies.map(e=>({...e, score: getEntryScore(e)})).sort((a,b)=>b.score-a.score);
   if (!scored.length) { discoverCache.recommend = []; return []; }
 

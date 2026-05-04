@@ -2500,7 +2500,7 @@ function updateRefreshUI() {
   const hint = document.getElementById('discoverRefreshHint');
   if (!btn || !hint) return;
   const elapsed = Math.floor((Date.now() - discoverLastRefresh) / 1000);
-  const cooldown = 15;
+  const cooldown = 5;
   if (elapsed < cooldown) {
     btn.disabled = true;
     const remain = cooldown - elapsed;

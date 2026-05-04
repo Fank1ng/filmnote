@@ -1,5 +1,23 @@
 # FD&Ceci 更新日志
 
+## 2026-05-04
+
+### Cloudflare Worker 后端
+- **TMDB API 代理**：所有 TMDB 请求通过 `filmnote.lccf1223.workers.dev` 中转，API Key 不再暴露在前端
+- **推荐算法服务端化**：`POST /recommend` 端点，Worker 并行拉取 TMDB 数据并执行评分排序，前端只需 1 次请求
+- **双层缓存**：tmdbCache（内存，24h）+ Cache API（跨实例，1h），同一用户评分不变时刷新 0 次 TMDB 调用
+- **movie-rater.html 重定向**：替换为 `index.html` 自动跳转
+
+### 体验优化
+- 推荐刷新冷却时间 15s → 5s（Worker 缓存已消除 TMDB 压力）
+
+### 架构收益
+- TMDB 限流（40次/10s）在 20 人规模下无压力
+- 推荐刷新：二次命中 <2 秒，首次仍需 4-5 秒（取决于 TMDB 响应速度）
+- 全部运行在 Cloudflare + GitHub Pages 免费额度内
+
+---
+
 ## 2026-05-03
 
 ### TMDB 详情增强

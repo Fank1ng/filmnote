@@ -736,6 +736,12 @@ const SUPABASE_URL = 'https://rkkakwmxzipxmofgrlwa.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJra2Frd214emlweG1vZmdybHdhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNjQ2NjUsImV4cCI6MjA5Mjk0MDY2NX0.r3L82v1z2QBmIkg2KbyD6S_dT0bAomIZ7cU4sS6vdNo';
 const TMDB_KEY = 'bedbd15b921f0127d7d8921337ea5a06';
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w185';
+const TMDB_PROXY = 'https://filmnote.lccf1223.workers.dev';
+function tmdbFetch(path, opts = {}) {
+  if (TMDB_PROXY) return fetch(TMDB_PROXY + '/tmdb' + path, opts);
+  const sep = path.includes('?') ? '&' : '?';
+  return fetch('https://api.themoviedb.org/3' + path + sep + 'api_key=' + TMDB_KEY, opts);
+}
 
 const WEIGHTS = { story:0.25, character:0.20, visual:0.15, editing:0.10, sound:0.10, emotion:0.20 };
 const DIM_LABELS = { story:'故事与剧本', character:'角色与表演', visual:'导演与视觉', editing:'剪辑与节奏', sound:'声音与配乐', emotion:'情感共鸣' };
@@ -1526,7 +1532,7 @@ async function searchTmdb(query) {
   tmdbAbort = new AbortController();
   try {
     const type = entryType==='series' ? 'tv' : 'movie';
-    const res = await fetch(`https://api.themoviedb.org/3/search/${type}?api_key=${TMDB_KEY}&query=${encodeURIComponent(query)}&language=zh-CN`, { signal: tmdbAbort.signal });
+    const res = await tmdbFetch(`/search/${type}?query=${encodeURIComponent(query)}&language=zh-CN`, { signal: tmdbAbort.signal });
     const data = await res.json();
     if (!data.results?.length) {
       container.innerHTML = '<div style="padding:12px;color:var(--text2);font-size:0.85rem">无结果</div>';
@@ -1564,7 +1570,7 @@ async function searchTmdb(query) {
         // Fetch director
         try {
           const type = entryType==='series' ? 'tv' : 'movie';
-          const credRes = await fetch(`https://api.themoviedb.org/3/${type}/${tmdbId}/credits?api_key=${TMDB_KEY}&language=zh-CN`);
+          const credRes = await tmdbFetch(`/${type}/${tmdbId}/credits?language=zh-CN`);
           const credData = await credRes.json();
           let director = '';
           if (entryType==='series') {
@@ -1796,8 +1802,8 @@ async function fetchTmdbDetail(tmdbId) {
   if (tmdbDetailCache[tmdbId]) return tmdbDetailCache[tmdbId];
   try {
     const [detailRes, creditRes] = await Promise.all([
-      fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${TMDB_KEY}&language=zh-CN`),
-      fetch(`https://api.themoviedb.org/3/movie/${tmdbId}/credits?api_key=${TMDB_KEY}&language=zh-CN`)
+      tmdbFetch(`/movie/${tmdbId}?language=zh-CN`),
+      tmdbFetch(`/movie/${tmdbId}/credits?language=zh-CN`)
     ]);
     if (!detailRes.ok) { tmdbDetailCache[tmdbId] = null; return null; }
     const details = await detailRes.json();
@@ -2817,7 +2823,7 @@ async function loadRecommendations() {
   const allSeeds = [...seeds, ...avoidSeeds];
   await Promise.all(allSeeds.map(async seed=>{
     try {
-      const r = await fetch(`https://api.themoviedb.org/3/movie/${seed.tmdb_id}?api_key=${TMDB_KEY}&language=zh-CN`);
+      const r = await tmdbFetch(`/movie/${seed.tmdb_id}?language=zh-CN`);
       const d = await r.json();
       seedGenres[seed.tmdb_id] = (d.genres||[]).map(g=>g.id);
       seed._fetchedGenres = seedGenres[seed.tmdb_id];
@@ -2840,7 +2846,7 @@ async function loadRecommendations() {
     const decadeScores = {};
     await Promise.all(topRated.map(async e=>{
       try {
-        const r = await fetch(`https://api.themoviedb.org/3/movie/${e.tmdb_id}?api_key=${TMDB_KEY}&language=zh-CN`);
+        const r = await tmdbFetch(`/movie/${e.tmdb_id}?language=zh-CN`);
         const d = await r.json();
         // Track directors
         if (d.credits?.crew) {
@@ -2883,20 +2889,20 @@ async function loadRecommendations() {
   for (const seed of seeds) {
     // Route 1: recommendations (2 pages in advanced mode)
     try {
-      const r1 = await fetch(`https://api.themoviedb.org/3/movie/${seed.tmdb_id}/recommendations?api_key=${TMDB_KEY}&language=zh-CN&page=1`);
+      const r1 = await tmdbFetch(`/movie/${seed.tmdb_id}/recommendations?language=zh-CN&page=1`);
       const d1 = await r1.json();
       if (d1.results) addRecs(d1.results, seed);
     } catch(e){}
     if (advanced) {
       try {
-        const r1b = await fetch(`https://api.themoviedb.org/3/movie/${seed.tmdb_id}/recommendations?api_key=${TMDB_KEY}&language=zh-CN&page=2`);
+        const r1b = await tmdbFetch(`/movie/${seed.tmdb_id}/recommendations?language=zh-CN&page=2`);
         const d1b = await r1b.json();
         if (d1b.results) addRecs(d1b.results, seed);
       } catch(e){}
     }
     // Route 2: similar
     try {
-      const r2 = await fetch(`https://api.themoviedb.org/3/movie/${seed.tmdb_id}/similar?api_key=${TMDB_KEY}&language=zh-CN&page=1`);
+      const r2 = await tmdbFetch(`/movie/${seed.tmdb_id}/similar?language=zh-CN&page=1`);
       const d2 = await r2.json();
       if (d2.results) addRecs(d2.results, seed);
     } catch(e){}
@@ -2904,7 +2910,7 @@ async function loadRecommendations() {
 
   // Route 3: genre-based discovery
   try {
-    const dRes = await fetch(`https://api.themoviedb.org/3/discover/movie?api_key=${TMDB_KEY}&language=zh-CN&sort_by=vote_average.desc&vote_count.gte=200&page=1`);
+    const dRes = await tmdbFetch(`/discover/movie?language=zh-CN&sort_by=vote_average.desc&vote_count.gte=200&page=1`);
     const dData = await dRes.json();
     if (dData.results) addRecs(dData.results, null);
   } catch(e){}
@@ -2913,7 +2919,7 @@ async function loadRecommendations() {
   if (advanced && topDirectors.length) {
     for (const dir of topDirectors.slice(0, 3)) {
       try {
-        const sr = await fetch(`https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&language=zh-CN&query=${encodeURIComponent(dir)}&page=1`);
+        const sr = await tmdbFetch(`/search/movie?language=zh-CN&query=${encodeURIComponent(dir)}&page=1`);
         const sd = await sr.json();
         if (sd.results) addRecs(sd.results, null);
       } catch(e){}
@@ -3011,7 +3017,7 @@ async function loadTrending() {
 
   const results = [];
   try {
-    const res = await fetch(`https://api.themoviedb.org/3/trending/movie/week?api_key=${TMDB_KEY}&language=zh-CN`);
+    const res = await tmdbFetch(`/trending/movie/week?language=zh-CN`);
     const data = await res.json();
     if (data.results) results.push(...data.results);
   } catch(e) { return []; }
@@ -3028,7 +3034,7 @@ async function loadTopRated() {
   try {
     // Fetch enough pages to reach 100 after vote_count filter
     for (let page=1; page<=10 && results.length<100; page++) {
-      const res = await fetch(`https://api.themoviedb.org/3/movie/top_rated?api_key=${TMDB_KEY}&language=zh-CN&page=${page}`);
+      const res = await tmdbFetch(`/movie/top_rated?language=zh-CN&page=${page}`);
       const data = await res.json();
       if (data.results && data.results.length) {
         data.results.forEach(r=>{

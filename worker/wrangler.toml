@@ -1,0 +1,7 @@
+# FilmNote Worker — TMDB API Proxy
+name = "filmnote"
+main = "src/index.js"
+compatibility_date = "2025-05-01"
+
+# Free tier: 100k requests/day, enough for 20 users
+# Cache: 50MB included in free tier — plenty for TMDB responses

@@ -1,31 +1,10 @@
 // FilmNote Cloudflare Worker — TMDB API proxy with caching
-// Deploy to Cloudflare Workers, then update TMDB_PROXY in index.html
-
 const TMDB_KEY = 'bedbd15b921f0127d7d8921337ea5a06';
 const TMDB_BASE = 'https://api.themoviedb.org/3';
-const CACHE_TTL = {
-  movie_detail: 86400,    // 24h — movie details rarely change
-  credits: 86400,         // 24h
-  recommendations: 86400, // 24h
-  similar: 86400,         // 24h
-  discover: 3600,         // 1h
-  search: 3600,           // 1h
-  trending: 3600,         // 1h
-  top_rated: 86400,       // 24h
-  default: 3600,
-};
 
-function getCacheTtl(url) {
-  if (url.includes('/credits')) return CACHE_TTL.credits;
-  if (url.includes('/recommendations')) return CACHE_TTL.recommendations;
-  if (url.includes('/similar')) return CACHE_TTL.similar;
-  if (url.includes('/discover')) return CACHE_TTL.discover;
-  if (url.includes('/search')) return CACHE_TTL.search;
-  if (url.includes('/trending')) return CACHE_TTL.trending;
-  if (url.includes('/top_rated')) return CACHE_TTL.top_rated;
-  if (/\/movie\/\d+$/.test(url) || /\/tv\/\d+$/.test(url)) return CACHE_TTL.movie_detail;
-  return CACHE_TTL.default;
-}
+// In-memory cache: { urlString: { data, ts } }
+const memCache = new Map();
+const CACHE_MAX = 500; // max entries before eviction
 
 function corsHeaders() {
   return {
@@ -36,75 +15,87 @@ function corsHeaders() {
   };
 }
 
+function getCacheTtl(url) {
+  if (url.includes('/credits') || url.includes('/recommendations') || url.includes('/similar')) return 86400000;
+  if (url.includes('/movie/') || url.includes('/tv/')) return 86400000;
+  if (url.includes('/top_rated')) return 86400000;
+  return 3600000; // 1h for search/discover/trending
+}
+
+function checkMemCache(url) {
+  const entry = memCache.get(url);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > getCacheTtl(url)) {
+    memCache.delete(url);
+    return null;
+  }
+  return entry.data;
+}
+
+function setMemCache(url, data) {
+  // Evict oldest if over max
+  if (memCache.size >= CACHE_MAX) {
+    const firstKey = memCache.keys().next().value;
+    memCache.delete(firstKey);
+  }
+  memCache.set(url, { data, ts: Date.now() });
+}
+
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
 
-    // CORS preflight
     if (request.method === 'OPTIONS') {
       return new Response(null, { status: 204, headers: corsHeaders() });
     }
 
-    // Health check
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', ts: Date.now() }), {
+      return new Response(JSON.stringify({ status: 'ok', cacheSize: memCache.size, ts: Date.now() }), {
         headers: { 'Content-Type': 'application/json', ...corsHeaders() },
       });
     }
 
-    // TMDB proxy: /tmdb/search/movie?query=... → https://api.themoviedb.org/3/search/movie?api_key=...&query=...
     if (url.pathname.startsWith('/tmdb/')) {
       const tmdbPath = url.pathname.replace('/tmdb', '');
-      const tmdbUrl = new URL(TMDB_BASE + tmdbPath);
-      // Copy all query params and inject API key
+      const fullUrl = new URL(TMDB_BASE + tmdbPath);
       for (const [k, v] of url.searchParams) {
-        tmdbUrl.searchParams.set(k, v);
+        fullUrl.searchParams.set(k, v);
       }
-      tmdbUrl.searchParams.set('api_key', TMDB_KEY);
+      fullUrl.searchParams.set('api_key', TMDB_KEY);
+      const cacheKey = fullUrl.toString();
 
-      const cacheKey = new Request(tmdbUrl.toString(), { method: 'GET' });
-      const cache = caches.default;
-
-      // Try cache first
-      let response = await cache.match(cacheKey);
-      if (response) {
-        // Clone and add CORS headers
-        const body = await response.text();
-        return new Response(body, {
-          status: response.status,
+      // Check memory cache
+      const cached = checkMemCache(cacheKey);
+      if (cached) {
+        return new Response(JSON.stringify(cached), {
           headers: {
             'Content-Type': 'application/json',
-            'Cache-Control': 'public, max-age=' + getCacheTtl(tmdbUrl.pathname),
+            'X-Cache': 'HIT',
             ...corsHeaders(),
           },
         });
       }
 
       // Fetch from TMDB
-      const tmdbRes = await fetch(tmdbUrl.toString());
-      const body = await tmdbRes.text();
+      const tmdbRes = await fetch(cacheKey, {
+        headers: { 'Accept': 'application/json' },
+      });
+      const data = await tmdbRes.json();
 
-      response = new Response(body, {
+      if (tmdbRes.ok) {
+        setMemCache(cacheKey, data);
+      }
+
+      return new Response(JSON.stringify(data), {
         status: tmdbRes.status,
         headers: {
           'Content-Type': 'application/json',
-          'Cache-Control': 'public, max-age=' + getCacheTtl(tmdbUrl.pathname),
+          'X-Cache': 'MISS',
           ...corsHeaders(),
         },
       });
-
-      // Cache successful responses
-      if (tmdbRes.ok && tmdbRes.status !== 429) {
-        ctx.waitUntil(cache.put(cacheKey, response.clone()));
-      }
-
-      return response;
     }
 
-    // Fallback
-    return new Response('FilmNote Worker — use /tmdb/* for TMDB API proxy', {
-      status: 404,
-      headers: corsHeaders(),
-    });
+    return new Response('FilmNote Worker', { status: 404, headers: corsHeaders() });
   },
 };

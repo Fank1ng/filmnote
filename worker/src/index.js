@@ -243,32 +243,32 @@ async function collectCandidates(seeds, profile, partnerProfile, env, advanced, 
     }
   };
 
-  // Route 1: Per-seed recommendations + similar
-  for (const seed of seeds) {
-    try {
-      const d = await fetchTmdb(`/movie/${seed.tmdb_id}/recommendations?language=zh-CN&page=1`, env);
-      addRecs(d.results, seed, 'rec');
-    } catch (e) { }
-    try {
-      const d = await fetchTmdb(`/movie/${seed.tmdb_id}/similar?language=zh-CN&page=1`, env);
-      addRecs(d.results, seed, 'similar');
-    } catch (e) { }
+  // Route 1: Per-seed recommendations + similar (all seeds in parallel)
+  await Promise.all(seeds.map(async seed => {
+    const fetches = [
+      fetchTmdb(`/movie/${seed.tmdb_id}/recommendations?language=zh-CN&page=1`, env).catch(() => null),
+      fetchTmdb(`/movie/${seed.tmdb_id}/similar?language=zh-CN&page=1`, env).catch(() => null),
+    ];
     if (advanced) {
-      try {
-        const d = await fetchTmdb(`/movie/${seed.tmdb_id}/recommendations?language=zh-CN&page=2`, env);
-        addRecs(d.results, seed, 'rec2');
-      } catch (e) { }
+      fetches.push(fetchTmdb(`/movie/${seed.tmdb_id}/recommendations?language=zh-CN&page=2`, env).catch(() => null));
     }
-  }
+    const results = await Promise.all(fetches);
+    if (results[0]) addRecs(results[0].results, seed, 'rec');
+    if (results[1]) addRecs(results[1].results, seed, 'similar');
+    if (advanced && results[2]) addRecs(results[2].results, seed, 'rec2');
+  }));
+
+  // Routes 2-8: Run all discovery routes in parallel
+  const routePromises = [];
 
   // Route 2: Genre discovery
   const topGenres = Object.keys(profile.genrePref).slice(0, 4);
   for (let i = 0; i < topGenres.length; i += 2) {
     const pair = topGenres.slice(i, i + 2).join(',');
-    try {
-      const d = await fetchTmdb(`/discover/movie?language=zh-CN&with_genres=${pair}&sort_by=vote_average.desc&vote_count.gte=100&page=1`, env);
-      addRecs(d.results, null, 'genre');
-    } catch (e) { }
+    routePromises.push(
+      fetchTmdb(`/discover/movie?language=zh-CN&with_genres=${pair}&sort_by=vote_average.desc&vote_count.gte=100&page=1`, env)
+        .then(d => addRecs(d.results, null, 'genre')).catch(() => {})
+    );
   }
 
   // Route 3: Keyword discovery (advanced only)
@@ -278,61 +278,65 @@ async function collectCandidates(seeds, profile, partnerProfile, env, advanced, 
       kwBatches.push(profile.topKeywords.slice(i, i + 3).join('|'));
     }
     for (const kw of kwBatches.slice(0, 5)) {
-      try {
-        const d = await fetchTmdb(`/discover/movie?language=zh-CN&with_keywords=${kw}&sort_by=vote_average.desc&vote_count.gte=50&page=1`, env);
-        addRecs(d.results, null, 'keyword');
-      } catch (e) { }
+      routePromises.push(
+        fetchTmdb(`/discover/movie?language=zh-CN&with_keywords=${kw}&sort_by=vote_average.desc&vote_count.gte=50&page=1`, env)
+          .then(d => addRecs(d.results, null, 'keyword')).catch(() => {})
+      );
     }
   }
 
   // Route 4: Quality pool
   const qualVotes = advanced ? 300 : 200;
-  try {
-    const d = await fetchTmdb(`/discover/movie?language=zh-CN&sort_by=vote_average.desc&vote_count.gte=${qualVotes}&page=1`, env);
-    addRecs(d.results, null, 'quality');
-  } catch (e) { }
+  routePromises.push(
+    fetchTmdb(`/discover/movie?language=zh-CN&sort_by=vote_average.desc&vote_count.gte=${qualVotes}&page=1`, env)
+      .then(d => addRecs(d.results, null, 'quality')).catch(() => {})
+  );
 
-  // Route 5: Director search
+  // Route 5: Director search (each director in parallel)
   const dirCount = advanced ? 5 : 2;
   for (const dir of profile.topDirectors.slice(0, dirCount)) {
-    try {
-      const d = await fetchTmdb(`/search/movie?language=zh-CN&query=${encodeURIComponent(dir)}&page=1`, env);
-      addRecs(d.results, null, 'director');
-    } catch (e) { }
+    routePromises.push(
+      fetchTmdb(`/search/movie?language=zh-CN&query=${encodeURIComponent(dir)}&page=1`, env)
+        .then(d => addRecs(d.results, null, 'director')).catch(() => {})
+    );
   }
 
   // Route 6: Actor discovery (advanced only)
   if (advanced && profile.topActors.length) {
     for (const actor of profile.topActors.slice(0, 5)) {
-      try {
-        const personRes = await fetchTmdb(`/search/person?query=${encodeURIComponent(actor)}`, env);
-        const personId = personRes.results?.[0]?.id;
-        if (personId) {
-          const d = await fetchTmdb(`/discover/movie?language=zh-CN&with_cast=${personId}&sort_by=vote_average.desc&vote_count.gte=50&page=1`, env);
-          addRecs(d.results, null, 'actor');
-        }
-      } catch (e) { }
+      routePromises.push((async () => {
+        try {
+          const personRes = await fetchTmdb(`/search/person?query=${encodeURIComponent(actor)}`, env);
+          const personId = personRes.results?.[0]?.id;
+          if (personId) {
+            const d = await fetchTmdb(`/discover/movie?language=zh-CN&with_cast=${personId}&sort_by=vote_average.desc&vote_count.gte=50&page=1`, env);
+            addRecs(d.results, null, 'actor');
+          }
+        } catch (e) { }
+      })());
     }
   }
 
   // Route 7: Language discovery (advanced)
   if (advanced && profile.langPref && profile.langPref !== 'en') {
-    try {
-      const d = await fetchTmdb(`/discover/movie?language=zh-CN&with_original_language=${profile.langPref}&sort_by=vote_average.desc&vote_count.gte=50&page=1`, env);
-      addRecs(d.results, null, 'language');
-    } catch (e) { }
+    routePromises.push(
+      fetchTmdb(`/discover/movie?language=zh-CN&with_original_language=${profile.langPref}&sort_by=vote_average.desc&vote_count.gte=50&page=1`, env)
+        .then(d => addRecs(d.results, null, 'language')).catch(() => {})
+    );
   }
 
   // Route 8: Partner seed recommendations (advanced)
   if (advanced && partnerProfile) {
     const pSeeds = seeds.filter(s => s._isPartnerSeed).slice(0, 1);
     for (const ps of pSeeds) {
-      try {
-        const d = await fetchTmdb(`/movie/${ps.tmdb_id}/recommendations?language=zh-CN&page=1`, env);
-        addRecs(d.results, ps, 'partner_rec');
-      } catch (e) { }
+      routePromises.push(
+        fetchTmdb(`/movie/${ps.tmdb_id}/recommendations?language=zh-CN&page=1`, env)
+          .then(d => addRecs(d.results, ps, 'partner_rec')).catch(() => {})
+      );
     }
   }
+
+  await Promise.all(routePromises);
 
   return allRecs;
 }
@@ -417,18 +421,16 @@ async function enrichAndScorePhase2(candidates, profile, partnerProfile, avoidSe
   const partnerKeywordSet = new Set(partnerProfile ? partnerProfile.topKeywords : []);
   const partnerGenreSet = new Set(partnerProfile ? Object.keys(partnerProfile.genrePref) : []);
 
-  // Enrich all candidates
+  // Enrich all candidates with detail + credits (keywords deferred to after MMR)
   await Promise.all(candidates.map(async r => {
     try {
-      const [detail, credits, keywords] = await Promise.all([
+      const [detail, credits] = await Promise.all([
         fetchTmdb(`/movie/${r.id}?language=zh-CN`, env),
         advanced ? fetchTmdb(`/movie/${r.id}/credits?language=zh-CN`, env) : Promise.resolve(null),
-        fetchTmdb(`/movie/${r.id}/keywords`, env)
       ]);
       r._detail = detail;
       r._credits = credits;
-      r._keywords = keywords ? (keywords.keywords || []).map(k => k.id) : [];
-    } catch (e) { r._keywords = []; }
+    } catch (e) { /* skip */ }
   }));
 
   // Rescore
@@ -517,13 +519,15 @@ async function enrichAndScorePhase2(candidates, profile, partnerProfile, avoidSe
     }
 
     if (advanced) {
-      r._score = 0.16 * kwScore + 0.13 * genreScore + 0.12 * voteNorm + 0.10 * dirScore
-               + 0.10 * sourceNorm + 0.09 * actorScore + 0.09 * decadeBonus + partnerSignal
-               + 0.05 * Math.min(r._detail && r._detail.original_language === profile.langPref ? 1 : 0.3, 1)
-               + 0.04 * popNorm + 0.05 * freshness - avoidPenalty;
+      // Phase 2 scoring without keywords (added after MMR in final rescore)
+      r._score = 0.18 * genreScore + 0.14 * voteNorm + 0.12 * dirScore
+               + 0.12 * sourceNorm + 0.11 * actorScore + 0.11 * decadeBonus
+               + 0.06 * Math.min(r._detail && r._detail.original_language === profile.langPref ? 1 : 0.3, 1)
+               + 0.05 * popNorm + 0.06 * freshness - avoidPenalty;
     } else {
-      r._score = 0.18 * kwScore + 0.20 * genreScore + 0.17 * voteNorm + 0.15 * sourceNorm
-               + 0.12 * dirScore + 0.08 * decadeBonus + 0.05 * popNorm + 0.05 * freshness;
+      // Phase 2 scoring without keywords (added after MMR in final rescore)
+      r._score = 0.26 * genreScore + 0.21 * voteNorm + 0.18 * sourceNorm
+               + 0.14 * dirScore + 0.10 * decadeBonus + 0.06 * popNorm + 0.05 * freshness;
     }
   });
 }
@@ -593,6 +597,123 @@ function applyExplorationBudget(selected, allCandidates, profile, targetCount) {
 }
 
 // ── Recommendation engine ──
+// ── Post-MMR: enrich final pool with keywords and compute final scores ──
+async function enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoidSeeds, advanced, env) {
+  if (!final.length) return;
+
+  // Fetch keywords for all final candidates
+  await Promise.all(final.map(async r => {
+    try {
+      const kw = await fetchTmdb(`/movie/${r.id}/keywords`, env);
+      r._keywords = kw ? (kw.keywords || []).map(k => k.id) : [];
+    } catch (e) { r._keywords = []; }
+  }));
+
+  // Build sets for partner / avoid calculations
+  const partnerKeywordSet = new Set(partnerProfile ? partnerProfile.topKeywords : []);
+  const partnerGenreSet = new Set(partnerProfile ? Object.keys(partnerProfile.genrePref) : []);
+  const avoidGenreSet = new Set();
+  avoidSeeds.forEach(s => { (s._fetchedGenres || []).forEach(g => avoidGenreSet.add(g)); });
+
+  const maxPop = Math.max(...final.map(r => r.popularity || 0), 1);
+  const maxVote = Math.max(...final.map(r => r.vote_average || 0), 1);
+  const now = new Date();
+
+  final.forEach(r => {
+    const voteNorm = (r.vote_average || 0) / maxVote;
+    const popNorm = Math.min((r.popularity || 0) / maxPop, 1);
+    const releaseYear = parseInt((r.release_date || '').slice(0, 4)) || 0;
+    const ageYears = releaseYear ? now.getFullYear() - releaseYear : 10;
+    const freshness = ageYears <= 2 ? 1 : ageYears <= 5 ? 0.7 : ageYears <= 10 ? 0.35 : 0;
+    const sourceNorm = (r._sourceScore || 5) / 10;
+
+    // Keyword match (now available)
+    let kwScore = 0;
+    if (r._keywords && r._keywords.length && profile.topKeywords.length) {
+      kwScore = jaccard(r._keywords, profile.topKeywords);
+    }
+
+    // Genre match (reuse from Phase2 detail)
+    let genreScore = 0;
+    const fullGenres = r._detail ? (r._detail.genres || []).map(g => g.id) : (r.genre_ids || []);
+    if (fullGenres.length && r._sourceGenres.length) {
+      genreScore = jaccard(fullGenres, r._sourceGenres);
+      let prefBoost = 0;
+      fullGenres.forEach(g => { prefBoost += (profile.genrePref[g] || 0); });
+      genreScore = genreScore * 0.6 + Math.min(prefBoost / Math.max(fullGenres.length, 1), 1) * 0.4;
+    }
+
+    // Director affinity
+    let dirScore = 0;
+    if (r._credits && profile.topDirectors.length) {
+      const dirs = (r._credits.crew || []).filter(c => c.job === 'Director').map(c => c.name);
+      for (const d of dirs) {
+        const idx = profile.topDirectors.indexOf(d);
+        if (idx >= 0) { dirScore = Math.max(dirScore, 1 - idx / profile.topDirectors.length); }
+      }
+    }
+
+    // Actor affinity
+    let actorScore = 0;
+    if (r._credits && profile.topActors && profile.topActors.length) {
+      const cast = (r._credits.cast || []).slice(0, 5).map(c => c.name);
+      for (const a of cast) {
+        const idx = profile.topActors.indexOf(a);
+        if (idx >= 0) { actorScore = Math.max(actorScore, 1 - idx / profile.topActors.length); }
+      }
+    }
+
+    // Decade
+    let decadeBonus = 0;
+    if (releaseYear) {
+      const decade = Math.floor(releaseYear / 10) * 10;
+      const decAvg = profile.decadeProfile[decade];
+      decadeBonus = decAvg !== undefined ? Math.min(decAvg / 10, 1) : 0.3;
+    }
+
+    // Partner signal (with keywords now available)
+    let partnerSignal = 0;
+    if (partnerProfile && r._keywords) {
+      const pKwOverlap = r._keywords.filter(k => partnerKeywordSet.has(k)).length;
+      const pGenreOverlap = fullGenres.filter(g => partnerGenreSet.has(g)).length;
+      partnerSignal = Math.min((pKwOverlap / Math.max(r._keywords.length, 1)) * 0.5 +
+                               (pGenreOverlap / Math.max(fullGenres.length, 1)) * 0.5, 1) * 0.07;
+    }
+
+    // Avoid penalty (with keywords now available)
+    let avoidPenalty = 0;
+    if (avoidSeeds.length) {
+      let gOverlap = 0, kwOverlap = 0;
+      for (const as of avoidSeeds) {
+        if (as._fetchedGenres && as._fetchedGenres.length && fullGenres.length) {
+          const olap = fullGenres.filter(g => avoidGenreSet.has(g)).length;
+          gOverlap = Math.max(gOverlap, olap / Math.max(as._fetchedGenres.length, 1));
+        }
+        if (as._keywords && as._keywords.length && r._keywords && r._keywords.length) {
+          const asKwSet = new Set(as._keywords);
+          const olap = r._keywords.filter(k => asKwSet.has(k)).length;
+          kwOverlap = Math.max(kwOverlap, olap / Math.max(as._keywords.length, 1));
+        }
+      }
+      const combinedOverlap = Math.max(gOverlap * 0.5 + kwOverlap * 0.5, gOverlap);
+      if (combinedOverlap > 0.4) avoidPenalty = Math.min(combinedOverlap * 0.15, 0.15);
+    }
+
+    // Full scoring WITH keywords
+    if (advanced) {
+      r._score = 0.16 * kwScore + 0.13 * genreScore + 0.12 * voteNorm + 0.10 * dirScore
+               + 0.10 * sourceNorm + 0.09 * actorScore + 0.09 * decadeBonus + partnerSignal
+               + 0.05 * Math.min(r._detail && r._detail.original_language === profile.langPref ? 1 : 0.3, 1)
+               + 0.04 * popNorm + 0.05 * freshness - avoidPenalty;
+    } else {
+      r._score = 0.18 * kwScore + 0.20 * genreScore + 0.17 * voteNorm + 0.15 * sourceNorm
+               + 0.12 * dirScore + 0.08 * decadeBonus + 0.05 * popNorm + 0.05 * freshness;
+    }
+  });
+
+  final.sort((a, b) => b._score - a._score);
+}
+
 async function loadRecommendations(env, entries, userId) {
   const myMovies = entries.filter(e => e.user_id === userId && e.tmdb_id && e.type === 'movie');
   const totalRated = entries.filter(e => e.user_id === userId && e.type === 'movie').length;
@@ -636,7 +757,7 @@ async function loadRecommendations(env, entries, userId) {
   candidates.sort((a, b) => b._score - a._score);
 
   // Phase 4+5: Enrich top pool and rescore
-  const enrichCount = advanced ? 80 : 30;
+  const enrichCount = advanced ? 60 : 20;
   const topPool = candidates.slice(0, enrichCount);
 
   // Also enrich avoid seeds if they're in the pool
@@ -645,7 +766,7 @@ async function loadRecommendations(env, entries, userId) {
   await enrichAndScorePhase2(topPool, profile, partnerProfile, avoidSeeds, advanced);
   topPool.sort((a, b) => b._score - a._score);
 
-  // Phase 6: MMR diversity
+  // Phase 6: MMR diversity (using Phase2 scores without keywords)
   const finalCount = advanced ? 60 : 30;
   const lambda = advanced ? 0.7 : 0.75;
   let final = mmrRerank(topPool, Math.min(finalCount, topPool.length), lambda);
@@ -654,6 +775,9 @@ async function loadRecommendations(env, entries, userId) {
   if (advanced && candidates.length > finalCount) {
     final = applyExplorationBudget(final, candidates, profile, finalCount);
   }
+
+  // Phase 8: Enrich final pool with keywords and compute full scores
+  await enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoidSeeds, advanced, env);
 
   return { movies: final.slice(0, finalCount), totalRated };
 }

@@ -282,11 +282,45 @@ export default {
 
     // ── TMDB Proxy ──
     if (url.pathname.startsWith('/tmdb/')) {
-      const tmdbPath = url.pathname.replace('/tmdb', '');
+      const tmdbPath = url.pathname.replace('/tmdb', '') + url.search;
       const data = await fetchTmdb(tmdbPath, env);
       return new Response(JSON.stringify(data), {
         headers: { 'Content-Type': 'application/json', ...corsHeaders() },
       });
+    }
+
+    // ── Prefetch endpoint (warm KV for movie details + credits) ──
+    if (url.pathname === '/prefetch' && request.method === 'POST') {
+      try {
+        const body = await request.json();
+        const ids = body.tmdb_ids;
+        if (!Array.isArray(ids) || !ids.length) {
+          return new Response(JSON.stringify({ error: 'Missing or invalid tmdb_ids' }), {
+            status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+          });
+        }
+        const unique = [...new Set(ids.filter(id => Number.isFinite(id) && id > 0))];
+        let cached = 0, errors = 0;
+
+        for (let i = 0; i < unique.length; i += 5) {
+          const batch = unique.slice(i, i + 5);
+          const results = await Promise.allSettled(
+            batch.flatMap(id => [
+              fetchTmdb(`/movie/${id}?language=zh-CN`, env),
+              fetchTmdb(`/movie/${id}/credits?language=zh-CN`, env)
+            ])
+          );
+          results.forEach(r => { r.status === 'fulfilled' ? cached++ : errors++; });
+        }
+
+        return new Response(JSON.stringify({ cached, errors, total: unique.length }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: e.message }), {
+          status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+        });
+      }
     }
 
     // ── Recommendation endpoint ──

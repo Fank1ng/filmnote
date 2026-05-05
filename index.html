@@ -1281,6 +1281,11 @@ async function loadAllData() {
     updateRecTabLabel();
     // Background: warm original_title cache for English search
     warmOriginalTitleCache();
+    // One-time KV backfill for recommendation engine (runs once per deployment)
+    if (!localStorage.getItem('kv_backfilled_v1')) {
+      localStorage.setItem('kv_backfilled_v1', '1');
+      setTimeout(() => backfillKvCache(), 3000);
+    }
   } catch(e) {
     console.error('loadAllData error:', e);
     if (!cachedEntries) toast('加载数据失败: ' + (e.message||e));
@@ -1300,6 +1305,26 @@ function warmOriginalTitleCache() {
     warmTitleTimer = setTimeout(next, 500);
   }
   next();
+}
+
+// One-time KV cache backfill — collects all unique movie tmdb_ids and pre-warms via Worker
+async function backfillKvCache() {
+  if (!TMDB_PROXY) return;
+  const movieIds = [...new Set(
+    allEntries.filter(e => e.tmdb_id && e.type === 'movie').map(e => e.tmdb_id)
+  )];
+  if (!movieIds.length) return;
+  try {
+    const res = await fetch(TMDB_PROXY + '/prefetch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tmdb_ids: movieIds })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      console.log('KV backfill done:', data);
+    }
+  } catch (e) { /* silent */ }
 }
 
 function getActiveTab() {
@@ -1674,6 +1699,8 @@ $['movieForm'].addEventListener('submit', async e=>{
     }
 
     toast(editingEntryId ? '评价已更新' : '评价已保存');
+    // Pre-warm KV cache for recommendation engine (fire-and-forget)
+    if (entryType === 'movie' && entryData.tmdb_id) fetchTmdbDetail(entryData.tmdb_id).catch(() => {});
     resetForm();
     skipListRender = true;
     await loadAllData();

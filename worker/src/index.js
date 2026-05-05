@@ -1,4 +1,4 @@
-// FilmNote Cloudflare Worker — TMDB API proxy + recommendation engine
+// FilmNote Cloudflare Worker — TMDB proxy + recommendation + KV persistence
 const TMDB_KEY = 'bedbd15b921f0127d7d8921337ea5a06';
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 
@@ -8,9 +8,9 @@ const GENRE_MAP = {
   10770:'电视电影',53:'惊悚',10752:'战争',37:'西部'
 };
 
-// ── Memory caches ──
-const tmdbCache = new Map();
-const MAX_CACHE = 500;
+// L1 memory cache (fast, isolate-scoped)
+const memCache = new Map();
+const MEM_MAX = 500;
 
 function corsHeaders() {
   return {
@@ -21,36 +21,61 @@ function corsHeaders() {
   };
 }
 
-// ── TMDB fetch helper ──
-async function cachedTmdbFetch(urlStr) {
-  if (tmdbCache.has(urlStr)) {
-    const entry = tmdbCache.get(urlStr);
-    if (Date.now() - entry.ts < entry.ttl) return entry.data;
-    tmdbCache.delete(urlStr);
+// KV expiration: permanent for static data, TTL for dynamic lists
+function getKvTtl(path) {
+  if (/\/movie\/\d+$|\/tv\/\d+$/.test(path)) return null; // details: permanent
+  if (/\/credits/.test(path)) return null; // credits: permanent
+  if (/\/recommendations|\/similar/.test(path)) return 604800; // 7 days
+  if (/\/discover|\/top_rated/.test(path)) return 604800;
+  if (/\/search|\/trending/.test(path)) return 86400; // 1 day
+  return 86400;
+}
+
+// Fetch TMDB data through L1(memory) → L2(KV) → L3(TMDB API)
+async function fetchTmdb(path, env) {
+  const kvKey = 'p:' + path;
+
+  // L1: memory
+  if (memCache.has(kvKey)) return memCache.get(kvKey);
+
+  // L2: KV
+  if (env && env.TMDB_CACHE) {
+    try {
+      const kvData = await env.TMDB_CACHE.get(kvKey, { type: 'json' });
+      if (kvData) {
+        if (memCache.size >= MEM_MAX) memCache.delete(memCache.keys().next().value);
+        memCache.set(kvKey, kvData);
+        return kvData;
+      }
+    } catch(e) { /* KV miss, proceed to TMDB */ }
   }
-  const res = await fetch(urlStr, { headers: { 'Accept': 'application/json' } });
+
+  // L3: TMDB API
+  const sep = path.includes('?') ? '&' : '?';
+  const url = TMDB_BASE + path + sep + 'api_key=' + TMDB_KEY;
+  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
   const data = await res.json();
+
   if (res.ok) {
-    const ttl = getCacheTtl(urlStr);
-    if (tmdbCache.size >= MAX_CACHE) tmdbCache.delete(tmdbCache.keys().next().value);
-    tmdbCache.set(urlStr, { data, ts: Date.now(), ttl });
+    // Store in L1
+    if (memCache.size >= MEM_MAX) memCache.delete(memCache.keys().next().value);
+    memCache.set(kvKey, data);
+
+    // Store in L2 (KV) if available
+    if (env && env.TMDB_CACHE) {
+      const ttl = getKvTtl(path);
+      const opts = ttl ? { expirationTtl: ttl } : {};
+      try { await env.TMDB_CACHE.put(kvKey, JSON.stringify(data), opts); } catch(e) {}
+    }
   }
   return data;
 }
 
-function getCacheTtl(url) {
-  if (/\/credits|recommendations|similar|top_rated/.test(url)) return 86400000;
-  if (/\/movie\/\d+$|\/tv\/\d+$/.test(url)) return 86400000;
-  return 3600000;
-}
-
 // ── Scoring helpers ──
-function getEntryTotalScore(entry) {
-  return entry.total_score || 5;
-}
+function getEntryTotalScore(entry) { return entry.total_score || 5; }
 
 // ── Recommendation engine ──
-async function loadRecommendations(entries, userId) {
+async function loadRecommendations(env, entries, userId) {
   const myMovies = entries.filter(e => e.user_id === userId && e.tmdb_id && e.type === 'movie');
   const totalRated = entries.filter(e => e.user_id === userId && e.type === 'movie').length;
 
@@ -81,13 +106,12 @@ async function loadRecommendations(entries, userId) {
   }
   seeds.sort(() => Math.random() - 0.5);
 
-  // Fetch genre info for all seeds in parallel
+  // Fetch genre info for all seeds in parallel (via KV-backed fetch)
   const seedGenres = {};
   const allSeeds = [...seeds, ...avoidSeeds];
   await Promise.all(allSeeds.map(async seed => {
     try {
-      const url = `${TMDB_BASE}/movie/${seed.tmdb_id}?api_key=${TMDB_KEY}&language=zh-CN`;
-      const d = await cachedTmdbFetch(url);
+      const d = await fetchTmdb(`/movie/${seed.tmdb_id}?language=zh-CN`, env);
       seedGenres[seed.tmdb_id] = (d.genres || []).map(g => g.id);
       seed._fetchedGenres = seedGenres[seed.tmdb_id];
     } catch (e) { seed._fetchedGenres = []; }
@@ -107,8 +131,7 @@ async function loadRecommendations(entries, userId) {
     const decadeScores = {};
     await Promise.all(topRated.map(async e => {
       try {
-        const url = `${TMDB_BASE}/movie/${e.tmdb_id}?api_key=${TMDB_KEY}&language=zh-CN`;
-        const d = await cachedTmdbFetch(url);
+        const d = await fetchTmdb(`/movie/${e.tmdb_id}?language=zh-CN`, env);
         if (d.credits && d.credits.crew) {
           d.credits.crew.filter(c => c.job === 'Director').forEach(c => {
             directorCount[c.name] = (directorCount[c.name] || 0) + 1;
@@ -147,35 +170,30 @@ async function loadRecommendations(entries, userId) {
 
   for (const seed of seeds) {
     try {
-      const url1 = `${TMDB_BASE}/movie/${seed.tmdb_id}/recommendations?api_key=${TMDB_KEY}&language=zh-CN&page=1`;
-      const d1 = await cachedTmdbFetch(url1);
+      const d1 = await fetchTmdb(`/movie/${seed.tmdb_id}/recommendations?language=zh-CN&page=1`, env);
       if (d1.results) addRecs(d1.results, seed);
     } catch (e) { }
     if (advanced) {
       try {
-        const url1b = `${TMDB_BASE}/movie/${seed.tmdb_id}/recommendations?api_key=${TMDB_KEY}&language=zh-CN&page=2`;
-        const d1b = await cachedTmdbFetch(url1b);
+        const d1b = await fetchTmdb(`/movie/${seed.tmdb_id}/recommendations?language=zh-CN&page=2`, env);
         if (d1b.results) addRecs(d1b.results, seed);
       } catch (e) { }
     }
     try {
-      const url2 = `${TMDB_BASE}/movie/${seed.tmdb_id}/similar?api_key=${TMDB_KEY}&language=zh-CN&page=1`;
-      const d2 = await cachedTmdbFetch(url2);
+      const d2 = await fetchTmdb(`/movie/${seed.tmdb_id}/similar?language=zh-CN&page=1`, env);
       if (d2.results) addRecs(d2.results, seed);
     } catch (e) { }
   }
 
   try {
-    const dUrl = `${TMDB_BASE}/discover/movie?api_key=${TMDB_KEY}&language=zh-CN&sort_by=vote_average.desc&vote_count.gte=200&page=1`;
-    const dData = await cachedTmdbFetch(dUrl);
+    const dData = await fetchTmdb(`/discover/movie?language=zh-CN&sort_by=vote_average.desc&vote_count.gte=200&page=1`, env);
     if (dData.results) addRecs(dData.results, null);
   } catch (e) { }
 
   if (advanced && topDirectors.length) {
     for (const dir of topDirectors.slice(0, 3)) {
       try {
-        const sUrl = `${TMDB_BASE}/search/movie?api_key=${TMDB_KEY}&language=zh-CN&query=${encodeURIComponent(dir)}&page=1`;
-        const sd = await cachedTmdbFetch(sUrl);
+        const sd = await fetchTmdb(`/search/movie?language=zh-CN&query=${encodeURIComponent(dir)}&page=1`, env);
         if (sd.results) addRecs(sd.results, null);
       } catch (e) { }
     }
@@ -232,14 +250,13 @@ async function loadRecommendations(entries, userId) {
   return { movies: pool, totalRated };
 }
 
-// ── Cache key for recommendations ──
+// Cache key for recommendations
 function makeRecKey(userId, entries) {
   const movieIds = entries
     .filter(e => e.user_id === userId && e.type === 'movie' && e.tmdb_id)
     .map(e => e.tmdb_id + ':' + (e.total_score || 0))
     .sort()
     .join(',');
-  // Simple hash
   let hash = 0;
   for (let i = 0; i < movieIds.length; i++) {
     hash = ((hash << 5) - hash) + movieIds.charCodeAt(i);
@@ -258,7 +275,7 @@ export default {
     }
 
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', tmdbCache: tmdbCache.size, ts: Date.now() }), {
+      return new Response(JSON.stringify({ status: 'ok', memCache: memCache.size, ts: Date.now() }), {
         headers: { 'Content-Type': 'application/json', ...corsHeaders() },
       });
     }
@@ -266,14 +283,9 @@ export default {
     // ── TMDB Proxy ──
     if (url.pathname.startsWith('/tmdb/')) {
       const tmdbPath = url.pathname.replace('/tmdb', '');
-      const fullUrl = new URL(TMDB_BASE + tmdbPath);
-      for (const [k, v] of url.searchParams) fullUrl.searchParams.set(k, v);
-      fullUrl.searchParams.set('api_key', TMDB_KEY);
-      const cacheKey = fullUrl.toString();
-
-      const data = await cachedTmdbFetch(cacheKey);
+      const data = await fetchTmdb(tmdbPath, env);
       return new Response(JSON.stringify(data), {
-        headers: { 'Content-Type': 'application/json', 'X-Cache': tmdbCache.has(cacheKey) ? 'HIT' : 'MISS', ...corsHeaders() },
+        headers: { 'Content-Type': 'application/json', ...corsHeaders() },
       });
     }
 
@@ -303,9 +315,8 @@ export default {
           });
         }
 
-        const result = await loadRecommendations(entries, userId);
+        const result = await loadRecommendations(env, entries, userId);
 
-        // Store in Cache API (TTL: 1 hour)
         if (result.movies) {
           const resToCache = new Response(JSON.stringify(result), {
             headers: { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=3600' },

@@ -1,7 +1,9 @@
-# FilmNote Worker — TMDB API Proxy
+# FilmNote Worker — TMDB API Proxy + Recommendation Engine
 name = "filmnote"
 main = "src/index.js"
 compatibility_date = "2025-05-01"
 
-# Free tier: 100k requests/day, enough for 20 users
-# Cache: 50MB included in free tier — plenty for TMDB responses
+# KV: persistent TMDB data cache (movie details permanent, lists 7-day TTL)
+kv_namespaces = [
+  { binding = "TMDB_CACHE", id = "c963baf99e644d6b964b146904a7fd9b" }
+]

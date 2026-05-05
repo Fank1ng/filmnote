@@ -226,7 +226,7 @@ async function enrichEntries(entries, env, advanced) {
 }
 
 // ── Candidate collection ──
-async function collectCandidates(seeds, profile, partnerProfile, env, advanced, ratedKeys) {
+async function collectCandidates(seeds, profile, partnerProfile, env, advanced, ratedKeys, blockedKeys) {
   const allRecs = [];
   const seen = new Set();
 
@@ -234,7 +234,7 @@ async function collectCandidates(seeds, profile, partnerProfile, env, advanced, 
     if (!results) return;
     for (const r of results) {
       const key = 'tmdb_' + r.id;
-      if (seen.has(key) || ratedKeys.has(key)) continue;
+      if (seen.has(key) || ratedKeys.has(key) || (blockedKeys && blockedKeys.has(key))) continue;
       seen.add(key);
       r._sourceScore = sourceEntry ? sourceEntry.score : 0;
       r._sourceGenres = sourceEntry ? (sourceEntry._fetchedGenres || []) : [];
@@ -714,7 +714,7 @@ async function enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoid
   final.sort((a, b) => b._score - a._score);
 }
 
-async function loadRecommendations(env, entries, userId) {
+async function loadRecommendations(env, entries, userId, blockedIds) {
   const myMovies = entries.filter(e => e.user_id === userId && e.tmdb_id && e.type === 'movie');
   const totalRated = entries.filter(e => e.user_id === userId && e.type === 'movie').length;
 
@@ -748,7 +748,10 @@ async function loadRecommendations(env, entries, userId) {
 
   // Phase 2: Collect candidates
   const ratedKeys = new Set(myMovies.filter(e => e.tmdb_id).map(e => 'tmdb_' + e.tmdb_id));
-  const candidates = await collectCandidates(seeds, profile, partnerProfile, env, advanced, ratedKeys);
+  const blockedKeys = blockedIds && blockedIds.length
+    ? new Set(blockedIds.map(id => 'tmdb_' + id))
+    : new Set();
+  const candidates = await collectCandidates(seeds, profile, partnerProfile, env, advanced, ratedKeys, blockedKeys);
 
   if (!candidates.length) return { movies: [], totalRated };
 
@@ -783,7 +786,7 @@ async function loadRecommendations(env, entries, userId) {
 }
 
 // Cache key for recommendations
-function makeRecKey(userId, entries) {
+function makeRecKey(userId, entries, blockedIds) {
   const movieIds = entries
     .filter(e => e.user_id === userId && e.type === 'movie' && e.tmdb_id)
     .map(e => e.tmdb_id + ':' + (e.total_score || 0))
@@ -794,7 +797,20 @@ function makeRecKey(userId, entries) {
     hash = ((hash << 5) - hash) + movieIds.charCodeAt(i);
     hash |= 0;
   }
-  return userId + '-' + movieIds.length + '-' + hash;
+  // Include blocked IDs in cache key so blocking invalidates cache
+  const blockedHash = blockedIds && blockedIds.length
+    ? 'b:' + [...blockedIds].sort((a, b) => a - b).join(',')
+    : '';
+  let keyBase = userId + '-' + movieIds.length + '-' + hash;
+  if (blockedHash) {
+    let bh = 0;
+    for (let i = 0; i < blockedHash.length; i++) {
+      bh = ((bh << 5) - bh) + blockedHash.charCodeAt(i);
+      bh |= 0;
+    }
+    keyBase += '-b' + bh;
+  }
+  return keyBase;
 }
 
 // ── Main Worker ──
@@ -898,7 +914,7 @@ export default {
     if (url.pathname === '/recommend' && request.method === 'POST') {
       try {
         const body = await request.json();
-        const { entries, userId } = body;
+        const { entries, userId, blockedIds } = body;
 
         if (!entries || !userId) {
           return new Response(JSON.stringify({ error: 'Missing entries or userId' }), {
@@ -906,7 +922,7 @@ export default {
           });
         }
 
-        const recKey = makeRecKey(userId, entries);
+        const recKey = makeRecKey(userId, entries, blockedIds);
         const cacheKeyUrl = 'https://rec-cache.local/recommend/' + recKey;
         const cacheKey = new Request(cacheKeyUrl, { method: 'GET' });
         const cache = caches.default;
@@ -920,7 +936,7 @@ export default {
           });
         }
 
-        const result = await loadRecommendations(env, entries, userId);
+        const result = await loadRecommendations(env, entries, userId, blockedIds);
 
         if (result.movies) {
           const resToCache = new Response(JSON.stringify(result), {

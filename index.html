@@ -382,6 +382,18 @@
   .dc-action { margin-top: auto; padding-top: 8px; }
   .dc-action .btn { width: 100%; }
   .dc-rated-badge { text-align: center; font-size: 0.75rem; color: var(--text2); padding: 6px 0; }
+  .dc-action-row { display: flex; gap: 4px; align-items: center; }
+  .dc-action-row .dc-rate-btn { flex: 1; }
+  .dc-block-btn {
+    background: transparent; border: 1px solid transparent; color: var(--text2);
+    cursor: pointer; padding: 2px 6px; border-radius: 4px; font-size: 0.85rem;
+    line-height: 1; transition: var(--t); flex-shrink: 0;
+  }
+  .dc-block-btn:hover { color: #e74c3c; border-color: #e74c3c; background: rgba(231,76,60,0.08); }
+  .discover-card.blocked-removing {
+    opacity: 0; transform: scale(0.9); transition: opacity 0.3s ease, transform 0.3s ease;
+    pointer-events: none;
+  }
   .discover-spinner { text-align: center; padding: 40px; }
   .discover-pages, .list-pages {
     display: flex; justify-content: center; gap: 8px; margin: 24px 0; align-items: center;
@@ -670,6 +682,14 @@
         <button data-dt="toprated">Top100</button>
       </div>
       <div id="discoverContent"></div>
+      <!-- Blocked Movies Management -->
+      <div id="blockedPanel" style="margin-top:24px;display:none">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <h3 style="font-size:0.95rem;color:var(--text2);margin:0">不再推荐的电影 (<span id="blockedCount">0</span>)</h3>
+          <button class="btn btn-xs btn-secondary" id="toggleBlockedPanel">收起</button>
+        </div>
+        <div class="discover-grid" id="blockedMovieGrid"></div>
+      </div>
     </section>
 
     <!-- ═══ 统计 ═══ -->
@@ -845,6 +865,10 @@ const $ = {
   get qrCancel() { return document.getElementById('qrCancel'); },
   get qrSubmit() { return document.getElementById('qrSubmit'); },
   get quickRateModal() { return document.getElementById('quickRateModal'); },
+  get blockedPanel() { return document.getElementById('blockedPanel'); },
+  get blockedMovieGrid() { return document.getElementById('blockedMovieGrid'); },
+  get blockedCount() { return document.getElementById('blockedCount'); },
+  get showBlockedBtn() { return document.getElementById('showBlockedBtn'); },
 };
 
 // ===== AUTH UI =====
@@ -1280,6 +1304,8 @@ async function loadAllData() {
     updateRecTabLabel();
     // Background: warm original_title cache for English search
     warmOriginalTitleCache();
+    // Load blocked movies
+    loadBlockedMovies();
     // One-time KV backfill for recommendation engine (runs once per deployment)
     if (!localStorage.getItem('kv_backfilled_v1')) {
       localStorage.setItem('kv_backfilled_v1', '1');
@@ -1361,6 +1387,10 @@ function subscribeToRealtime() {
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'user_preferences' },
         (payload) => handleRealtimeChange(payload, 'prefs')
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'blocked_movies' },
+        () => { loadBlockedMovies(); }
       )
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') console.log('Realtime: connected');
@@ -2454,6 +2484,20 @@ let discoverRatedCount = 0;
 let discoverRefreshStreak = 0;
 let discoverLastShownIds = [];
 
+// Blocked movies (不再推荐)
+let blockedMovieIds = new Set();
+let blockedMoviesLoaded = false;
+
+async function loadBlockedMovies() {
+  if (!currentUser) return;
+  const { data, error } = await db.from('blocked_movies')
+    .select('tmdb_id')
+    .eq('user_id', currentUser.id);
+  if (!error && data) {
+    blockedMovieIds = new Set(data.map(r => r.tmdb_id));
+  }
+  blockedMoviesLoaded = true;
+}
 
 function updateRecTabLabel() {
   const btn = document.getElementById('discoverRecTab');
@@ -2556,6 +2600,16 @@ $['discoverContent'].addEventListener('click', e=>{
   if (movie) openQuickRate(movie);
 });
 
+// Delegated click for "不再推荐" buttons in discover grid
+$['discoverContent'].addEventListener('click', e => {
+  const btn = e.target.closest('.dc-block-btn');
+  if (!btn) return;
+  e.stopPropagation();
+  const tmdbId = parseInt(btn.dataset.tmdbId);
+  if (!tmdbId) return;
+  blockMovie(tmdbId, btn.closest('.discover-card'));
+});
+
 // Delegated click for discover cards → movie detail
 $['discoverContent'].addEventListener('click', e=>{
   // Ignore clicks on buttons or inside rate-btn
@@ -2625,10 +2679,11 @@ async function renderDiscover() {
 
   // ── Week: show all 32, no pagination ──
   if (tab === 'week') {
+    const visibleMovies = movies.filter(m => !blockedMovieIds.has(m.id));
     container.innerHTML = `
-      <div class="discover-topbar"><span class="topbar-count">共 ${movies.length} 部</span></div>
+      <div class="discover-topbar"><span class="topbar-count">共 ${visibleMovies.length} 部</span></div>
       <div class="discover-grid">
-        ${movies.map(m=>renderDiscoverCard(m, ratedTmdbIds)).join('')}
+        ${visibleMovies.map(m=>renderDiscoverCard(m, ratedTmdbIds)).join('')}
       </div>
     `;
     return;
@@ -2636,7 +2691,8 @@ async function renderDiscover() {
 
   // ── TopRated: default show full list + toggle filter ──
   if (tab === 'toprated') {
-    const filteredMovies = topratedFilterUnwatched ? movies.filter(m=>!ratedTmdbIds.has('tmdb_'+m.id)) : movies;
+    const unblockedMovies = movies.filter(m => !blockedMovieIds.has(m.id));
+    const filteredMovies = topratedFilterUnwatched ? unblockedMovies.filter(m=>!ratedTmdbIds.has('tmdb_'+m.id)) : unblockedMovies;
     const page = discoverPage.toprated || 1;
     const pageSize = 20;
     const totalPages = Math.ceil(filteredMovies.length / pageSize);
@@ -2661,10 +2717,13 @@ async function renderDiscover() {
   const advanced = ratedCount >= 100;
   const pageSize = advanced ? 24 : 12;
 
+  // Filter out blocked movies before freshness selection
+  const unblockedMovies = movies.filter(m => !blockedMovieIds.has(m.id));
+
   // Select movies ensuring freshness on refresh, or top N on first load
   const displayMovies = discoverLastShownIds.length
-    ? selectWithFreshness(movies, pageSize, discoverLastShownIds, 0.75)
-    : movies.slice(0, pageSize);
+    ? selectWithFreshness(unblockedMovies, pageSize, discoverLastShownIds, 0.75)
+    : unblockedMovies.slice(0, pageSize);
 
   // Track shown tmdb_ids for next refresh freshness check
   discoverLastShownIds = displayMovies.map(m=>m.id);
@@ -2673,6 +2732,7 @@ async function renderDiscover() {
     <div class="discover-topbar">
       <button class="btn btn-sm btn-secondary" id="discoverRefreshBtn">🔄 刷新推荐</button>
       <span id="discoverRefreshHint" style="font-size:0.75rem;color:var(--text2)"></span>
+      <button class="btn btn-xs btn-secondary" id="showBlockedBtn" style="margin-left:auto">管理屏蔽</button>
     </div>
     <div class="discover-grid">
       ${displayMovies.map(m=>renderDiscoverCard(m, ratedTmdbIds)).join('')}
@@ -2680,6 +2740,63 @@ async function renderDiscover() {
   `;
   bindDiscoverRefresh();
   updateRefreshUI();
+}
+
+async function blockMovie(tmdbId, cardEl) {
+  if (!currentUser || !tmdbId) return;
+  const { error } = await db.from('blocked_movies').insert({
+    user_id: currentUser.id,
+    tmdb_id: tmdbId
+  });
+  if (error) {
+    if (!error.message.includes('duplicate') && !error.message.includes('unique')) {
+      toast('操作失败: ' + error.message);
+      return;
+    }
+  }
+  blockedMovieIds.add(tmdbId);
+  discoverCache.recommend = null;
+  if (cardEl) {
+    cardEl.classList.add('blocked-removing');
+    setTimeout(() => {
+      cardEl.remove();
+      const grid = $['discoverContent'].querySelector('.discover-grid');
+      if (grid && !grid.querySelector('.discover-card')) {
+        renderDiscover();
+      }
+    }, 300);
+  }
+  toast('已加入不再推荐列表');
+}
+
+function renderBlockedPanel() {
+  const ids = [...blockedMovieIds];
+  if ($['blockedCount']) $['blockedCount'].textContent = ids.length;
+  if (!$['blockedMovieGrid']) return;
+  if (!ids.length) {
+    $['blockedMovieGrid'].innerHTML = '<div class="empty-state"><p style="font-size:0.85rem">暂无不推荐电影</p></div>';
+    return;
+  }
+  $['blockedMovieGrid'].innerHTML = ids.map(tmdbId => {
+    const movie = discoverMovieMap[tmdbId];
+    const title = movie ? movie.title : 'TMDB #' + tmdbId;
+    const poster = movie && movie.poster_path ? posterUrl(movie.poster_path) : '';
+    const year = movie ? (movie.release_date || '').slice(0, 4) : '';
+    return `
+      <div class="discover-card" data-tmdb-id="${tmdbId}">
+        <div class="dc-poster-wrap">
+          ${poster ? `<img src="${poster}" alt="${esc(title)}" loading="lazy">` : '<div class="dc-no-poster">🚫</div>'}
+        </div>
+        <div class="dc-info">
+          <div class="dc-title">${esc(title)}</div>
+          <div class="dc-meta">${year || '未知'}</div>
+          <div class="dc-action">
+            <button class="btn btn-xs btn-secondary dc-unblock-btn" data-tmdb-id="${tmdbId}" style="width:100%">恢复推荐</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
 }
 
 let discoverPageDebounce = null;
@@ -2692,6 +2809,49 @@ function goDiscoverPage(n) {
   renderDiscover();
   window.scrollTo({top: ($['discoverContent'].offsetTop||0)-80, behavior: 'smooth'});
 }
+
+// Toggle blocked panel
+document.addEventListener('click', e => {
+  const showBtn = e.target.closest('#showBlockedBtn');
+  if (showBtn) {
+    const panel = $['blockedPanel'];
+    if (!panel) return;
+    const isVisible = panel.style.display !== 'none';
+    if (isVisible) {
+      panel.style.display = 'none';
+      showBtn.textContent = '管理屏蔽';
+    } else {
+      panel.style.display = 'block';
+      renderBlockedPanel();
+      showBtn.textContent = '收起';
+    }
+    return;
+  }
+  const toggleBtn = e.target.closest('#toggleBlockedPanel');
+  if (toggleBtn) {
+    const panel = $['blockedPanel'];
+    if (panel) panel.style.display = 'none';
+    const showBtn = $['showBlockedBtn'];
+    if (showBtn) showBtn.textContent = '管理屏蔽';
+    return;
+  }
+  // Unblock button in blocked panel
+  const unblockBtn = e.target.closest('.dc-unblock-btn');
+  if (unblockBtn) {
+    e.stopPropagation();
+    const tmdbId = parseInt(unblockBtn.dataset.tmdbId);
+    if (!tmdbId || !currentUser) return;
+    db.from('blocked_movies').delete().eq('user_id', currentUser.id).eq('tmdb_id', tmdbId).then(({error}) => {
+      if (!error) {
+        blockedMovieIds.delete(tmdbId);
+        discoverCache.recommend = null;
+        renderBlockedPanel();
+        toast('已恢复推荐');
+      }
+    });
+    return;
+  }
+});
 
 // Delegated click on discover-pages container
 $['discoverContent'].addEventListener('click', e=>{
@@ -2769,7 +2929,13 @@ function renderDiscoverCard(m, ratedTmdbIds) {
         <div class="dc-meta">${year||'未知'}${m.original_language ? ' · ' + m.original_language.toUpperCase() : ''}</div>
         ${genres.length ? `<div class="dc-genres">${genres.map(g=>`<span class="dc-genre">${g}</span>`).join('')}</div>` : ''}
         <div class="dc-action">
-          ${isRated ? '<div class="dc-rated-badge">已评价 ✓</div>' : `<button class="btn btn-sm btn-secondary dc-rate-btn" data-tmdb-id="${tmdbId}">＋我的评分</button>`}
+          ${isRated
+            ? '<div class="dc-rated-badge">已评价 ✓</div>'
+            : `<div class="dc-action-row">
+                 <button class="btn btn-sm btn-secondary dc-rate-btn" data-tmdb-id="${tmdbId}">＋我的评分</button>
+                 <button class="btn btn-xs dc-block-btn" data-tmdb-id="${tmdbId}" title="不再推荐">🚫</button>
+               </div>`
+          }
         </div>
       </div>
     </div>
@@ -2801,7 +2967,11 @@ async function loadRecommendations() {
       const res = await fetch(TMDB_PROXY + '/recommend', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ entries: allEntries, userId: currentUser.id }),
+        body: JSON.stringify({
+          entries: allEntries,
+          userId: currentUser.id,
+          blockedIds: [...blockedMovieIds]
+        }),
       });
       const data = await res.json();
       if (data.movies) {

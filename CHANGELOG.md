@@ -2,6 +2,12 @@
 
 ## 2026-05-05
 
+### 前端精简 & 后端强化
+- **前端减负 277 行**：删除死代码(refreshMainDims/discoverHistoryBatches)、移除 ~220 行本地推荐 fallback、移除前端防重复检查
+- **Worker 新增端点**：`/trending`(热门Top12)、`/toprated`(Top100, vote_count≥500)、`/search?q=&type=`(TMDB搜索)
+- **前端调用统一走 Worker**：loadTrending/loadTopRated/searchTmdb 不再直接调 TMDB API，改为 Worker 端点
+- **Supabase 数据完整性**：添加 UNIQUE 约束 `(user_id, tmdb_id, type)` + `(entry_id, user_id, season_number)`，数据库层面防止重复
+
 ### Cloudflare KV 持久化缓存
 - **三级缓存架构**：L1 内存 Map → L2 Cloudflare KV → L3 TMDB API
 - **永久存储**：电影/剧集详情、演职员表写入 KV 永不过期，只拉取一次

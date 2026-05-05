@@ -732,6 +732,44 @@ export default {
       }
     }
 
+    // ── Trending endpoint ──
+    if (url.pathname === '/trending' && request.method === 'GET') {
+      const data = await fetchTmdb('/trending/movie/week?language=zh-CN', env);
+      const results = (data.results || []).sort((a, b) => (b.popularity || 0) - (a.popularity || 0)).slice(0, 12);
+      return new Response(JSON.stringify({ results }), {
+        headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+      });
+    }
+
+    // ── Top Rated endpoint ──
+    if (url.pathname === '/toprated' && request.method === 'GET') {
+      const results = [];
+      for (let page = 1; page <= 10 && results.length < 100; page++) {
+        const data = await fetchTmdb(`/movie/top_rated?language=zh-CN&page=${page}`, env);
+        if (data.results && data.results.length) {
+          data.results.forEach(r => { if ((r.vote_count || 0) >= 500) results.push(r); });
+        } else break;
+      }
+      return new Response(JSON.stringify({ results: results.slice(0, 100) }), {
+        headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+      });
+    }
+
+    // ── Search endpoint (with auto-credits for director) ──
+    if (url.pathname === '/search' && request.method === 'GET') {
+      const q = url.searchParams.get('q');
+      const type = url.searchParams.get('type') || 'movie';
+      if (!q) {
+        return new Response(JSON.stringify({ error: 'Missing query' }), {
+          status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+        });
+      }
+      const data = await fetchTmdb(`/search/${type}?query=${encodeURIComponent(q)}&language=zh-CN`, env);
+      return new Response(JSON.stringify(data), {
+        headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+      });
+    }
+
     // ── Recommendation endpoint ──
     if (url.pathname === '/recommend' && request.method === 'POST') {
       try {

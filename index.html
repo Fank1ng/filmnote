@@ -1514,15 +1514,23 @@ async function prefetchOverviews() {
     });
     if (res.ok) {
       const data = await res.json();
-      if (data.overviews) {
+      // Prefer full detail objects (genres, rating, director, cast); fallback to overview-only
+      if (data.details) {
+        movieCache.setBatch(data.details);
+      } else if (data.overviews) {
         movieCache.setBatch(data.overviews);
-        // Build reverse index: tmdbId → entries (one tmdbId may have multiple rated entries)
+      }
+      // Backfill overviews to in-memory entries + DB
+      const overviews = data.overviews || (data.details ? Object.fromEntries(
+        Object.entries(data.details).map(([id, d]) => [id, d.overview]).filter(([,ov]) => ov)
+      ) : {});
+      if (Object.keys(overviews).length) {
         const byTmdbId = {};
         for (const entry of missing) {
           if (!byTmdbId[entry.tmdb_id]) byTmdbId[entry.tmdb_id] = [];
           byTmdbId[entry.tmdb_id].push(entry);
         }
-        for (const [tmdbId, overview] of Object.entries(data.overviews)) {
+        for (const [tmdbId, overview] of Object.entries(overviews)) {
           const entries = byTmdbId[parseInt(tmdbId)];
           if (entries) {
             for (const entry of entries) {

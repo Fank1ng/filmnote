@@ -857,6 +857,7 @@ export default {
         const unique = [...new Set(ids.filter(id => Number.isFinite(id) && id > 0))];
         let cached = 0, errors = 0;
         const overviews = {};
+        const details = {};
 
         for (let i = 0; i < unique.length; i += 5) {
           const batch = unique.slice(i, i + 5);
@@ -868,19 +869,35 @@ export default {
             ])
           );
           results.forEach(r => { r.status === 'fulfilled' ? cached++ : errors++; });
-          // Extract overviews from batch results (no re-fetch needed)
           if (returnOverviews) {
             for (let j = 0; j < batch.length; j++) {
-              const detailResult = results[j * 3]; // detail is first of 3 paths per id
+              const detailResult = results[j * 3];
+              const creditsResult = results[j * 3 + 1];
               if (detailResult.status === 'fulfilled' && detailResult.value?.overview) {
                 overviews[batch[j]] = detailResult.value.overview;
+              }
+              if (detailResult.status === 'fulfilled') {
+                const d = detailResult.value || {};
+                const credits = (creditsResult.status === 'fulfilled' && creditsResult.value) || {};
+                const director = (credits.crew || []).find(c => c.job === 'Director');
+                details[batch[j]] = {
+                  overview: d.overview || '',
+                  genres: (d.genres || []).map(g => g.name),
+                  vote_average: d.vote_average || 0,
+                  runtime: d.runtime || 0,
+                  director: director ? director.name : '',
+                  cast: (credits.cast || []).slice(0, 6).map(c => c.name),
+                };
               }
             }
           }
         }
 
         const resp = { cached, errors, total: unique.length };
-        if (returnOverviews) resp.overviews = overviews;
+        if (returnOverviews) {
+          resp.overviews = overviews;
+          resp.details = details;
+        }
         return new Response(JSON.stringify(resp), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders() },
         });

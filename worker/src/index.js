@@ -1,16 +1,27 @@
 // FilmNote Cloudflare Worker — TMDB proxy + recommendation + KV persistence
-const TMDB_KEY = 'bedbd15b921f0127d7d8921337ea5a06';
 const TMDB_BASE = 'https://api.themoviedb.org/3';
+const TMDB_KEY_FALLBACK = 'bedbd15b921f0127d7d8921337ea5a06';
 
-const GENRE_MAP = {
-  28:'动作',12:'冒险',16:'动画',35:'喜剧',80:'犯罪',99:'纪录',18:'剧情',10751:'家庭',
-  14:'奇幻',36:'历史',27:'恐怖',10402:'音乐',9648:'悬疑',10749:'爱情',878:'科幻',
-  10770:'电视电影',53:'惊悚',10752:'战争',37:'西部'
-};
+function getTmdbKey(env) {
+  return (env && env.TMDB_API_KEY) || TMDB_KEY_FALLBACK;
+}
 
-// L1 memory cache (fast, isolate-scoped)
+// L1 memory cache (fast, isolate-scoped, LRU eviction)
 const memCache = new Map();
 const MEM_MAX = 500;
+
+function cacheGet(key) {
+  if (!memCache.has(key)) return undefined;
+  const val = memCache.get(key);
+  memCache.delete(key);
+  memCache.set(key, val);  // move to end (most-recently-used)
+  return val;
+}
+
+function cacheSet(key, value) {
+  if (memCache.size >= MEM_MAX) memCache.delete(memCache.keys().next().value);
+  memCache.set(key, value);
+}
 
 function corsHeaders() {
   return {
@@ -23,7 +34,7 @@ function corsHeaders() {
 
 // KV expiration: permanent for static data, TTL for dynamic lists
 function getKvTtl(path) {
-  if (/\/movie\/\d+$|\/tv\/\d+$/.test(path)) return null; // details: permanent
+  if (/\/movie\/\d+(\?|$)/.test(path) || /\/tv\/\d+(\?|$)/.test(path)) return null; // details: permanent
   if (/\/credits/.test(path)) return null; // credits: permanent
   if (/\/keywords/.test(path)) return null; // keywords: permanent
   if (/\/recommendations|\/similar/.test(path)) return 604800; // 7 days
@@ -37,15 +48,15 @@ async function fetchTmdb(path, env) {
   const kvKey = 'p:' + path;
 
   // L1: memory
-  if (memCache.has(kvKey)) return memCache.get(kvKey);
+  const cached = cacheGet(kvKey);
+  if (cached !== undefined) return cached;
 
   // L2: KV
   if (env && env.TMDB_CACHE) {
     try {
       const kvData = await env.TMDB_CACHE.get(kvKey, { type: 'json' });
       if (kvData) {
-        if (memCache.size >= MEM_MAX) memCache.delete(memCache.keys().next().value);
-        memCache.set(kvKey, kvData);
+        cacheSet(kvKey, kvData);
         return kvData;
       }
     } catch(e) { /* KV miss, proceed to TMDB */ }
@@ -53,14 +64,23 @@ async function fetchTmdb(path, env) {
 
   // L3: TMDB API
   const sep = path.includes('?') ? '&' : '?';
-  const url = TMDB_BASE + path + sep + 'api_key=' + TMDB_KEY;
-  const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+  const url = TMDB_BASE + path + sep + 'api_key=' + getTmdbKey(env);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: { 'Accept': 'application/json' },
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timer);
+  }
   const data = await res.json();
 
   if (res.ok) {
     // Store in L1
-    if (memCache.size >= MEM_MAX) memCache.delete(memCache.keys().next().value);
-    memCache.set(kvKey, data);
+    cacheSet(kvKey, data);
 
     // Store in L2 (KV) if available
     if (env && env.TMDB_CACHE) {
@@ -80,6 +100,60 @@ function jaccard(a, b) {
   let intersection = 0;
   for (const v of sa) { if (sb.has(v)) intersection++; }
   return intersection / (sa.size + sb.size - intersection);
+}
+
+// Shared normalization (used by Phase1, Phase2, Final rescore)
+function computeBaseScores(r, maxPop, maxVote, now) {
+  const voteNorm = (r.vote_average || 0) / maxVote;
+  const popNorm = Math.min((r.popularity || 0) / maxPop, 1);
+  const releaseYear = parseInt((r.release_date || '').slice(0, 4)) || 0;
+  const ageYears = releaseYear ? now.getFullYear() - releaseYear : 10;
+  const freshness = ageYears <= 2 ? 1 : ageYears <= 5 ? 0.7 : ageYears <= 10 ? 0.35 : 0;
+  const sourceNorm = (r._sourceScore || 5) / 10;
+  return { voteNorm, popNorm, releaseYear, ageYears, freshness, sourceNorm };
+}
+
+function computeGenreScore(genreIds, sourceGenres, genrePref, jaccardWeight) {
+  if (!sourceGenres.length || !genreIds.length) return 0;
+  let score = jaccard(sourceGenres, genreIds);
+  let prefBoost = 0;
+  genreIds.forEach(g => { prefBoost += (genrePref[g] || 0); });
+  const prefPart = Math.min(prefBoost / Math.max(genreIds.length, 1), 1);
+  return score * jaccardWeight + prefPart * (1 - jaccardWeight);
+}
+
+function computeAffinityScore(candidateNames, topNames) {
+  let score = 0;
+  for (const name of candidateNames) {
+    const idx = topNames.indexOf(name);
+    if (idx >= 0) score = Math.max(score, 1 - idx / topNames.length);
+  }
+  return score;
+}
+
+function computeDecadeBonus(releaseYear, decadeProfile) {
+  if (!releaseYear) return 0;
+  const decade = Math.floor(releaseYear / 10) * 10;
+  const decAvg = decadeProfile[decade];
+  return decAvg !== undefined ? Math.min(decAvg / 10, 1) : 0.3;
+}
+
+function computeAvoidPenalty(candidate, avoidSeeds, avoidGenreSet, fullGenres, candidateKeywords) {
+  if (!avoidSeeds.length) return 0;
+  let gOverlap = 0, kwOverlap = 0;
+  for (const as of avoidSeeds) {
+    if (as._fetchedGenres && as._fetchedGenres.length && fullGenres && fullGenres.length) {
+      const olap = fullGenres.filter(g => avoidGenreSet.has(g)).length;
+      gOverlap = Math.max(gOverlap, olap / Math.max(as._fetchedGenres.length, 1));
+    }
+    if (as._keywords && as._keywords.length && candidateKeywords && candidateKeywords.length) {
+      const asKwSet = new Set(as._keywords);
+      const olap = candidateKeywords.filter(k => asKwSet.has(k)).length;
+      kwOverlap = Math.max(kwOverlap, olap / Math.max(as._keywords.length, 1));
+    }
+  }
+  const combinedOverlap = Math.max(gOverlap * 0.5 + kwOverlap * 0.5, gOverlap);
+  return combinedOverlap > 0.4 ? Math.min(combinedOverlap * 0.15, 0.15) : 0;
 }
 
 // ── User profile builder ──
@@ -354,30 +428,10 @@ function scorePhase1(candidates, profile, avoidSeeds, advanced) {
   });
 
   candidates.forEach(r => {
-    const voteNorm = (r.vote_average || 0) / maxVote;
-    const popNorm = Math.min((r.popularity || 0) / maxPop, 1);
-    const releaseYear = parseInt((r.release_date || '').slice(0, 4)) || 0;
-    const ageYears = releaseYear ? now.getFullYear() - releaseYear : 10;
-    const freshness = ageYears <= 2 ? 1 : ageYears <= 5 ? 0.7 : ageYears <= 10 ? 0.35 : 0;
-    const sourceNorm = (r._sourceScore || 5) / 10;
+    const { voteNorm, popNorm, releaseYear, freshness, sourceNorm } = computeBaseScores(r, maxPop, maxVote, now);
 
-    // Genre match: Jaccard with seed's genres, weighted by user genre preference
-    let genreScore = 0;
-    if (r._sourceGenres.length && r.genre_ids) {
-      genreScore = jaccard(r._sourceGenres, r.genre_ids);
-      // Boost by user genre preference weight
-      let prefBoost = 0;
-      r.genre_ids.forEach(g => { prefBoost += (profile.genrePref[g] || 0); });
-      genreScore = genreScore * 0.7 + Math.min(prefBoost / Math.max(r.genre_ids.length, 1), 1) * 0.3;
-    }
-
-    // Decade
-    let decadeBonus = 0;
-    if (releaseYear) {
-      const decade = Math.floor(releaseYear / 10) * 10;
-      const decAvg = profile.decadeProfile[decade];
-      decadeBonus = decAvg !== undefined ? Math.min(decAvg / 10, 1) : 0.3;
-    }
+    const genreScore = computeGenreScore(r.genre_ids || [], r._sourceGenres || [], profile.genrePref, 0.7);
+    const decadeBonus = computeDecadeBonus(releaseYear, profile.decadeProfile);
 
     // Director bonus (cheap: route-based)
     const directorBonus = r._route === 'director' ? 0.8 : 0;
@@ -389,7 +443,7 @@ function scorePhase1(candidates, profile, avoidSeeds, advanced) {
       exploreBonus = Math.min(unfamiliar.length / Math.max(r.genre_ids.length, 1), 1) * 0.3;
     }
 
-    // Avoid penalty
+    // Avoid penalty (genre-only in Phase1)
     let avoidPenalty = 0;
     if (avoidSeeds.length && r.genre_ids) {
       for (const as of avoidSeeds) {
@@ -439,56 +493,30 @@ async function enrichAndScorePhase2(candidates, profile, partnerProfile, avoidSe
   const now = new Date();
 
   candidates.forEach(r => {
-    const voteNorm = (r.vote_average || 0) / maxVote;
-    const popNorm = Math.min((r.popularity || 0) / maxPop, 1);
-    const releaseYear = parseInt((r.release_date || '').slice(0, 4)) || 0;
-    const ageYears = releaseYear ? now.getFullYear() - releaseYear : 10;
-    const freshness = ageYears <= 2 ? 1 : ageYears <= 5 ? 0.7 : ageYears <= 10 ? 0.35 : 0;
-    const sourceNorm = (r._sourceScore || 5) / 10;
+    const { voteNorm, popNorm, releaseYear, freshness, sourceNorm } = computeBaseScores(r, maxPop, maxVote, now);
 
-    // Keyword match: Jaccard with user's top keywords
+    // Keyword match (may not be available in Phase2)
     let kwScore = 0;
     if (r._keywords && r._keywords.length && profile.topKeywords.length) {
       kwScore = jaccard(r._keywords, profile.topKeywords);
     }
 
-    // Genre match with full genre data
-    let genreScore = 0;
     const fullGenres = r._detail ? (r._detail.genres || []).map(g => g.id) : (r.genre_ids || []);
-    if (fullGenres.length && r._sourceGenres.length) {
-      genreScore = jaccard(fullGenres, r._sourceGenres);
-      let prefBoost = 0;
-      fullGenres.forEach(g => { prefBoost += (profile.genrePref[g] || 0); });
-      genreScore = genreScore * 0.6 + Math.min(prefBoost / Math.max(fullGenres.length, 1), 1) * 0.4;
-    }
+    const genreScore = computeGenreScore(fullGenres, r._sourceGenres || [], profile.genrePref, 0.6);
 
-    // Director affinity: check if candidate director is in user's top directors
-    let dirScore = 0;
-    if (r._credits && profile.topDirectors.length) {
-      const dirs = (r._credits.crew || []).filter(c => c.job === 'Director').map(c => c.name);
-      for (const d of dirs) {
-        const idx = profile.topDirectors.indexOf(d);
-        if (idx >= 0) { dirScore = Math.max(dirScore, 1 - idx / profile.topDirectors.length); }
-      }
-    }
+    // Director affinity
+    const dirs = (r._credits && profile.topDirectors.length)
+      ? (r._credits.crew || []).filter(c => c.job === 'Director').map(c => c.name)
+      : [];
+    const dirScore = computeAffinityScore(dirs, profile.topDirectors);
 
     // Actor affinity
-    let actorScore = 0;
-    if (r._credits && profile.topActors && profile.topActors.length) {
-      const cast = (r._credits.cast || []).slice(0, 5).map(c => c.name);
-      for (const a of cast) {
-        const idx = profile.topActors.indexOf(a);
-        if (idx >= 0) { actorScore = Math.max(actorScore, 1 - idx / profile.topActors.length); }
-      }
-    }
+    const cast = (r._credits && profile.topActors && profile.topActors.length)
+      ? (r._credits.cast || []).slice(0, 5).map(c => c.name)
+      : [];
+    const actorScore = computeAffinityScore(cast, profile.topActors || []);
 
-    // Decade
-    let decadeBonus = 0;
-    if (releaseYear) {
-      const decade = Math.floor(releaseYear / 10) * 10;
-      const decAvg = profile.decadeProfile[decade];
-      decadeBonus = decAvg !== undefined ? Math.min(decAvg / 10, 1) : 0.3;
-    }
+    const decadeBonus = computeDecadeBonus(releaseYear, profile.decadeProfile);
 
     // Partner signal
     let partnerSignal = 0;
@@ -499,24 +527,7 @@ async function enrichAndScorePhase2(candidates, profile, partnerProfile, avoidSe
                                (pGenreOverlap / Math.max(fullGenres.length, 1)) * 0.5, 1) * 0.07;
     }
 
-    // Avoid penalty (genre + keyword overlap with avoid seeds)
-    let avoidPenalty = 0;
-    if (avoidSeeds.length) {
-      let gOverlap = 0, kwOverlap = 0;
-      for (const as of avoidSeeds) {
-        if (as._fetchedGenres && as._fetchedGenres.length && fullGenres.length) {
-          const olap = fullGenres.filter(g => avoidGenreSet.has(g)).length;
-          gOverlap = Math.max(gOverlap, olap / Math.max(as._fetchedGenres.length, 1));
-        }
-        if (as._keywords && as._keywords.length && r._keywords && r._keywords.length) {
-          const asKwSet = new Set(as._keywords);
-          const olap = r._keywords.filter(k => asKwSet.has(k)).length;
-          kwOverlap = Math.max(kwOverlap, olap / Math.max(as._keywords.length, 1));
-        }
-      }
-      const combinedOverlap = Math.max(gOverlap * 0.5 + kwOverlap * 0.5, gOverlap);
-      if (combinedOverlap > 0.4) avoidPenalty = Math.min(combinedOverlap * 0.15, 0.15);
-    }
+    const avoidPenalty = computeAvoidPenalty(r, avoidSeeds, avoidGenreSet, fullGenres, r._keywords);
 
     if (advanced) {
       // Phase 2 scoring without keywords (added after MMR in final rescore)
@@ -620,12 +631,7 @@ async function enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoid
   const now = new Date();
 
   final.forEach(r => {
-    const voteNorm = (r.vote_average || 0) / maxVote;
-    const popNorm = Math.min((r.popularity || 0) / maxPop, 1);
-    const releaseYear = parseInt((r.release_date || '').slice(0, 4)) || 0;
-    const ageYears = releaseYear ? now.getFullYear() - releaseYear : 10;
-    const freshness = ageYears <= 2 ? 1 : ageYears <= 5 ? 0.7 : ageYears <= 10 ? 0.35 : 0;
-    const sourceNorm = (r._sourceScore || 5) / 10;
+    const { voteNorm, popNorm, releaseYear, freshness, sourceNorm } = computeBaseScores(r, maxPop, maxVote, now);
 
     // Keyword match (now available)
     let kwScore = 0;
@@ -633,45 +639,24 @@ async function enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoid
       kwScore = jaccard(r._keywords, profile.topKeywords);
     }
 
-    // Genre match (reuse from Phase2 detail)
-    let genreScore = 0;
     const fullGenres = r._detail ? (r._detail.genres || []).map(g => g.id) : (r.genre_ids || []);
-    if (fullGenres.length && r._sourceGenres.length) {
-      genreScore = jaccard(fullGenres, r._sourceGenres);
-      let prefBoost = 0;
-      fullGenres.forEach(g => { prefBoost += (profile.genrePref[g] || 0); });
-      genreScore = genreScore * 0.6 + Math.min(prefBoost / Math.max(fullGenres.length, 1), 1) * 0.4;
-    }
+    const genreScore = computeGenreScore(fullGenres, r._sourceGenres || [], profile.genrePref, 0.6);
 
     // Director affinity
-    let dirScore = 0;
-    if (r._credits && profile.topDirectors.length) {
-      const dirs = (r._credits.crew || []).filter(c => c.job === 'Director').map(c => c.name);
-      for (const d of dirs) {
-        const idx = profile.topDirectors.indexOf(d);
-        if (idx >= 0) { dirScore = Math.max(dirScore, 1 - idx / profile.topDirectors.length); }
-      }
-    }
+    const dirs = (r._credits && profile.topDirectors.length)
+      ? (r._credits.crew || []).filter(c => c.job === 'Director').map(c => c.name)
+      : [];
+    const dirScore = computeAffinityScore(dirs, profile.topDirectors);
 
     // Actor affinity
-    let actorScore = 0;
-    if (r._credits && profile.topActors && profile.topActors.length) {
-      const cast = (r._credits.cast || []).slice(0, 5).map(c => c.name);
-      for (const a of cast) {
-        const idx = profile.topActors.indexOf(a);
-        if (idx >= 0) { actorScore = Math.max(actorScore, 1 - idx / profile.topActors.length); }
-      }
-    }
+    const cast = (r._credits && profile.topActors && profile.topActors.length)
+      ? (r._credits.cast || []).slice(0, 5).map(c => c.name)
+      : [];
+    const actorScore = computeAffinityScore(cast, profile.topActors || []);
 
-    // Decade
-    let decadeBonus = 0;
-    if (releaseYear) {
-      const decade = Math.floor(releaseYear / 10) * 10;
-      const decAvg = profile.decadeProfile[decade];
-      decadeBonus = decAvg !== undefined ? Math.min(decAvg / 10, 1) : 0.3;
-    }
+    const decadeBonus = computeDecadeBonus(releaseYear, profile.decadeProfile);
 
-    // Partner signal (with keywords now available)
+    // Partner signal
     let partnerSignal = 0;
     if (partnerProfile && r._keywords) {
       const pKwOverlap = r._keywords.filter(k => partnerKeywordSet.has(k)).length;
@@ -680,24 +665,7 @@ async function enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoid
                                (pGenreOverlap / Math.max(fullGenres.length, 1)) * 0.5, 1) * 0.07;
     }
 
-    // Avoid penalty (with keywords now available)
-    let avoidPenalty = 0;
-    if (avoidSeeds.length) {
-      let gOverlap = 0, kwOverlap = 0;
-      for (const as of avoidSeeds) {
-        if (as._fetchedGenres && as._fetchedGenres.length && fullGenres.length) {
-          const olap = fullGenres.filter(g => avoidGenreSet.has(g)).length;
-          gOverlap = Math.max(gOverlap, olap / Math.max(as._fetchedGenres.length, 1));
-        }
-        if (as._keywords && as._keywords.length && r._keywords && r._keywords.length) {
-          const asKwSet = new Set(as._keywords);
-          const olap = r._keywords.filter(k => asKwSet.has(k)).length;
-          kwOverlap = Math.max(kwOverlap, olap / Math.max(as._keywords.length, 1));
-        }
-      }
-      const combinedOverlap = Math.max(gOverlap * 0.5 + kwOverlap * 0.5, gOverlap);
-      if (combinedOverlap > 0.4) avoidPenalty = Math.min(combinedOverlap * 0.15, 0.15);
-    }
+    const avoidPenalty = computeAvoidPenalty(r, avoidSeeds, avoidGenreSet, fullGenres, r._keywords);
 
     // Full scoring WITH keywords
     if (advanced) {
@@ -714,7 +682,7 @@ async function enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoid
   final.sort((a, b) => b._score - a._score);
 }
 
-async function loadRecommendations(env, entries, userId, blockedIds) {
+async function loadRecommendations(env, entries, userId, blockedIds, excludeIds) {
   const myMovies = entries.filter(e => e.user_id === userId && e.tmdb_id && e.type === 'movie');
   const totalRated = entries.filter(e => e.user_id === userId && e.type === 'movie').length;
 
@@ -782,11 +750,16 @@ async function loadRecommendations(env, entries, userId, blockedIds) {
   // Phase 8: Enrich final pool with keywords and compute full scores
   await enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoidSeeds, advanced, env);
 
+  // Filter out previously shown movies (freshness)
+  if (excludeIds && excludeIds.length) {
+    const excludeSet = new Set(excludeIds);
+    final = final.filter(m => !excludeSet.has(m.id));
+  }
   return { movies: final.slice(0, finalCount), totalRated };
 }
 
 // Cache key for recommendations
-function makeRecKey(userId, entries, blockedIds) {
+function makeRecKey(userId, entries, blockedIds, excludeIds) {
   const movieIds = entries
     .filter(e => e.user_id === userId && e.type === 'movie' && e.tmdb_id)
     .map(e => e.tmdb_id + ':' + (e.total_score || 0))
@@ -801,6 +774,10 @@ function makeRecKey(userId, entries, blockedIds) {
   const blockedHash = blockedIds && blockedIds.length
     ? 'b:' + [...blockedIds].sort((a, b) => a - b).join(',')
     : '';
+  // Include exclude IDs so freshness rotation gets distinct cache entries
+  const excludeHash = excludeIds && excludeIds.length
+    ? 'x:' + [...excludeIds].sort((a, b) => a - b).join(',')
+    : '';
   let keyBase = userId + '-' + movieIds.length + '-' + hash;
   if (blockedHash) {
     let bh = 0;
@@ -809,6 +786,14 @@ function makeRecKey(userId, entries, blockedIds) {
       bh |= 0;
     }
     keyBase += '-b' + bh;
+  }
+  if (excludeHash) {
+    let xh = 0;
+    for (let i = 0; i < excludeHash.length; i++) {
+      xh = ((xh << 5) - xh) + excludeHash.charCodeAt(i);
+      xh |= 0;
+    }
+    keyBase += '-x' + xh;
   }
   return keyBase;
 }
@@ -837,6 +822,19 @@ export default {
       });
     }
 
+    // ── Combined detail+credits endpoint ──
+    const detailMatch = url.pathname.match(/^\/detail\/(\d+)$/);
+    if (detailMatch && request.method === 'GET') {
+      const tmdbId = parseInt(detailMatch[1]);
+      const [details, credits] = await Promise.all([
+        fetchTmdb(`/movie/${tmdbId}?language=zh-CN`, env),
+        fetchTmdb(`/movie/${tmdbId}/credits?language=zh-CN`, env)
+      ]);
+      return new Response(JSON.stringify({ details, credits }), {
+        headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+      });
+    }
+
     // ── Prefetch endpoint (warm KV for movie details + credits) ──
     if (url.pathname === '/prefetch' && request.method === 'POST') {
       try {
@@ -847,8 +845,10 @@ export default {
             status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
           });
         }
+        const returnOverviews = body.return_overviews === true;
         const unique = [...new Set(ids.filter(id => Number.isFinite(id) && id > 0))];
         let cached = 0, errors = 0;
+        const overviews = {};
 
         for (let i = 0; i < unique.length; i += 5) {
           const batch = unique.slice(i, i + 5);
@@ -860,9 +860,48 @@ export default {
             ])
           );
           results.forEach(r => { r.status === 'fulfilled' ? cached++ : errors++; });
+          // Extract overviews from batch results (no re-fetch needed)
+          if (returnOverviews) {
+            for (let j = 0; j < batch.length; j++) {
+              const detailResult = results[j * 3]; // detail is first of 3 paths per id
+              if (detailResult.status === 'fulfilled' && detailResult.value?.overview) {
+                overviews[batch[j]] = detailResult.value.overview;
+              }
+            }
+          }
         }
 
-        return new Response(JSON.stringify({ cached, errors, total: unique.length }), {
+        const resp = { cached, errors, total: unique.length };
+        if (returnOverviews) resp.overviews = overviews;
+        return new Response(JSON.stringify(resp), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: e.message }), {
+          status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+        });
+      }
+    }
+
+    // ── Batch original_title endpoint ──
+    if (url.pathname === '/titles' && request.method === 'POST') {
+      try {
+        const body = await request.json();
+        const ids = body.tmdb_ids;
+        if (!Array.isArray(ids) || !ids.length) {
+          return new Response(JSON.stringify({ error: 'Missing or invalid tmdb_ids' }), {
+            status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+          });
+        }
+        const unique = [...new Set(ids.filter(id => Number.isFinite(id) && id > 0))];
+        const results = {};
+        await Promise.all(unique.map(async id => {
+          try {
+            const detail = await fetchTmdb(`/movie/${id}?language=zh-CN`, env);
+            if (detail && detail.original_title) results[id] = detail.original_title;
+          } catch (e) {}
+        }));
+        return new Response(JSON.stringify({ results }), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders() },
         });
       } catch (e) {
@@ -914,7 +953,7 @@ export default {
     if (url.pathname === '/recommend' && request.method === 'POST') {
       try {
         const body = await request.json();
-        const { entries, userId, blockedIds } = body;
+        const { entries, userId, blockedIds, excludeIds } = body;
 
         if (!entries || !userId) {
           return new Response(JSON.stringify({ error: 'Missing entries or userId' }), {
@@ -922,7 +961,7 @@ export default {
           });
         }
 
-        const recKey = makeRecKey(userId, entries, blockedIds);
+        const recKey = makeRecKey(userId, entries, blockedIds, excludeIds);
         const cacheKeyUrl = 'https://rec-cache.local/recommend/' + recKey;
         const cacheKey = new Request(cacheKeyUrl, { method: 'GET' });
         const cache = caches.default;
@@ -936,7 +975,7 @@ export default {
           });
         }
 
-        const result = await loadRecommendations(env, entries, userId, blockedIds);
+        const result = await loadRecommendations(env, entries, userId, blockedIds, excludeIds);
 
         if (result.movies) {
           const resToCache = new Response(JSON.stringify(result), {

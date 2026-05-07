@@ -323,9 +323,9 @@
   /* ── TMDB Detail Section ── */
   .tmdb-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
   .tmdb-section h4 { font-size: 0.85rem; color: var(--text2); margin-bottom: 8px; }
-  .tmdb-overview { font-size: 0.82rem; color: var(--text2); line-height: 1.7; margin-bottom: 12px; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .tmdb-overview { font-size: 0.82rem; color: var(--text2); line-height: 1.7; margin-bottom: 12px; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
   .tmdb-overview.expanded { -webkit-line-clamp: unset; display: block; }
-  .tmdb-expand { font-size: 0.72rem; color: var(--gold); cursor: pointer; margin-left: 4px; }
+  .tmdb-expand { font-size: 0.72rem; color: var(--gold); cursor: pointer; margin-left: 4px; display: inline-block; padding: 2px 6px; }
   .tmdb-cast { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
   .cast-chip { font-size: 0.72rem; padding: 2px 8px; border-radius: 10px; background: rgba(255,255,255,0.04); color: var(--text2); border: 1px solid var(--border); }
   .detail-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--gold); border-radius: 50%; animation: spin 0.6s linear infinite; vertical-align: middle; margin-right: 4px; }
@@ -439,6 +439,7 @@
     .mc-poster { width: 36px; height: 54px; }
     .mc-scores-compare { gap: 4px; min-width: 0; flex-shrink: 1; }
     .mc-title { font-size: 0.88rem; }
+    .tmdb-expand { display: block; margin-left: 0; margin-top: 4px; font-size: 0.78rem; padding: 6px 0; }
   }
 </style>
 </head>
@@ -699,7 +700,7 @@
         <button data-st="movie">电影</button>
         <button data-st="series">剧集</button>
       </div>
-      <div id="statsUserRow" style="margin-bottom:12px;display:none">
+      <div id="statsUserRow" class="hidden" style="margin-bottom:12px">
         <select id="statsUserPicker" style="padding:6px 12px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;font-size:0.85rem"></select>
       </div>
       <div id="statsContent"></div>
@@ -785,7 +786,6 @@ try {
 const $ = {
   get addSeasonBtn() { return document.getElementById('addSeasonBtn'); },
   get authEmail() { return document.getElementById('authEmail'); },
-  get authBox() { return document.querySelector('.auth-box'); },
   get authError() { return document.getElementById('authError'); },
   get authOverlay() { return document.getElementById('authOverlay'); },
   get authPassword() { return document.getElementById('authPassword'); },
@@ -1272,6 +1272,41 @@ function setCache(key, data) {
   try { localStorage.setItem(CACHE_KEY + key, JSON.stringify({data, ts: Date.now()})); } catch {}
 }
 
+// Overview store: single source of truth, permanent localStorage, keyed by tmdb_id
+const overviewStore = (() => {
+  const KEY = 'filmnote_overviews';
+  function loadAll() {
+    try { const raw = localStorage.getItem(KEY); return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+  }
+  function saveAll(all) {
+    try { localStorage.setItem(KEY, JSON.stringify(all)); } catch {}
+  }
+  return {
+    get(tmdbId) {
+      if (!tmdbId) return null;
+      return loadAll()[tmdbId] || null;
+    },
+    set(tmdbId, overview) {
+      if (!overview || !tmdbId) return;
+      const all = loadAll();
+      all[tmdbId] = overview;
+      saveAll(all);
+    },
+    setBatch(map) {
+      if (!map || !Object.keys(map).length) return;
+      const all = loadAll();
+      Object.assign(all, map);
+      saveAll(all);
+    },
+    applyTo(entries) {
+      const all = loadAll();
+      for (const e of entries) {
+        if (!e.overview && e.tmdb_id && all[e.tmdb_id]) e.overview = all[e.tmdb_id];
+      }
+    }
+  };
+})();
+
 async function loadAllData() {
   if (!currentUser) return;
   const uid = currentUser.id;
@@ -1282,6 +1317,7 @@ async function loadAllData() {
   const cachedPrefs = getCache('prefs_' + uid);
   if (cachedEntries) {
     allEntries = cachedEntries;
+    overviewStore.applyTo(allEntries);
     allSeasonRatings = cachedSeasons || [];
     allProfiles = cachedPrefs || {};
     updateHeaderCount();
@@ -1296,6 +1332,11 @@ async function loadAllData() {
       db.from('user_preferences').select('*')
     ]);
     allEntries = entries || [];
+    // Backfill overviewStore from Supabase (migration: overviews stored in DB before refactor)
+    for (const e of allEntries) {
+      if (e.tmdb_id && e.overview) overviewStore.set(e.tmdb_id, e.overview);
+    }
+    overviewStore.applyTo(allEntries);
     allSeasonRatings = seasons || [];
     allProfiles = {};
     (prefs||[]).forEach(p=>{ allProfiles[p.user_id]=p; });
@@ -1306,6 +1347,8 @@ async function loadAllData() {
     setCache('prefs_' + uid, allProfiles);
 
     updateHeaderCount();
+    // Background: prefetch missing overviews (non-blocking, fills before user clicks)
+    prefetchOverviews();
     renderActiveTab();
     // Init discover refresh state
     discoverRatedCount = allEntries.filter(e=>e.user_id===currentUser?.id && e.type==='movie').length;
@@ -1325,19 +1368,95 @@ async function loadAllData() {
   }
 }
 
+// Shared helpers for overview rendering
+function buildOverviewHTML(ovId, text) {
+  return `<h4>📖 简介</h4><div class="tmdb-overview" id="${ovId}">${esc(text)}</div><span class="tmdb-expand" id="${ovId}-btn" style="display:none" onclick="document.getElementById('${ovId}').classList.toggle('expanded');this.textContent=this.textContent==='展开全部'?'收起':'展开全部'">展开全部</span>`;
+}
+
+function checkOverviewOverflow(ovId) {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const oe = document.getElementById(ovId);
+      const btn = document.getElementById(ovId + '-btn');
+      if (oe && btn && oe.scrollHeight > oe.clientHeight) btn.style.display = '';
+    });
+  });
+}
+
+async function fetchOverview(tmdbId) {
+  if (!tmdbId) return '';
+  try { const d = await fetchTmdbDetail(tmdbId); return d?.details?.overview || ''; } catch(e) { return ''; }
+}
+
+function editActionForEntry(entry) {
+  return entry.type === 'series' ? `editEntry('${entry.id}')` : `openQuickEdit('${entry.id}')`;
+}
+
+function buildDimTagsHTML(ratings, userColor) {
+  return Object.keys(WEIGHTS).map(dim =>
+    `<span class="mc-dim-item" style="border-color:${userColor.main}"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${userColor.main}">${ratings[dim]||5}</span></span>`
+  ).join('');
+}
+
+async function backfillOverviewToDB(entry, overview) {
+  if (!overview || !entry.id || entry.user_id !== currentUser?.id) return;
+  entry.overview = overview;
+  db.from('entries').update({ overview }).eq('id', entry.id).then(()=>{}).catch(()=>{});
+}
+
+function buildDirectorCastHTML(director, cast) {
+  const parts = [];
+  if (director) parts.push(`<h4 style="margin-top:8px">🎬 导演</h4><div class="tmdb-cast"><span class="cast-chip">${esc(director.name)}</span></div>`);
+  if (cast.length) parts.push(`<h4 style="margin-top:8px">👥 演员</h4><div class="tmdb-cast">${cast.map(c=>`<span class="cast-chip">${esc(c.name)}</span>`).join('')}</div>`);
+  return parts.join('');
+}
+
+// Batch-prefetch missing overviews after data load (hits Worker cache, non-blocking)
+async function prefetchOverviews() {
+  const missing = allEntries.filter(e => e.tmdb_id && !e.overview);
+  if (!missing.length) return;
+  const ids = [...new Set(missing.map(e => e.tmdb_id))];
+  try {
+    const res = await fetch(TMDB_PROXY + '/prefetch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tmdb_ids: ids, return_overviews: true })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.overviews) {
+        overviewStore.setBatch(data.overviews);
+        for (const [tmdbId, overview] of Object.entries(data.overviews)) {
+          const id = parseInt(tmdbId);
+          for (const entry of missing) {
+            if (entry.tmdb_id === id) {
+              backfillOverviewToDB(entry, overview);
+              entry.overview = overview;
+            }
+          }
+        }
+      }
+    }
+  } catch(e) {}
+}
+
 let warmTitleTimer = null;
-function warmOriginalTitleCache() {
+async function warmOriginalTitleCache() {
   clearTimeout(warmTitleTimer);
   const uncached = allEntries.filter(e => e.tmdb_id && !originalTitleCache[e.tmdb_id]);
   if (!uncached.length) return;
-  let i = 0;
-  function next() {
-    if (i >= uncached.length) return;
-    fetchTmdbDetail(uncached[i].tmdb_id);
-    i++;
-    warmTitleTimer = setTimeout(next, 500);
-  }
-  next();
+  const ids = [...new Set(uncached.map(e => e.tmdb_id))];
+  try {
+    const res = await fetch(TMDB_PROXY + '/titles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tmdb_ids: ids })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      Object.assign(originalTitleCache, data.results);
+    }
+  } catch(e) {}
 }
 
 // One-time KV cache backfill — collects all unique movie tmdb_ids and pre-warms via Worker
@@ -1722,8 +1841,18 @@ $['movieForm'].addEventListener('submit', async e=>{
     }
 
     toast(editingEntryId ? '评价已更新' : '评价已保存');
-    // Pre-warm KV cache for recommendation engine (fire-and-forget)
-    if (entryType === 'movie' && entryData.tmdb_id) fetchTmdbDetail(entryData.tmdb_id).catch(() => {});
+    // Fire-and-forget: warm KV cache + backfill overview to saved entry
+    if (entryType === 'movie' && entryData.tmdb_id) {
+      fetchOverview(entryData.tmdb_id).then(overview => {
+        if (overview && entryId) {
+          overviewStore.set(entryData.tmdb_id, overview);
+          db.from('entries').update({ overview }).eq('id', entryId).then(()=>{}).catch(()=>{});
+          // Update local entry if still in allEntries
+          const e = allEntries.find(x => x.id === entryId);
+          if (e) e.overview = overview;
+        }
+      });
+    }
     resetForm();
     skipListRender = true;
     await loadAllData();
@@ -1845,17 +1974,11 @@ async function fetchTmdbDetail(tmdbId) {
   if (!tmdbId) return null;
   if (tmdbDetailCache[tmdbId]) return tmdbDetailCache[tmdbId];
   try {
-    const [detailRes, creditRes] = await Promise.all([
-      tmdbFetch(`/movie/${tmdbId}?language=zh-CN`),
-      tmdbFetch(`/movie/${tmdbId}/credits?language=zh-CN`)
-    ]);
-    if (!detailRes.ok) { tmdbDetailCache[tmdbId] = null; return null; }
-    const details = await detailRes.json();
-    const credits = await creditRes.json();
-    const result = { details, credits };
+    const res = await fetch(TMDB_PROXY + '/detail/' + tmdbId);
+    if (!res.ok) { tmdbDetailCache[tmdbId] = null; return null; }
+    const result = await res.json();
     tmdbDetailCache[tmdbId] = result;
-    // Cache original title for English search
-    if (details.original_title) originalTitleCache[tmdbId] = details.original_title;
+    if (result.details?.original_title) originalTitleCache[tmdbId] = result.details.original_title;
     return result;
   } catch(e) {
     tmdbDetailCache[tmdbId] = null;
@@ -1950,10 +2073,10 @@ function renderList() {
 
   if (!groups.length) {
     container.innerHTML = '';
-    empty.style.display = '';
+    empty.classList.remove('hidden');
     return;
   }
-  empty.style.display = 'none';
+  empty.classList.add('hidden');
 
   // Pagination: slice groups for current page
   const start = (listPageNum - 1) * listPageSize;
@@ -1967,9 +2090,7 @@ function renderList() {
     const seasonCount = main.type==='series' ? allSeasonRatings.filter(s=>s.entry_id===main.id&&s.user_id===main.user_id).length : 0;
 
     const dimOrder = Object.keys(WEIGHTS);
-    const dimTags = (entry, uc) => dimOrder.map(dim=>
-      `<span class="mc-dim-item" style="border-color:${uc.main}"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${uc.main}">${(entry.ratings||{})[dim]||5}</span></span>`
-    ).join('');
+    const dimTags = (entry, uc) => buildDimTagsHTML(entry.ratings||{}, uc);
 
     if (merged) {
       const priv = isPrivileged();
@@ -1988,7 +2109,7 @@ function renderList() {
         let act = '';
         if (showActions) {
           act = `<div class="mc-actions" onclick="event.stopPropagation()" style="margin-left:auto">
-            <button class="btn btn-sm btn-secondary" onclick="${e.type==='series' ? `editEntry('${e.id}')` : `openQuickEdit('${e.id}')`}" aria-label="编辑 ${esc(allProfiles[e.user_id]?.display_name||'')} 的评价">编辑</button>
+            <button class="btn btn-sm btn-secondary" onclick="${editActionForEntry(e)}" aria-label="编辑 ${esc(allProfiles[e.user_id]?.display_name||'')} 的评价">编辑</button>
             <button class="btn btn-sm btn-danger" onclick="deleteEntry('${e.id}')" aria-label="删除 ${esc(allProfiles[e.user_id]?.display_name||'')} 的评价">删除</button>
           </div>`;
         }
@@ -2050,7 +2171,7 @@ function renderList() {
       let cardActionsHtml = '';
       const myEntryInGroup = group.find(e=>e.user_id===currentUser.id);
       if (myEntryInGroup) {
-        cardActionsHtml = `<div class="mc-actions-mobile" onclick="event.stopPropagation()"><button class="btn btn-sm btn-secondary" onclick="${myEntryInGroup.type==='series' ? `editEntry('${myEntryInGroup.id}')` : `openQuickEdit('${myEntryInGroup.id}')`}" aria-label="编辑我的评价">编辑</button><button class="btn btn-sm btn-danger" onclick="deleteEntry('${myEntryInGroup.id}')" aria-label="删除我的评价">删除</button></div>`;
+        cardActionsHtml = `<div class="mc-actions-mobile" onclick="event.stopPropagation()"><button class="btn btn-sm btn-secondary" onclick="${editActionForEntry(myEntryInGroup)}" aria-label="编辑我的评价">编辑</button><button class="btn btn-sm btn-danger" onclick="deleteEntry('${myEntryInGroup.id}')" aria-label="删除我的评价">删除</button></div>`;
       } else {
         const firstOther = group.find(e=>e.user_id!==currentUser.id);
         if (firstOther) cardActionsHtml = `<div class="mc-actions-mobile" onclick="event.stopPropagation()"><button class="btn btn-sm btn-secondary" onclick="addMyRating('${firstOther.id}')" aria-label="添加我的评分">＋我的评分</button></div>`;
@@ -2106,14 +2227,14 @@ function renderList() {
                 <span class="mc-dim-user" style="color:${uc.main}">${esc(ownerName)}</span>
                 <span class="mc-dim-dots">${dimTags(main, uc)}</span>
                 <span class="mc-dim-total" style="color:${uc.main}">总分 ${getEntryScore(main).toFixed(1)}</span>
-                ${isMine ? `<div class="mc-actions" onclick="event.stopPropagation()" style="margin-left:auto"><button class="btn btn-sm btn-secondary" onclick="${main.type==='series' ? `editEntry('${main.id}')` : `openQuickEdit('${main.id}')`}" aria-label="编辑 ${esc(ownerName)} 的评价">编辑</button><button class="btn btn-sm btn-danger" onclick="deleteEntry('${main.id}')" aria-label="删除 ${esc(ownerName)} 的评价">删除</button></div>` : `<div class="mc-actions" onclick="event.stopPropagation()" style="margin-left:auto"><button class="btn btn-sm btn-secondary" onclick="addMyRating('${main.id}')" aria-label="添加我对 ${esc(main.title)} 的评分">＋我的评分</button></div>`}
+                ${isMine ? `<div class="mc-actions" onclick="event.stopPropagation()" style="margin-left:auto"><button class="btn btn-sm btn-secondary" onclick="${editActionForEntry(main)}" aria-label="编辑 ${esc(ownerName)} 的评价">编辑</button><button class="btn btn-sm btn-danger" onclick="deleteEntry('${main.id}')" aria-label="删除 ${esc(ownerName)} 的评价">删除</button></div>` : `<div class="mc-actions" onclick="event.stopPropagation()" style="margin-left:auto"><button class="btn btn-sm btn-secondary" onclick="addMyRating('${main.id}')" aria-label="添加我对 ${esc(main.title)} 的评分">＋我的评分</button></div>`}
               </div>
             </div>
             ${main.comment ? `<div class="mc-comment">${esc(main.comment)}</div>` : ''}
           </div>
           ${isMine ? `
           <div class="mc-actions-mobile" onclick="event.stopPropagation()">
-            <button class="btn btn-sm btn-secondary" onclick="${main.type==='series' ? `editEntry('${main.id}')` : `openQuickEdit('${main.id}')`}" aria-label="编辑 ${esc(ownerName)} 的评价">编辑</button>
+            <button class="btn btn-sm btn-secondary" onclick="${editActionForEntry(main)}" aria-label="编辑 ${esc(ownerName)} 的评价">编辑</button>
             <button class="btn btn-sm btn-danger" onclick="deleteEntry('${main.id}')" aria-label="删除 ${esc(ownerName)} 的评价">删除</button>
           </div>` : `
           <div class="mc-actions-mobile" onclick="event.stopPropagation()">
@@ -2132,6 +2253,11 @@ function renderList() {
 async function showDetail(id) {
   const entry = allEntries.find(e=>e.id===id);
   if (!entry) return;
+  // Sync check: overview may already be in permanent store
+  if (entry.tmdb_id && !entry.overview) {
+    const ov = overviewStore.get(entry.tmdb_id);
+    if (ov) entry.overview = ov;
+  }
 
   const isMine = entry.user_id===currentUser.id;
   const ownerName = allProfiles[entry.user_id]?.display_name||'未知';
@@ -2161,7 +2287,7 @@ async function showDetail(id) {
       </div>
     </div>
     <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
-      ${Object.keys(WEIGHTS).map(dim=>`<span class="mc-dim-item" style="border-color:${getUserColor(entry.user_id).main}"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${getUserColor(entry.user_id).main}">${(entry.ratings||{})[dim]||5}</span></span>`).join('')}
+      ${buildDimTagsHTML(entry.ratings||{}, getUserColor(entry.user_id))}
     </div>
     ${entry.comment ? `<p style="font-style:italic;color:var(--text2);margin-bottom:12px">"${esc(entry.comment)}"</p>` : ''}
     ${seasons.length ? `
@@ -2185,36 +2311,55 @@ async function showDetail(id) {
               <span class="fr-score" style="color:${getUserColor(f.user_id).main}">${getEntryScore(f).toFixed(1)} / 10</span>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:0.75rem">
-              ${Object.keys(WEIGHTS).map(dim=>`<span class="mc-dim-item" style="border-color:${getUserColor(f.user_id).main}"><span class="dim-lab">${DIM_LABELS[dim].slice(0,2)}</span><span class="dim-val" style="color:${getUserColor(f.user_id).main}">${(f.ratings||{})[dim]||5}</span></span>`).join('')}
+              ${buildDimTagsHTML(f.ratings||{}, getUserColor(f.user_id))}
             </div>
             ${f.comment ? `<p style="font-size:0.8rem;color:var(--text2);font-style:italic;margin-top:4px">"${esc(f.comment)}"</p>` : ''}
           </div>
         `).join('')}
       </div>
     ` : ''}
-    ${entry.tmdb_id ? `<div class="tmdb-section" id="tmdbDetail-${entry.id}"><div class="detail-spinner"></div> 加载电影详情...</div>` : ''}
+    ${entry.tmdb_id ? `<div class="tmdb-section" id="tmdbDetail-${entry.id}">${entry.overview ? buildOverviewHTML('tmdbOv-'+entry.id, entry.overview) : `<div class="detail-spinner"></div> 加载电影详情...`}</div>` : ''}
     <div class="btn-group" style="justify-content:flex-end">
-      ${isMine ? `<button class="btn btn-secondary btn-sm" onclick="${entry.type==='series' ? `editEntry('${entry.id}');closeModal()` : `openQuickEdit('${entry.id}');closeModal()`}">编辑</button>` : ''}
+      ${isMine ? `<button class="btn btn-secondary btn-sm" onclick="${editActionForEntry(entry)};closeModal()">编辑</button>` : ''}
       <button class="btn btn-secondary btn-sm" onclick="closeModal()">关闭</button>
     </div>
   `;
   modal.classList.add('open');
 
-  // Async load TMDB detail if available
-  if (entry.tmdb_id) {
-    const tmdbSection = document.getElementById('tmdbDetail-' + entry.id);
-    const data = await fetchTmdbDetail(entry.tmdb_id);
-    if (!data || !tmdbSection) return;
-    const { details, credits } = data;
-    const overview = details.overview || '';
-    const director = (credits.crew||[]).find(c => c.job === 'Director');
-    const cast = (credits.cast||[]).slice(0, 6);
-    if (overview || director || cast.length) {
-      tmdbSection.innerHTML = `
-        ${overview ? `<h4>📖 简介</h4><div class="tmdb-overview" id="tmdbOv-${entry.id}">${esc(overview)}</div>${overview.length > 150 ? `<span class="tmdb-expand" onclick="document.getElementById('tmdbOv-${entry.id}').classList.toggle('expanded');this.textContent=this.textContent==='展开全部'?'收起':'展开全部'">展开全部</span>` : ''}` : ''}
-        ${director ? `<h4 style="margin-top:8px">🎬 导演</h4><div class="tmdb-cast"><span class="cast-chip">${esc(director.name)}</span></div>` : ''}
-        ${cast.length ? `<h4 style="margin-top:8px">👥 演员</h4><div class="tmdb-cast">${cast.map(c=>`<span class="cast-chip">${esc(c.name)}</span>`).join('')}</div>` : ''}
-      `;
+  // Show expand button if overview pre-rendered and overflows
+  if (entry.overview) checkOverviewOverflow('tmdbOv-' + entry.id);
+
+  // Async load TMDB credits for director/cast
+  if (entry.tmdb_id) loadAndRenderTmdbCredits(entry, 'tmdbDetail-' + entry.id);
+}
+
+// Shared async tail for showDetail/showMovieDetail: fetches credits and renders director/cast
+async function loadAndRenderTmdbCredits(entry, sectionId) {
+  const tmdbSection = document.getElementById(sectionId);
+  const data = await fetchTmdbDetail(entry.tmdb_id);
+  if (!data || !tmdbSection) return;
+  const { details, credits } = data;
+  const director = (credits.crew||[]).find(c => c.job === 'Director');
+  const cast = (credits.cast||[]).slice(0, 6);
+
+  const ovId = 'tmdbOv-' + entry.id;
+
+  // Lazy backfill: entry had no overview at render time
+  if (!entry.overview && details.overview) {
+    tmdbSection.innerHTML = buildOverviewHTML(ovId, details.overview);
+    backfillOverviewToDB(entry, details.overview);
+    overviewStore.set(entry.tmdb_id, details.overview);
+    checkOverviewOverflow(ovId);
+  }
+
+  if (director || cast.length) {
+    const extra = buildDirectorCastHTML(director, cast);
+    if (extra) tmdbSection.insertAdjacentHTML('beforeend', extra);
+  } else if (tmdbSection.querySelector('.detail-spinner')) {
+    // Prefetch may have backfilled overview while we were fetching credits
+    if (entry.overview) {
+      tmdbSection.innerHTML = buildOverviewHTML(ovId, entry.overview);
+      checkOverviewOverflow(ovId);
     } else {
       tmdbSection.innerHTML = '';
     }
@@ -2225,6 +2370,13 @@ async function showDetail(id) {
 async function showMovieDetail(tmdbId) {
   const movie = discoverMovieMap[tmdbId];
   if (!movie) return;
+
+  // Sync check: overview may already be in permanent store (e.g. from entry detail or previous session)
+  if (!movie.overview) {
+    const ov = overviewStore.get(tmdbId);
+    if (ov) movie.overview = ov;
+  }
+
   const ratedTmdbIds = new Set(allEntries.filter(e=>e.user_id===currentUser.id && e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
   const isRated = ratedTmdbIds.has('tmdb_'+tmdbId);
   const myEntry = isRated ? allEntries.find(e=>e.user_id===currentUser.id && e.tmdb_id===tmdbId) : null;
@@ -2248,7 +2400,7 @@ async function showMovieDetail(tmdbId) {
       </div>
     </div>
     <div class="tmdb-section" id="tmdbDiscoverDetail">
-      <div class="detail-spinner"></div> 加载电影详情...
+      ${movie.overview ? buildOverviewHTML('tmdbOv-d-'+tmdbId, movie.overview) : `<div class="detail-spinner"></div> 加载电影详情...`}
     </div>
     <div class="btn-group" style="justify-content:flex-end;margin-top:8px">
       ${!isRated ? `<button class="btn btn-primary btn-sm" onclick="closeModal();openQuickRate({id:${tmdbId},title:'${esc(movie.title).replace(/'/g,"\\'")}',release_date:'${movie.release_date||''}',poster_path:'${movie.poster_path||''}'})">＋我的评分</button>` : ''}
@@ -2257,23 +2409,35 @@ async function showMovieDetail(tmdbId) {
   `;
   $['detailModal'].classList.add('open');
 
-  // Async load TMDB detail
+  if (movie.overview) checkOverviewOverflow('tmdbOv-d-' + tmdbId);
+
+  // Async load TMDB credits for director/cast
   const tmdbSection = document.getElementById('tmdbDiscoverDetail');
   const data = await fetchTmdbDetail(tmdbId);
   if (!data || !tmdbSection) return;
   const { details, credits } = data;
-  const overview = details.overview || '';
+  const ovId = 'tmdbOv-d-' + tmdbId;
+
+  // Lazy backfill: movie had no overview at render time, but fetch returned one
+  if (!movie.overview && details.overview) {
+    movie.overview = details.overview;
+    overviewStore.set(tmdbId, details.overview);
+    tmdbSection.innerHTML = buildOverviewHTML(ovId, details.overview);
+    checkOverviewOverflow(ovId);
+  }
+
   const director = (credits.crew||[]).find(c => c.job === 'Director');
   const cast = (credits.cast||[]).slice(0, 6);
-  if (overview || director || cast.length) {
-    const uid = tmdbId; // unique enough for DOM id
-    tmdbSection.innerHTML = `
-      ${overview ? `<h4>📖 简介</h4><div class="tmdb-overview" id="tmdbOv-d-${uid}">${esc(overview)}</div>${overview.length > 150 ? `<span class="tmdb-expand" onclick="document.getElementById('tmdbOv-d-${uid}').classList.toggle('expanded');this.textContent=this.textContent==='展开全部'?'收起':'展开全部'">展开全部</span>` : ''}` : ''}
-      ${director ? `<h4 style="margin-top:8px">🎬 导演</h4><div class="tmdb-cast"><span class="cast-chip">${esc(director.name)}</span></div>` : ''}
-      ${cast.length ? `<h4 style="margin-top:8px">👥 演员</h4><div class="tmdb-cast">${cast.map(c=>`<span class="cast-chip">${esc(c.name)}</span>`).join('')}</div>` : ''}
-    `;
-  } else {
-    tmdbSection.innerHTML = '<p style="font-size:0.8rem;color:var(--text2)">暂无详细信息</p>';
+  if (director || cast.length) {
+    const extra = buildDirectorCastHTML(director, cast);
+    if (extra) tmdbSection.insertAdjacentHTML('beforeend', extra);
+  } else if (tmdbSection.querySelector('.detail-spinner')) {
+    if (movie.overview) {
+      tmdbSection.innerHTML = buildOverviewHTML(ovId, movie.overview);
+      checkOverviewOverflow(ovId);
+    } else {
+      tmdbSection.innerHTML = '<p style="font-size:0.8rem;color:var(--text2)">暂无详细信息</p>';
+    }
   }
 }
 
@@ -2365,6 +2529,71 @@ function filterByType(entries) {
   return entries.filter(e=>e.type===statsType);
 }
 
+// Stats sub-renderers
+function buildMeStatsHTML(myStats, myColor, typeSuffix) {
+  return `<div class="stats-grid">${renderStatCards(myStats, myColor)}</div>
+    <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分${typeSuffix}</h3>
+    ${renderDimBars(myStats.dimAvgs, myColor)}
+    <h3 style="margin:20px 0 10px;font-size:0.9rem;color:var(--text2)">评分分布${typeSuffix}</h3>
+    <div class="score-dist">${renderDist(myStats.dist, myColor)}</div>`;
+}
+
+function buildOthersStatsHTML(otherStats, otherColor, typeSuffix, otherName) {
+  return `<h3 style="margin-bottom:14px;font-size:0.9rem;color:${otherColor.main}">${esc(otherName)}${typeSuffix}</h3>
+    <div class="stats-grid">${renderStatCards(otherStats, otherColor)}</div>
+    <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分</h3>
+    ${renderDimBars(otherStats.dimAvgs, otherColor)}
+    <h3 style="margin:20px 0 10px;font-size:0.9rem;color:var(--text2)">评分分布</h3>
+    <div class="score-dist">${renderDist(otherStats.dist, otherColor)}</div>`;
+}
+
+function buildCompareStatsHTML(myStats, otherStats, myColor, otherColor, typeSuffix) {
+  const myName = currentProfile?.display_name||'我';
+  const otherLabel = statsOtherUser ? (allProfiles[statsOtherUser]?.display_name||'对方') : '所有他人';
+  let html = `<div class="stats-grid">
+    <div class="stat-card"><div class="stat-value" style="color:${myColor.main}">${myStats?myStats.avgTotal.toFixed(1):'-'}</div><div class="stat-label">${esc(myName)}均分${typeSuffix}</div></div>
+    <div class="stat-card"><div class="stat-value" style="color:${otherColor.main}">${otherStats?otherStats.avgTotal.toFixed(1):'-'}</div><div class="stat-label">${esc(otherLabel)}均分${typeSuffix}</div></div>
+    <div class="stat-card"><div class="stat-value">${myStats?myStats.movies:0}/${otherStats?otherStats.movies:0}</div><div class="stat-label">电影 (我/${esc(otherLabel)})</div></div>
+    <div class="stat-card"><div class="stat-value">${myStats?myStats.series:0}/${otherStats?otherStats.series:0}</div><div class="stat-label">剧集 (我/${esc(otherLabel)})</div></div>
+    <div class="stat-card"><div class="stat-value">${myStats?myStats.count:0}/${otherStats?otherStats.count:0}</div><div class="stat-label">总计 (我/${esc(otherLabel)})</div></div>
+  </div>
+  <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分对比 <span style="font-size:0.75rem"><span style="color:${myColor.main}">${esc(myName)}</span> / <span style="color:${otherColor.main}">${esc(otherLabel)}</span></span></h3>`;
+  for (const dim of Object.keys(WEIGHTS)) {
+    const mv = myStats?myStats.dimAvgs[dim]:0;
+    const ov = otherStats?otherStats.dimAvgs[dim]:0;
+    html += `<div class="stat-compare-row">
+      <span class="stat-compare-label">${DIM_LABELS[dim]}</span>
+      <div class="stat-compare-bars">
+        <div style="height:7px;border-radius:3px;background:${myColor.main};width:${(mv/10)*100}%"></div>
+        <div style="height:7px;border-radius:3px;background:${otherColor.main};width:${(ov/10)*100}%"></div>
+      </div>
+      <div class="stat-compare-values">
+        <span style="color:${myColor.main}">${mv.toFixed(1)}</span>
+        <span style="color:${otherColor.main}">${ov.toFixed(1)}</span>
+      </div>
+    </div>`;
+  }
+  html += `<h3 style="margin:20px 0 10px;font-size:0.9rem;color:var(--text2)">评分分布对比</h3>
+  <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:0.65rem">
+    <span style="display:inline-block;width:10px;height:10px;background:${myColor.main};border-radius:2px"></span> ${esc(myName)}
+    <span style="display:inline-block;width:10px;height:10px;background:${otherColor.main};border-radius:2px"></span> ${esc(otherLabel)}
+  </div>
+  <div class="compare-dist">
+    ${(myStats?myStats.dist:new Array(10).fill(0)).map((c,i)=>{
+      const oc = otherStats?otherStats.dist[i]:0;
+      const maxAll = Math.max(...(myStats?myStats.dist:[]),...(otherStats?otherStats.dist:[]),1);
+      return `<div class="cd-bar-group">
+        <div class="cd-bars">
+          ${c?`<div class="cd-bar" style="height:${Math.max((c/maxAll)*100,4)}%;background:${myColor.main}"><span class="cd-count">${c}</span></div>`:''}
+          ${oc?`<div class="cd-bar" style="height:${Math.max((oc/maxAll)*100,4)}%;background:${otherColor.main}"><span class="cd-count">${oc}</span></div>`:''}
+        </div>
+        <span class="cd-label">${i+1}分</span>
+      </div>`;
+    }).join('')}
+  </div>`;
+  return html;
+}
+
 function renderStats() {
   const container = $['statsContent'];
   const userRow = document.getElementById('statsUserRow');
@@ -2372,16 +2601,16 @@ function renderStats() {
 
   // Show/hide user picker for "others" and "compare" filters
   if (statsFilter==='others' || statsFilter==='compare') {
-    userRow.style.display = '';
+    userRow.classList.remove('hidden');
     const otherUsers = [...new Set(allEntries.filter(e=>e.user_id!==currentUser.id).map(e=>e.user_id))];
     const currentVal = userPicker.value;
     userPicker.innerHTML = '<option value="">所有他人</option>' + otherUsers.map(uid=>{
       const name = allProfiles[uid]?.display_name||uid.slice(0,8);
       return `<option value="${uid}"${currentVal===uid?' selected':''}>${esc(name)}</option>`;
     }).join('');
-    if (!otherUsers.length) userRow.style.display = 'none';
+    if (!otherUsers.length) userRow.classList.add('hidden');
   } else {
-    userRow.style.display = 'none';
+    userRow.classList.add('hidden');
     statsOtherUser = null;
   }
 
@@ -2412,66 +2641,13 @@ function renderStats() {
 
   if (statsFilter==='me') {
     if (!myStats) { container.innerHTML = '<div class="empty-state"><p>暂无评价数据</p></div>'; return; }
-    html += `<div class="stats-grid">${renderStatCards(myStats, myColor)}</div>
-      <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分${typeSuffix}</h3>
-      ${renderDimBars(myStats.dimAvgs, myColor)}
-      <h3 style="margin:20px 0 10px;font-size:0.9rem;color:var(--text2)">评分分布${typeSuffix}</h3>
-      <div class="score-dist">${renderDist(myStats.dist, myColor)}</div>`;
-
+    html = buildMeStatsHTML(myStats, myColor, typeSuffix);
   } else if (statsFilter==='others') {
     if (!otherStats) { container.innerHTML = '<div class="empty-state"><p>暂无评价数据</p></div>'; return; }
     const otherName = statsOtherUser ? (allProfiles[statsOtherUser]?.display_name||'用户') : '所有他人';
-    html += `<h3 style="margin-bottom:14px;font-size:0.9rem;color:${otherColor.main}">${esc(otherName)}${typeSuffix}</h3>
-      <div class="stats-grid">${renderStatCards(otherStats, otherColor)}</div>
-      <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分</h3>
-      ${renderDimBars(otherStats.dimAvgs, otherColor)}
-      <h3 style="margin:20px 0 10px;font-size:0.9rem;color:var(--text2)">评分分布</h3>
-      <div class="score-dist">${renderDist(otherStats.dist, otherColor)}</div>`;
-
+    html = buildOthersStatsHTML(otherStats, otherColor, typeSuffix, otherName);
   } else if (statsFilter==='compare') {
-    const myName = currentProfile?.display_name||'我';
-    const otherLabel = statsOtherUser ? (allProfiles[statsOtherUser]?.display_name||'对方') : (otherEntries.length>1?'平均':(otherEntries.length>0?allProfiles[otherEntries[0].user_id]?.display_name||'对方':'对方'));
-    html += `<div class="stats-grid">
-      <div class="stat-card"><div class="stat-value" style="color:${myColor.main}">${myStats?myStats.avgTotal.toFixed(1):'-'}</div><div class="stat-label">${esc(myName)}均分${typeSuffix}</div></div>
-      <div class="stat-card"><div class="stat-value" style="color:${otherColor.main}">${otherStats?otherStats.avgTotal.toFixed(1):'-'}</div><div class="stat-label">${esc(otherLabel)}均分${typeSuffix}</div></div>
-      <div class="stat-card"><div class="stat-value">${myStats?myStats.movies:0}/${otherStats?otherStats.movies:0}</div><div class="stat-label">电影 (我/${esc(otherLabel)})</div></div>
-      <div class="stat-card"><div class="stat-value">${myStats?myStats.series:0}/${otherStats?otherStats.series:0}</div><div class="stat-label">剧集 (我/${esc(otherLabel)})</div></div>
-      <div class="stat-card"><div class="stat-value">${myStats?myStats.count:0}/${otherStats?otherStats.count:0}</div><div class="stat-label">总计 (我/${esc(otherLabel)})</div></div>
-    </div>
-    <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分对比 <span style="font-size:0.75rem"><span style="color:${myColor.main}">${esc(myName)}</span> / <span style="color:${otherColor.main}">${esc(otherLabel)}</span></span></h3>`;
-    for (const dim of Object.keys(WEIGHTS)) {
-      const mv = myStats?myStats.dimAvgs[dim]:0;
-      const ov = otherStats?otherStats.dimAvgs[dim]:0;
-      html += `<div class="stat-compare-row">
-        <span class="stat-compare-label">${DIM_LABELS[dim]}</span>
-        <div class="stat-compare-bars">
-          <div style="height:7px;border-radius:3px;background:${myColor.main};width:${(mv/10)*100}%"></div>
-          <div style="height:7px;border-radius:3px;background:${otherColor.main};width:${(ov/10)*100}%"></div>
-        </div>
-        <div class="stat-compare-values">
-          <span style="color:${myColor.main}">${mv.toFixed(1)}</span>
-          <span style="color:${otherColor.main}">${ov.toFixed(1)}</span>
-        </div>
-      </div>`;
-    }
-    html += `<h3 style="margin:20px 0 10px;font-size:0.9rem;color:var(--text2)">评分分布对比</h3>
-    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:0.65rem">
-      <span style="display:inline-block;width:10px;height:10px;background:${myColor.main};border-radius:2px"></span> ${esc(myName)}
-      <span style="display:inline-block;width:10px;height:10px;background:${otherColor.main};border-radius:2px"></span> ${esc(otherLabel)}
-    </div>
-    <div class="compare-dist">
-      ${(myStats?myStats.dist:new Array(10).fill(0)).map((c,i)=>{
-        const oc = otherStats?otherStats.dist[i]:0;
-        const maxAll = Math.max(...(myStats?myStats.dist:[]),...(otherStats?otherStats.dist:[]),1);
-        return `<div class="cd-bar-group">
-          <div class="cd-bars">
-            ${c?`<div class="cd-bar" style="height:${Math.max((c/maxAll)*100,4)}%;background:${myColor.main}"><span class="cd-count">${c}</span></div>`:''}
-            ${oc?`<div class="cd-bar" style="height:${Math.max((oc/maxAll)*100,4)}%;background:${otherColor.main}"><span class="cd-count">${oc}</span></div>`:''}
-          </div>
-          <span class="cd-label">${i+1}分</span>
-        </div>`;
-      }).join('')}
-    </div>`;
+    html = buildCompareStatsHTML(myStats, otherStats, myColor, otherColor, typeSuffix);
   }
 
   container.innerHTML = html;
@@ -2481,7 +2657,6 @@ function renderStats() {
 let discoverTab = 'recommend';
 let discoverPage = { recommend: 1, toprated: 1 };
 let discoverCache = { recommend: null, week: null, toprated: null };
-let discoverVisitCount = { recommend: 0 };
 let topratedFilterUnwatched = false;
 let discoverLastRefresh = 0;
 let discoverCooldownTimer = null;
@@ -2494,7 +2669,6 @@ let discoverLastShownIds = [];
 
 // Blocked movies (不再推荐)
 let blockedMovieIds = new Set();
-let blockedMoviesLoaded = false;
 let blockedPage = 1;
 
 async function loadBlockedMovies() {
@@ -2505,7 +2679,6 @@ async function loadBlockedMovies() {
   if (!error && data) {
     blockedMovieIds = new Set(data.map(r => r.tmdb_id));
   }
-  blockedMoviesLoaded = true;
 }
 
 function updateRecTabLabel() {
@@ -2514,7 +2687,7 @@ function updateRecTabLabel() {
   const ratedCount = allEntries.filter(e=>e.user_id===currentUser?.id && e.type==='movie').length;
   const uname = getUserName(currentUser?.id);
   btn.classList.remove('ceci-tab','fd-tab');
-  btn.style.display = '';
+  btn.classList.remove('hidden');
   const advanced = ratedCount >= 100;
   if (uname === 'ceci') {
     btn.textContent = advanced ? 'FD精心推荐' : 'FD推荐';
@@ -2680,22 +2853,61 @@ $['blockedModal'].addEventListener('click', e => {
   }
 });
 
-function selectWithFreshness(candidates, count, lastShownIds, minNewRatio) {
-  if (!lastShownIds.length) return candidates.slice(0, count);
-  const lastSet = new Set(lastShownIds);
-  const newFaces = candidates.filter(m => !lastSet.has(m.id));
-  const oldFaces = candidates.filter(m => lastSet.has(m.id));
-  const minNew = Math.ceil(count * minNewRatio);
-  if (newFaces.length >= count) {
-    return newFaces.slice(0, count);
-  }
-  // Not enough new faces — fill with old faces but ensure >= minNew new
-  const result = [...newFaces];
-  const needed = count - result.length;
-  const newNeeded = Math.max(0, minNew - result.length);
-  result.push(...oldFaces.slice(0, needed));
-  // If still short on new faces, just return what we have (extreme case)
-  return result.slice(0, count);
+// Discover sub-tab renderers
+function renderWeekDiscover(container, movies, ratedTmdbIds) {
+  const visibleMovies = movies.filter(m => !blockedMovieIds.has(m.id));
+  container.innerHTML = `
+    <div class="discover-topbar"><span class="topbar-count">共 ${visibleMovies.length} 部</span></div>
+    <div class="discover-grid">
+      ${visibleMovies.map(m=>renderDiscoverCard(m, ratedTmdbIds)).join('')}
+    </div>
+  `;
+}
+
+function renderTopRatedDiscover(container, movies, ratedTmdbIds) {
+  const unblockedMovies = movies.filter(m => !blockedMovieIds.has(m.id));
+  const filteredMovies = topratedFilterUnwatched ? unblockedMovies.filter(m=>!ratedTmdbIds.has('tmdb_'+m.id)) : unblockedMovies;
+  const page = discoverPage.toprated || 1;
+  const pageSize = 20;
+  const totalPages = Math.ceil(filteredMovies.length / pageSize);
+  const start = (page-1)*pageSize;
+  const pageMovies = filteredMovies.slice(start, start+pageSize);
+
+  container.innerHTML = `
+    <div class="discover-topbar">
+      <span class="topbar-count">${topratedFilterUnwatched ? '未看 ' : '共 '}${filteredMovies.length} 部</span>
+      <button class="toggle-pill ${topratedFilterUnwatched?'active':''}" onclick="topratedFilterUnwatched=!topratedFilterUnwatched;discoverPage.toprated=1;renderDiscover()">只看未看</button>
+    </div>
+    <div class="discover-grid">
+      ${pageMovies.map(m=>renderDiscoverCard(m, ratedTmdbIds)).join('')}
+    </div>
+    ${filteredMovies.length ? discoverPaginationHTML(page, totalPages) : '<div class="empty-state"><p>全部已看过</p></div>'}
+  `;
+}
+
+function renderRecommendDiscover(container, movies, ratedTmdbIds) {
+  const ratedCount = allEntries.filter(e=>e.user_id===currentUser.id && e.type==='movie').length;
+  const advanced = ratedCount >= 100;
+  const pageSize = advanced ? 24 : 12;
+
+  // Filter out blocked movies (Worker already handles freshness via excludeIds)
+  const unblockedMovies = movies.filter(m => !blockedMovieIds.has(m.id));
+  const displayMovies = unblockedMovies.slice(0, pageSize);
+
+  // Track shown tmdb_ids for next refresh freshness check
+  discoverLastShownIds = displayMovies.map(m=>m.id);
+
+  container.innerHTML = `
+    <div class="discover-topbar">
+      <button class="btn btn-sm btn-secondary" id="discoverRefreshBtn">🔄 刷新推荐</button>
+      <span id="discoverRefreshHint" style="font-size:0.75rem;color:var(--text2)"></span>
+    </div>
+    <div class="discover-grid">
+      ${displayMovies.map(m=>renderDiscoverCard(m, ratedTmdbIds, true)).join('')}
+    </div>
+  `;
+  bindDiscoverRefresh();
+  updateRefreshUI();
 }
 
 async function renderDiscover() {
@@ -2713,7 +2925,6 @@ async function renderDiscover() {
       movies = await loadTopRated();
     }
   } catch(e) {
-    // Only render error if tab hasn't changed since we started
     if (discoverTab === tab) container.innerHTML = '<div class="empty-state"><p>加载失败，请稍后重试</p></div>';
     return;
   }
@@ -2736,68 +2947,9 @@ async function renderDiscover() {
 
   const ratedTmdbIds = new Set(allEntries.filter(e=>e.user_id===currentUser.id && e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
 
-  // ── Week: show all 32, no pagination ──
-  if (tab === 'week') {
-    const visibleMovies = movies.filter(m => !blockedMovieIds.has(m.id));
-    container.innerHTML = `
-      <div class="discover-topbar"><span class="topbar-count">共 ${visibleMovies.length} 部</span></div>
-      <div class="discover-grid">
-        ${visibleMovies.map(m=>renderDiscoverCard(m, ratedTmdbIds)).join('')}
-      </div>
-    `;
-    return;
-  }
-
-  // ── TopRated: default show full list + toggle filter ──
-  if (tab === 'toprated') {
-    const unblockedMovies = movies.filter(m => !blockedMovieIds.has(m.id));
-    const filteredMovies = topratedFilterUnwatched ? unblockedMovies.filter(m=>!ratedTmdbIds.has('tmdb_'+m.id)) : unblockedMovies;
-    const page = discoverPage.toprated || 1;
-    const pageSize = 20;
-    const totalPages = Math.ceil(filteredMovies.length / pageSize);
-    const start = (page-1)*pageSize;
-    const pageMovies = filteredMovies.slice(start, start+pageSize);
-
-    container.innerHTML = `
-      <div class="discover-topbar">
-        <span class="topbar-count">${topratedFilterUnwatched ? '未看 ' : '共 '}${filteredMovies.length} 部</span>
-        <button class="toggle-pill ${topratedFilterUnwatched?'active':''}" onclick="topratedFilterUnwatched=!topratedFilterUnwatched;discoverPage.toprated=1;renderDiscover()">只看未看</button>
-      </div>
-      <div class="discover-grid">
-        ${pageMovies.map(m=>renderDiscoverCard(m, ratedTmdbIds)).join('')}
-      </div>
-      ${filteredMovies.length ? discoverPaginationHTML(page, totalPages) : '<div class="empty-state"><p>全部已看过</p></div>'}
-    `;
-    return;
-  }
-
-  // ── Recommend: no pagination, dynamic count ──
-  const ratedCount = allEntries.filter(e=>e.user_id===currentUser.id && e.type==='movie').length;
-  const advanced = ratedCount >= 100;
-  const pageSize = advanced ? 24 : 12;
-
-  // Filter out blocked movies before freshness selection
-  const unblockedMovies = movies.filter(m => !blockedMovieIds.has(m.id));
-
-  // Select movies ensuring freshness on refresh, or top N on first load
-  const displayMovies = discoverLastShownIds.length
-    ? selectWithFreshness(unblockedMovies, pageSize, discoverLastShownIds, 0.75)
-    : unblockedMovies.slice(0, pageSize);
-
-  // Track shown tmdb_ids for next refresh freshness check
-  discoverLastShownIds = displayMovies.map(m=>m.id);
-
-  container.innerHTML = `
-    <div class="discover-topbar">
-      <button class="btn btn-sm btn-secondary" id="discoverRefreshBtn">🔄 刷新推荐</button>
-      <span id="discoverRefreshHint" style="font-size:0.75rem;color:var(--text2)"></span>
-    </div>
-    <div class="discover-grid">
-      ${displayMovies.map(m=>renderDiscoverCard(m, ratedTmdbIds, true)).join('')}
-    </div>
-  `;
-  bindDiscoverRefresh();
-  updateRefreshUI();
+  if (tab === 'week') renderWeekDiscover(container, movies, ratedTmdbIds);
+  else if (tab === 'toprated') renderTopRatedDiscover(container, movies, ratedTmdbIds);
+  else renderRecommendDiscover(container, movies, ratedTmdbIds);
 }
 
 async function blockMovie(tmdbId, cardEl) {
@@ -3000,7 +3152,8 @@ async function loadRecommendations() {
         body: JSON.stringify({
           entries: allEntries,
           userId: currentUser.id,
-          blockedIds: [...blockedMovieIds]
+          blockedIds: [...blockedMovieIds],
+          excludeIds: discoverLastShownIds
         }),
       });
       const data = await res.json();
@@ -3134,6 +3287,17 @@ $['qrSubmit'].addEventListener('click', async ()=>{
   }
 
   toast(isEdit ? '评价已更新！' : '评价已保存！');
+  // Fire-and-forget: backfill overview for new entries (non-blocking)
+  if (!isEdit && quickRateMovie.tmdb_id) {
+    fetchOverview(quickRateMovie.tmdb_id).then(overview => {
+      if (overview) {
+        overviewStore.set(quickRateMovie.tmdb_id, overview);
+        db.from('entries').update({ overview }).eq('tmdb_id', quickRateMovie.tmdb_id).eq('user_id', currentUser.id).then(()=>{}).catch(()=>{});
+        const e = allEntries.find(x => x.tmdb_id === quickRateMovie.tmdb_id && x.user_id === currentUser.id);
+        if (e) e.overview = overview;
+      }
+    });
+  }
   $['quickRateModal'].classList.remove('open');
   quickRateMovie = null;
   quickEditEntryId = null;

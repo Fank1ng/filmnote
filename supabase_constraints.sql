@@ -34,3 +34,6 @@ CREATE POLICY "Users can insert own blocked movies"
 CREATE POLICY "Users can delete own blocked movies"
   ON blocked_movies FOR DELETE
   USING (auth.uid() = user_id);
+
+-- 5. Store TMDB overview in entries for instant detail display
+ALTER TABLE entries ADD COLUMN IF NOT EXISTS overview TEXT;

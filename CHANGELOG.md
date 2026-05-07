@@ -1,5 +1,23 @@
 # FD&Ceci 更新日志
 
+## 2026-05-07
+
+### 电影详情永久缓存体系
+- **movieCache 完整缓存**：localStorage 永久存储 genres、vote_average、runtime、director、cast，与 overview 统一存取路径
+- **Worker `/prefetch` 扩展**：返回 `details` 字段（完整 TMDB detail 对象），不再仅返回 overview 字符串
+- **`extractMovieDetail` + `buildTmdbDetailHTML`**：统一提取/渲染逻辑，详情弹窗缓存命中时零网络请求
+- **三级缓存渲染**：完整缓存 → overview-only → spinner，同步判断无需等待
+
+### Worker 4端点迁移（前端减负）
+- **`/detail/:tmdbId`**：合并 detail+credits 单次请求，消除双 HTTP 往返
+- **`/titles`**：批量获取 original_title 替代串行预热
+- **`/prefetch`**：增加 `return_overviews` 参数，一次拉取批量 overview
+- **`/recommend`**：服务端 `exclude` 过滤替代客户端 `selectWithFreshness()`
+
+### simplify + 5-agent 审查清理
+- **`/simplify` 5项**：`setBatch` 优化、删除 `warmTitleTimer`、prefetch 反向索引 O(n²)→O(n+m)、Worker 避免种子 Set 预计算、提取 `buildAvoidGenreSet`
+- **5-agent 审查 5项**：删除死代码（`buildDirectorCastHTML`/`hasOverview`）、消除重复 JSON.parse、genres `esc()` 缺失、N+1 DB 批量 UPDATE、catch 块错误日志
+
 ## 2026-05-06
 
 ### "不再推荐" UI 优化

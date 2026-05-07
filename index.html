@@ -1272,7 +1272,6 @@ function setCache(key, data) {
   try { localStorage.setItem(CACHE_KEY + key, JSON.stringify({data, ts: Date.now()})); } catch {}
 }
 
-// Overview store: single source of truth, permanent localStorage, keyed by tmdb_id
 // Movie cache: permanent localStorage for TMDB detail (overview, genres, vote, director, cast)
 const movieCache = (() => {
   const KEY = 'filmnote_movie_cache';
@@ -1311,10 +1310,7 @@ const movieCache = (() => {
       const c = loadAll()[tmdbId];
       return !!(c && (c.director || (c.cast && c.cast.length)));
     },
-    hasOverview(tmdbId) {
-      const c = loadAll()[tmdbId];
-      return !!(c && c.overview);
-    },
+
     set(tmdbId, data) {
       if (!tmdbId || !data) return;
       const all = loadAll();
@@ -1451,12 +1447,6 @@ async function backfillOverviewToDB(entry, overview) {
   db.from('entries').update({ overview }).eq('id', entry.id).then(()=>{}).catch(()=>{});
 }
 
-function buildDirectorCastHTML(director, cast) {
-  const parts = [];
-  if (director) parts.push(`<h4 style="margin-top:8px">🎬 导演</h4><div class="tmdb-cast"><span class="cast-chip">${esc(director.name)}</span></div>`);
-  if (cast.length) parts.push(`<h4 style="margin-top:8px">👥 演员</h4><div class="tmdb-cast">${cast.map(c=>`<span class="cast-chip">${esc(c.name)}</span>`).join('')}</div>`);
-  return parts.join('');
-}
 
 // Extract clean cacheable object from raw TMDB detail+credits response
 function extractMovieDetail(details, credits) {
@@ -1530,18 +1520,29 @@ async function prefetchOverviews() {
           if (!byTmdbId[entry.tmdb_id]) byTmdbId[entry.tmdb_id] = [];
           byTmdbId[entry.tmdb_id].push(entry);
         }
+        // Batch DB updates by overview value, max 50 per batch
+        const byOverview = {};
         for (const [tmdbId, overview] of Object.entries(overviews)) {
           const entries = byTmdbId[parseInt(tmdbId)];
           if (entries) {
             for (const entry of entries) {
-              backfillOverviewToDB(entry, overview);
               entry.overview = overview;
+              if (entry.user_id === currentUser?.id && entry.id) {
+                if (!byOverview[overview]) byOverview[overview] = [];
+                byOverview[overview].push(entry.id);
+              }
             }
+          }
+        }
+        for (const [overview, entryIds] of Object.entries(byOverview)) {
+          for (let i = 0; i < entryIds.length; i += 50) {
+            const batch = entryIds.slice(i, i + 50);
+            db.from('entries').update({ overview }).in('id', batch).then(()=>{}).catch(()=>{});
           }
         }
       }
     }
-  } catch(e) {}
+  } catch(e) { console.warn('prefetchOverviews failed:', e); }
 }
 
 async function warmOriginalTitleCache() {
@@ -1558,7 +1559,7 @@ async function warmOriginalTitleCache() {
       const data = await res.json();
       Object.assign(originalTitleCache, data.results);
     }
-  } catch(e) {}
+  } catch(e) { console.warn('warmOriginalTitleCache failed:', e); }
 }
 
 // One-time KV cache backfill — collects all unique movie tmdb_ids and pre-warms via Worker
@@ -1578,7 +1579,7 @@ async function backfillKvCache() {
       const data = await res.json();
       console.log('KV backfill done:', data);
     }
-  } catch (e) { /* silent */ }
+  } catch (e) { console.warn('backfillKvCache failed:', e); }
 }
 
 function getActiveTab() {
@@ -2355,7 +2356,7 @@ async function showDetail(id) {
   const entry = allEntries.find(e=>e.id===id);
   if (!entry) return;
   const cached = entry.tmdb_id ? movieCache.get(entry.tmdb_id) : null;
-  const hasFullCache = cached && movieCache.hasFull(entry.tmdb_id);
+  const hasFullCache = cached && (cached.director || (cached.cast && cached.cast.length));
   if (!entry.overview && cached?.overview) entry.overview = cached.overview;
 
   const isMine = entry.user_id===currentUser.id;
@@ -2440,7 +2441,6 @@ async function showDetail(id) {
   }
 }
 
-// Shared async tail for showDetail/showMovieDetail: fetches credits and renders director/cast
 // Unified async: fetch TMDB detail, cache full data, render complete section
 async function fetchAndRenderTmdbDetail(tmdbId, sectionId, ovId, onBackfill) {
   const section = document.getElementById(sectionId);
@@ -2466,7 +2466,7 @@ async function showMovieDetail(tmdbId) {
   if (!movie) return;
 
   const cached = movieCache.get(tmdbId);
-  const hasFullCache = cached && movieCache.hasFull(tmdbId);
+  const hasFullCache = cached && (cached.director || (cached.cast && cached.cast.length));
   if (!movie.overview && cached?.overview) movie.overview = cached.overview;
 
   const ratedTmdbIds = new Set(allEntries.filter(e=>e.user_id===currentUser.id && e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
@@ -2487,7 +2487,7 @@ async function showMovieDetail(tmdbId) {
         ${movie.original_language ? `<p style="color:var(--text2);font-size:0.8rem">${movie.original_language.toUpperCase()}</p>` : ''}
         <div style="display:flex;align-items:center;gap:10px;margin-top:6px">
           ${movie.vote_average ? `<span style="font-size:1.3rem;font-weight:800;color:var(--gold)">⭐ ${movie.vote_average.toFixed(1)}</span>` : ''}
-          ${genres.length ? genres.map(g=>`<span style="font-size:0.7rem;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,0.06);color:var(--text2)">${g}</span>`).join('') : ''}
+          ${genres.length ? genres.map(g=>`<span style="font-size:0.7rem;padding:2px 8px;border-radius:10px;background:rgba(255,255,255,0.06);color:var(--text2)">${esc(g)}</span>`).join('') : ''}
         </div>
         ${isRated && myEntry ? `<p style="font-size:0.85rem;color:var(--gold);margin-top:4px">已评价 · 你的评分 ${getEntryScore(myEntry).toFixed(1)}</p>` : ''}
       </div>

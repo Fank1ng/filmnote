@@ -138,17 +138,29 @@ function computeDecadeBonus(releaseYear, decadeProfile) {
   return decAvg !== undefined ? Math.min(decAvg / 10, 1) : 0.3;
 }
 
-function computeAvoidPenalty(candidate, avoidSeeds, avoidGenreSet, fullGenres, candidateKeywords) {
+function buildAvoidGenreSet(avoidSeeds) {
+  const s = new Set();
+  for (const seed of avoidSeeds) {
+    (seed._fetchedGenres || []).forEach(g => s.add(g));
+  }
+  return s;
+}
+
+function buildAvoidKwSets(avoidSeeds) {
+  return avoidSeeds.map(as => as._keywords?.length ? new Set(as._keywords) : null);
+}
+
+function computeAvoidPenalty(candidate, avoidSeeds, avoidGenreSet, fullGenres, candidateKeywords, avoidKwSets) {
   if (!avoidSeeds.length) return 0;
   let gOverlap = 0, kwOverlap = 0;
-  for (const as of avoidSeeds) {
+  for (let i = 0; i < avoidSeeds.length; i++) {
+    const as = avoidSeeds[i];
     if (as._fetchedGenres && as._fetchedGenres.length && fullGenres && fullGenres.length) {
       const olap = fullGenres.filter(g => avoidGenreSet.has(g)).length;
       gOverlap = Math.max(gOverlap, olap / Math.max(as._fetchedGenres.length, 1));
     }
-    if (as._keywords && as._keywords.length && candidateKeywords && candidateKeywords.length) {
-      const asKwSet = new Set(as._keywords);
-      const olap = candidateKeywords.filter(k => asKwSet.has(k)).length;
+    if (candidateKeywords && candidateKeywords.length && avoidKwSets[i]) {
+      const olap = candidateKeywords.filter(k => avoidKwSets[i].has(k)).length;
       kwOverlap = Math.max(kwOverlap, olap / Math.max(as._keywords.length, 1));
     }
   }
@@ -421,11 +433,7 @@ function scorePhase1(candidates, profile, avoidSeeds, advanced) {
   const maxVote = Math.max(...candidates.map(r => r.vote_average || 0), 1);
   const now = new Date();
 
-  // Build avoid-genre set
-  const avoidGenreSet = new Set();
-  avoidSeeds.forEach(s => {
-    (s._fetchedGenres || []).forEach(g => avoidGenreSet.add(g));
-  });
+  const avoidGenreSet = buildAvoidGenreSet(avoidSeeds);
 
   candidates.forEach(r => {
     const { voteNorm, popNorm, releaseYear, freshness, sourceNorm } = computeBaseScores(r, maxPop, maxVote, now);
@@ -468,8 +476,8 @@ function scorePhase1(candidates, profile, avoidSeeds, advanced) {
 async function enrichAndScorePhase2(candidates, profile, partnerProfile, avoidSeeds, advanced) {
   if (!candidates.length) return;
 
-  const avoidGenreSet = new Set();
-  avoidSeeds.forEach(s => { (s._fetchedGenres || []).forEach(g => avoidGenreSet.add(g)); });
+  const avoidGenreSet = buildAvoidGenreSet(avoidSeeds);
+  const avoidKwSets = buildAvoidKwSets(avoidSeeds);
 
   // Build partner keyword set
   const partnerKeywordSet = new Set(partnerProfile ? partnerProfile.topKeywords : []);
@@ -527,7 +535,7 @@ async function enrichAndScorePhase2(candidates, profile, partnerProfile, avoidSe
                                (pGenreOverlap / Math.max(fullGenres.length, 1)) * 0.5, 1) * 0.07;
     }
 
-    const avoidPenalty = computeAvoidPenalty(r, avoidSeeds, avoidGenreSet, fullGenres, r._keywords);
+    const avoidPenalty = computeAvoidPenalty(r, avoidSeeds, avoidGenreSet, fullGenres, r._keywords, avoidKwSets);
 
     if (advanced) {
       // Phase 2 scoring without keywords (added after MMR in final rescore)
@@ -623,8 +631,8 @@ async function enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoid
   // Build sets for partner / avoid calculations
   const partnerKeywordSet = new Set(partnerProfile ? partnerProfile.topKeywords : []);
   const partnerGenreSet = new Set(partnerProfile ? Object.keys(partnerProfile.genrePref) : []);
-  const avoidGenreSet = new Set();
-  avoidSeeds.forEach(s => { (s._fetchedGenres || []).forEach(g => avoidGenreSet.add(g)); });
+  const avoidGenreSet = buildAvoidGenreSet(avoidSeeds);
+  const avoidKwSets = buildAvoidKwSets(avoidSeeds);
 
   const maxPop = Math.max(...final.map(r => r.popularity || 0), 1);
   const maxVote = Math.max(...final.map(r => r.vote_average || 0), 1);
@@ -665,7 +673,7 @@ async function enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoid
                                (pGenreOverlap / Math.max(fullGenres.length, 1)) * 0.5, 1) * 0.07;
     }
 
-    const avoidPenalty = computeAvoidPenalty(r, avoidSeeds, avoidGenreSet, fullGenres, r._keywords);
+    const avoidPenalty = computeAvoidPenalty(r, avoidSeeds, avoidGenreSet, fullGenres, r._keywords, avoidKwSets);
 
     // Full scoring WITH keywords
     if (advanced) {

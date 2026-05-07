@@ -1333,9 +1333,11 @@ async function loadAllData() {
     ]);
     allEntries = entries || [];
     // Backfill overviewStore from Supabase (migration: overviews stored in DB before refactor)
+    const batch = {};
     for (const e of allEntries) {
-      if (e.tmdb_id && e.overview) overviewStore.set(e.tmdb_id, e.overview);
+      if (e.tmdb_id && e.overview) batch[e.tmdb_id] = e.overview;
     }
+    if (Object.keys(batch).length) overviewStore.setBatch(batch);
     overviewStore.applyTo(allEntries);
     allSeasonRatings = seasons || [];
     allProfiles = {};
@@ -1426,10 +1428,16 @@ async function prefetchOverviews() {
       const data = await res.json();
       if (data.overviews) {
         overviewStore.setBatch(data.overviews);
+        // Build reverse index: tmdbId → entries (one tmdbId may have multiple rated entries)
+        const byTmdbId = {};
+        for (const entry of missing) {
+          if (!byTmdbId[entry.tmdb_id]) byTmdbId[entry.tmdb_id] = [];
+          byTmdbId[entry.tmdb_id].push(entry);
+        }
         for (const [tmdbId, overview] of Object.entries(data.overviews)) {
-          const id = parseInt(tmdbId);
-          for (const entry of missing) {
-            if (entry.tmdb_id === id) {
+          const entries = byTmdbId[parseInt(tmdbId)];
+          if (entries) {
+            for (const entry of entries) {
               backfillOverviewToDB(entry, overview);
               entry.overview = overview;
             }
@@ -1440,9 +1448,7 @@ async function prefetchOverviews() {
   } catch(e) {}
 }
 
-let warmTitleTimer = null;
 async function warmOriginalTitleCache() {
-  clearTimeout(warmTitleTimer);
   const uncached = allEntries.filter(e => e.tmdb_id && !originalTitleCache[e.tmdb_id]);
   if (!uncached.length) return;
   const ids = [...new Set(uncached.map(e => e.tmdb_id))];

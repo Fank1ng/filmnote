@@ -1273,35 +1273,76 @@ function setCache(key, data) {
 }
 
 // Overview store: single source of truth, permanent localStorage, keyed by tmdb_id
-const overviewStore = (() => {
-  const KEY = 'filmnote_overviews';
+// Movie cache: permanent localStorage for TMDB detail (overview, genres, vote, director, cast)
+const movieCache = (() => {
+  const KEY = 'filmnote_movie_cache';
+  const OLD_KEY = 'filmnote_overviews';
+
   function loadAll() {
-    try { const raw = localStorage.getItem(KEY); return raw ? JSON.parse(raw) : {}; } catch { return {}; }
+    try {
+      const raw = localStorage.getItem(KEY);
+      if (raw) return JSON.parse(raw);
+      // One-time migration from old overview-only format
+      const oldRaw = localStorage.getItem(OLD_KEY);
+      if (oldRaw) {
+        const old = JSON.parse(oldRaw);
+        const migrated = {};
+        for (const [id, overview] of Object.entries(old)) {
+          migrated[id] = { overview };
+        }
+        saveAll(migrated);
+        localStorage.removeItem(OLD_KEY);
+        return migrated;
+      }
+      return {};
+    } catch { return {}; }
   }
+
   function saveAll(all) {
     try { localStorage.setItem(KEY, JSON.stringify(all)); } catch {}
   }
+
   return {
     get(tmdbId) {
       if (!tmdbId) return null;
       return loadAll()[tmdbId] || null;
     },
-    set(tmdbId, overview) {
-      if (!overview || !tmdbId) return;
+    hasFull(tmdbId) {
+      const c = loadAll()[tmdbId];
+      return !!(c && (c.director || (c.cast && c.cast.length)));
+    },
+    hasOverview(tmdbId) {
+      const c = loadAll()[tmdbId];
+      return !!(c && c.overview);
+    },
+    set(tmdbId, data) {
+      if (!tmdbId || !data) return;
       const all = loadAll();
-      all[tmdbId] = overview;
+      if (typeof data === 'string') {
+        all[tmdbId] = { ...(all[tmdbId] || {}), overview: data };
+      } else {
+        all[tmdbId] = { ...(all[tmdbId] || {}), ...data };
+      }
       saveAll(all);
     },
     setBatch(map) {
       if (!map || !Object.keys(map).length) return;
       const all = loadAll();
-      Object.assign(all, map);
+      for (const [id, val] of Object.entries(map)) {
+        if (typeof val === 'string') {
+          all[id] = { ...(all[id] || {}), overview: val };
+        } else {
+          all[id] = { ...(all[id] || {}), ...val };
+        }
+      }
       saveAll(all);
     },
-    applyTo(entries) {
+    applyOverviewTo(entries) {
       const all = loadAll();
       for (const e of entries) {
-        if (!e.overview && e.tmdb_id && all[e.tmdb_id]) e.overview = all[e.tmdb_id];
+        if (!e.overview && e.tmdb_id && all[e.tmdb_id]?.overview) {
+          e.overview = all[e.tmdb_id].overview;
+        }
       }
     }
   };
@@ -1317,7 +1358,7 @@ async function loadAllData() {
   const cachedPrefs = getCache('prefs_' + uid);
   if (cachedEntries) {
     allEntries = cachedEntries;
-    overviewStore.applyTo(allEntries);
+    movieCache.applyOverviewTo(allEntries);
     allSeasonRatings = cachedSeasons || [];
     allProfiles = cachedPrefs || {};
     updateHeaderCount();
@@ -1332,13 +1373,13 @@ async function loadAllData() {
       db.from('user_preferences').select('*')
     ]);
     allEntries = entries || [];
-    // Backfill overviewStore from Supabase (migration: overviews stored in DB before refactor)
+    // Backfill movieCache from Supabase (migration: overviews stored in DB before refactor)
     const batch = {};
     for (const e of allEntries) {
       if (e.tmdb_id && e.overview) batch[e.tmdb_id] = e.overview;
     }
-    if (Object.keys(batch).length) overviewStore.setBatch(batch);
-    overviewStore.applyTo(allEntries);
+    if (Object.keys(batch).length) movieCache.setBatch(batch);
+    movieCache.applyOverviewTo(allEntries);
     allSeasonRatings = seasons || [];
     allProfiles = {};
     (prefs||[]).forEach(p=>{ allProfiles[p.user_id]=p; });
@@ -1387,7 +1428,11 @@ function checkOverviewOverflow(ovId) {
 
 async function fetchOverview(tmdbId) {
   if (!tmdbId) return '';
-  try { const d = await fetchTmdbDetail(tmdbId); return d?.details?.overview || ''; } catch(e) { return ''; }
+  try {
+    const d = await fetchTmdbDetail(tmdbId);
+    if (d) movieCache.set(tmdbId, extractMovieDetail(d.details, d.credits));
+    return d?.details?.overview || '';
+  } catch(e) { return ''; }
 }
 
 function editActionForEntry(entry) {
@@ -1413,6 +1458,49 @@ function buildDirectorCastHTML(director, cast) {
   return parts.join('');
 }
 
+// Extract clean cacheable object from raw TMDB detail+credits response
+function extractMovieDetail(details, credits) {
+  const director = (credits?.crew || []).find(c => c.job === 'Director');
+  const cast = (credits?.cast || []).slice(0, 6);
+  return {
+    overview: details?.overview || '',
+    genres: (details?.genres || []).map(g => g.name),
+    vote_average: details?.vote_average || 0,
+    runtime: details?.runtime || 0,
+    director: director ? director.name : '',
+    cast: cast.map(c => c.name),
+  };
+}
+
+// Build complete TMDB detail section HTML from cached data
+function buildTmdbDetailHTML(cached, ovId) {
+  const parts = [];
+  // Meta row: vote_average + genres + runtime
+  const chips = [];
+  if (cached.vote_average) {
+    chips.push(`<span style="color:var(--gold);font-weight:700;font-size:0.85rem">⭐ ${cached.vote_average.toFixed(1)}</span>`);
+  }
+  if (cached.genres && cached.genres.length) {
+    cached.genres.forEach(g => chips.push(`<span class="cast-chip">${esc(g)}</span>`));
+  }
+  if (cached.runtime) {
+    chips.push(`<span class="cast-chip">${cached.runtime} 分钟</span>`);
+  }
+  if (chips.length) {
+    parts.push(`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">${chips.join('')}</div>`);
+  }
+  if (cached.overview) {
+    parts.push(buildOverviewHTML(ovId, cached.overview));
+  }
+  if (cached.director) {
+    parts.push(`<h4 style="margin-top:8px">🎬 导演</h4><div class="tmdb-cast"><span class="cast-chip">${esc(cached.director)}</span></div>`);
+  }
+  if (cached.cast && cached.cast.length) {
+    parts.push(`<h4 style="margin-top:8px">👥 演员</h4><div class="tmdb-cast">${cached.cast.map(c => `<span class="cast-chip">${esc(c)}</span>`).join('')}</div>`);
+  }
+  return parts.join('');
+}
+
 // Batch-prefetch missing overviews after data load (hits Worker cache, non-blocking)
 async function prefetchOverviews() {
   const missing = allEntries.filter(e => e.tmdb_id && !e.overview);
@@ -1427,7 +1515,7 @@ async function prefetchOverviews() {
     if (res.ok) {
       const data = await res.json();
       if (data.overviews) {
-        overviewStore.setBatch(data.overviews);
+        movieCache.setBatch(data.overviews);
         // Build reverse index: tmdbId → entries (one tmdbId may have multiple rated entries)
         const byTmdbId = {};
         for (const entry of missing) {
@@ -1851,7 +1939,6 @@ $['movieForm'].addEventListener('submit', async e=>{
     if (entryType === 'movie' && entryData.tmdb_id) {
       fetchOverview(entryData.tmdb_id).then(overview => {
         if (overview && entryId) {
-          overviewStore.set(entryData.tmdb_id, overview);
           db.from('entries').update({ overview }).eq('id', entryId).then(()=>{}).catch(()=>{});
           // Update local entry if still in allEntries
           const e = allEntries.find(x => x.id === entryId);
@@ -2259,11 +2346,9 @@ function renderList() {
 async function showDetail(id) {
   const entry = allEntries.find(e=>e.id===id);
   if (!entry) return;
-  // Sync check: overview may already be in permanent store
-  if (entry.tmdb_id && !entry.overview) {
-    const ov = overviewStore.get(entry.tmdb_id);
-    if (ov) entry.overview = ov;
-  }
+  const cached = entry.tmdb_id ? movieCache.get(entry.tmdb_id) : null;
+  const hasFullCache = cached && movieCache.hasFull(entry.tmdb_id);
+  if (!entry.overview && cached?.overview) entry.overview = cached.overview;
 
   const isMine = entry.user_id===currentUser.id;
   const ownerName = allProfiles[entry.user_id]?.display_name||'未知';
@@ -2324,7 +2409,13 @@ async function showDetail(id) {
         `).join('')}
       </div>
     ` : ''}
-    ${entry.tmdb_id ? `<div class="tmdb-section" id="tmdbDetail-${entry.id}">${entry.overview ? buildOverviewHTML('tmdbOv-'+entry.id, entry.overview) : `<div class="detail-spinner"></div> 加载电影详情...`}</div>` : ''}
+    ${(() => {
+      if (!entry.tmdb_id) return '';
+      const ovId = 'tmdbOv-' + entry.id;
+      if (hasFullCache) return `<div class="tmdb-section" id="tmdbDetail-${entry.id}">${buildTmdbDetailHTML(cached, ovId)}</div>`;
+      if (cached?.overview) return `<div class="tmdb-section" id="tmdbDetail-${entry.id}">${buildOverviewHTML(ovId, cached.overview)}<div class="detail-spinner"></div> 加载演职员信息...</div>`;
+      return `<div class="tmdb-section" id="tmdbDetail-${entry.id}"><div class="detail-spinner"></div> 加载电影详情...</div>`;
+    })()}
     <div class="btn-group" style="justify-content:flex-end">
       ${isMine ? `<button class="btn btn-secondary btn-sm" onclick="${editActionForEntry(entry)};closeModal()">编辑</button>` : ''}
       <button class="btn btn-secondary btn-sm" onclick="closeModal()">关闭</button>
@@ -2332,44 +2423,33 @@ async function showDetail(id) {
   `;
   modal.classList.add('open');
 
-  // Show expand button if overview pre-rendered and overflows
   if (entry.overview) checkOverviewOverflow('tmdbOv-' + entry.id);
 
-  // Async load TMDB credits for director/cast
-  if (entry.tmdb_id) loadAndRenderTmdbCredits(entry, 'tmdbDetail-' + entry.id);
+  // Async: only fetch if full TMDB detail not already cached
+  if (entry.tmdb_id && !hasFullCache) {
+    fetchAndRenderTmdbDetail(entry.tmdb_id, 'tmdbDetail-' + entry.id, 'tmdbOv-' + entry.id,
+      overview => { if (!entry.overview) backfillOverviewToDB(entry, overview); });
+  }
 }
 
 // Shared async tail for showDetail/showMovieDetail: fetches credits and renders director/cast
-async function loadAndRenderTmdbCredits(entry, sectionId) {
-  const tmdbSection = document.getElementById(sectionId);
-  const data = await fetchTmdbDetail(entry.tmdb_id);
-  if (!data || !tmdbSection) return;
-  const { details, credits } = data;
-  const director = (credits.crew||[]).find(c => c.job === 'Director');
-  const cast = (credits.cast||[]).slice(0, 6);
-
-  const ovId = 'tmdbOv-' + entry.id;
-
-  // Lazy backfill: entry had no overview at render time
-  if (!entry.overview && details.overview) {
-    tmdbSection.innerHTML = buildOverviewHTML(ovId, details.overview);
-    backfillOverviewToDB(entry, details.overview);
-    overviewStore.set(entry.tmdb_id, details.overview);
-    checkOverviewOverflow(ovId);
-  }
-
-  if (director || cast.length) {
-    const extra = buildDirectorCastHTML(director, cast);
-    if (extra) tmdbSection.insertAdjacentHTML('beforeend', extra);
-  } else if (tmdbSection.querySelector('.detail-spinner')) {
-    // Prefetch may have backfilled overview while we were fetching credits
-    if (entry.overview) {
-      tmdbSection.innerHTML = buildOverviewHTML(ovId, entry.overview);
-      checkOverviewOverflow(ovId);
-    } else {
-      tmdbSection.innerHTML = '';
+// Unified async: fetch TMDB detail, cache full data, render complete section
+async function fetchAndRenderTmdbDetail(tmdbId, sectionId, ovId, onBackfill) {
+  const section = document.getElementById(sectionId);
+  if (!section) return;
+  const data = await fetchTmdbDetail(tmdbId);
+  if (!data) {
+    if (section.querySelector('.detail-spinner')) {
+      section.innerHTML = '<p style="font-size:0.8rem;color:var(--text2)">暂无详细信息</p>';
     }
+    return;
   }
+  const { details, credits } = data;
+  const cached = extractMovieDetail(details, credits);
+  movieCache.set(tmdbId, cached);
+  if (onBackfill && details.overview) onBackfill(details.overview);
+  section.innerHTML = buildTmdbDetailHTML(cached, ovId);
+  checkOverviewOverflow(ovId);
 }
 
 // ── Movie detail from discover page (TMDB data focused) ──
@@ -2377,11 +2457,9 @@ async function showMovieDetail(tmdbId) {
   const movie = discoverMovieMap[tmdbId];
   if (!movie) return;
 
-  // Sync check: overview may already be in permanent store (e.g. from entry detail or previous session)
-  if (!movie.overview) {
-    const ov = overviewStore.get(tmdbId);
-    if (ov) movie.overview = ov;
-  }
+  const cached = movieCache.get(tmdbId);
+  const hasFullCache = cached && movieCache.hasFull(tmdbId);
+  if (!movie.overview && cached?.overview) movie.overview = cached.overview;
 
   const ratedTmdbIds = new Set(allEntries.filter(e=>e.user_id===currentUser.id && e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
   const isRated = ratedTmdbIds.has('tmdb_'+tmdbId);
@@ -2391,6 +2469,7 @@ async function showMovieDetail(tmdbId) {
   const poster = movie.poster_path ? posterUrl(movie.poster_path) : '';
   const genres = (movie.genre_ids||[]).slice(0,4).map(id=>genreMap[id]||'').filter(Boolean);
 
+  const ovId = 'tmdbOv-d-' + tmdbId;
   const content = $['modalContent'];
   content.innerHTML = `
     <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px">
@@ -2406,7 +2485,7 @@ async function showMovieDetail(tmdbId) {
       </div>
     </div>
     <div class="tmdb-section" id="tmdbDiscoverDetail">
-      ${movie.overview ? buildOverviewHTML('tmdbOv-d-'+tmdbId, movie.overview) : `<div class="detail-spinner"></div> 加载电影详情...`}
+      ${hasFullCache ? buildTmdbDetailHTML(cached, ovId) : (cached?.overview ? buildOverviewHTML(ovId, cached.overview) + '<div class="detail-spinner"></div> 加载演职员信息...' : '<div class="detail-spinner"></div> 加载电影详情...')}
     </div>
     <div class="btn-group" style="justify-content:flex-end;margin-top:8px">
       ${!isRated ? `<button class="btn btn-primary btn-sm" onclick="closeModal();openQuickRate({id:${tmdbId},title:'${esc(movie.title).replace(/'/g,"\\'")}',release_date:'${movie.release_date||''}',poster_path:'${movie.poster_path||''}'})">＋我的评分</button>` : ''}
@@ -2415,35 +2494,11 @@ async function showMovieDetail(tmdbId) {
   `;
   $['detailModal'].classList.add('open');
 
-  if (movie.overview) checkOverviewOverflow('tmdbOv-d-' + tmdbId);
+  if (movie.overview || hasFullCache) checkOverviewOverflow(ovId);
 
-  // Async load TMDB credits for director/cast
-  const tmdbSection = document.getElementById('tmdbDiscoverDetail');
-  const data = await fetchTmdbDetail(tmdbId);
-  if (!data || !tmdbSection) return;
-  const { details, credits } = data;
-  const ovId = 'tmdbOv-d-' + tmdbId;
-
-  // Lazy backfill: movie had no overview at render time, but fetch returned one
-  if (!movie.overview && details.overview) {
-    movie.overview = details.overview;
-    overviewStore.set(tmdbId, details.overview);
-    tmdbSection.innerHTML = buildOverviewHTML(ovId, details.overview);
-    checkOverviewOverflow(ovId);
-  }
-
-  const director = (credits.crew||[]).find(c => c.job === 'Director');
-  const cast = (credits.cast||[]).slice(0, 6);
-  if (director || cast.length) {
-    const extra = buildDirectorCastHTML(director, cast);
-    if (extra) tmdbSection.insertAdjacentHTML('beforeend', extra);
-  } else if (tmdbSection.querySelector('.detail-spinner')) {
-    if (movie.overview) {
-      tmdbSection.innerHTML = buildOverviewHTML(ovId, movie.overview);
-      checkOverviewOverflow(ovId);
-    } else {
-      tmdbSection.innerHTML = '<p style="font-size:0.8rem;color:var(--text2)">暂无详细信息</p>';
-    }
+  if (!hasFullCache) {
+    fetchAndRenderTmdbDetail(tmdbId, 'tmdbDiscoverDetail', ovId,
+      overview => { if (!movie.overview) movie.overview = overview; });
   }
 }
 
@@ -3297,7 +3352,6 @@ $['qrSubmit'].addEventListener('click', async ()=>{
   if (!isEdit && quickRateMovie.tmdb_id) {
     fetchOverview(quickRateMovie.tmdb_id).then(overview => {
       if (overview) {
-        overviewStore.set(quickRateMovie.tmdb_id, overview);
         db.from('entries').update({ overview }).eq('tmdb_id', quickRateMovie.tmdb_id).eq('user_id', currentUser.id).then(()=>{}).catch(()=>{});
         const e = allEntries.find(x => x.tmdb_id === quickRateMovie.tmdb_id && x.user_id === currentUser.id);
         if (e) e.overview = overview;

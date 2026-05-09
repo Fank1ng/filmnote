@@ -1615,23 +1615,27 @@ async function warmCreditsEnCache() {
   const uncached = allEntries.filter(e => e.tmdb_id && !creditsEnCache[e.tmdb_id]);
   if (!uncached.length) return;
   const ids = [...new Set(uncached.map(e => e.tmdb_id))];
-  try {
-    const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 8000);
-    const res = await fetch(TMDB_PROXY + '/credits', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tmdb_ids: ids }),
-      signal: ac.signal
-    });
-    clearTimeout(timer);
-    if (res.ok) {
-      const data = await res.json();
-      Object.assign(creditsEnCache, data.results);
-      buildSearchIndex();
-      if (getActiveTab()==='list') renderList();
-    }
-  } catch(e) { console.warn('warmCreditsEnCache failed:', e); }
+  // Send in batches of 50 (Worker limit)
+  for (let i = 0; i < ids.length; i += 50) {
+    const batch = ids.slice(i, i + 50);
+    try {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 15000);
+      const res = await fetch(TMDB_PROXY + '/credits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tmdb_ids: batch }),
+        signal: ac.signal
+      });
+      clearTimeout(timer);
+      if (res.ok) {
+        const data = await res.json();
+        Object.assign(creditsEnCache, data.results);
+      }
+    } catch(e) { console.warn('warmCreditsEnCache batch failed:', e); }
+  }
+  buildSearchIndex();
+  if (getActiveTab()==='list') renderList();
 }
 
 // One-time KV cache backfill — collects all unique movie tmdb_ids and pre-warms via Worker

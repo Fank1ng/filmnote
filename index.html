@@ -1611,11 +1611,15 @@ async function warmCreditsEnCache() {
   if (!uncached.length) return;
   const ids = [...new Set(uncached.map(e => e.tmdb_id))];
   try {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), 8000);
     const res = await fetch(TMDB_PROXY + '/credits', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tmdb_ids: ids })
+      body: JSON.stringify({ tmdb_ids: ids }),
+      signal: ac.signal
     });
+    clearTimeout(timer);
     if (res.ok) {
       const data = await res.json();
       Object.assign(creditsEnCache, data.results);

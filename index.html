@@ -1196,19 +1196,9 @@ async function initApp(user) {
     subscribeToRealtime();
     // Visibility change: re-validate session when tab returns to foreground
     document.addEventListener('visibilitychange', checkSessionOnFocus);
-    // Polling fallback: check session every 30s
+    // Polling fallback: check session every 10s
     clearInterval(sessionCheckTimer);
-    sessionCheckTimer = setInterval(async () => {
-      if (!currentUser) return;
-      try {
-        const {data:pref} = await db.from('user_preferences').select('session_token').eq('user_id', currentUser.id).maybeSingle();
-        const myToken = sessionStorage.getItem('__filmnote_session');
-        if (pref && myToken && pref.session_token !== myToken) {
-          toast('账号已在其他位置登录');
-          doLogout();
-        }
-      } catch(e) {}
-    }, 30000);
+    sessionCheckTimer = setInterval(() => checkSessionToken(), 10000);
     // Show invite management for fank1ng/ceci
     const uname = getUserName(user.id);
     $['inviteMenuBtn'].classList.toggle('hidden', uname !== 'fank1ng' && uname !== 'ceci');
@@ -1235,9 +1225,13 @@ function doLogout() {
   $['migrateBanner'].classList.add('hidden');
 }
 
-// Check session validity when tab returns to foreground
-async function checkSessionOnFocus() {
-  if (document.hidden || !currentUser) return;
+// Shared session token check — called from polling, visibilitychange, and tab switches
+let lastSessionCheck = 0;
+async function checkSessionToken() {
+  if (!currentUser) return;
+  const now = Date.now();
+  if (now - lastSessionCheck < 5000) return;  // max once per 5s
+  lastSessionCheck = now;
   try {
     const {data:pref} = await db.from('user_preferences').select('session_token').eq('user_id', currentUser.id).maybeSingle();
     const myToken = sessionStorage.getItem('__filmnote_session');
@@ -1246,6 +1240,12 @@ async function checkSessionOnFocus() {
       doLogout();
     }
   } catch(e) {}
+}
+
+// Check session validity when tab returns to foreground
+async function checkSessionOnFocus() {
+  if (document.hidden) return;
+  await checkSessionToken();
 }
 
 // ===== MIGRATION =====
@@ -1664,6 +1664,7 @@ function getActiveTab() {
 let skipListRender = false;
 
 function renderActiveTab() {
+  checkSessionToken(); // cross-device session validation (debounced internally)
   const tab = getActiveTab();
   if (tab==='list' && !skipListRender) renderList();
   if (tab==='stats') renderStats();

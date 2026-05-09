@@ -2,10 +2,11 @@
 
 ## 2026-05-09
 
-### 英文导演/演员搜索
-- **Worker `/credits` POST 端点**：批量获取中英文演职员（en + zh-CN），返回 `d`/`c`/`d_zh`/`c_zh`，5个一批并发+50 ID上限
-- **前端 `creditsEnCache`**：完全复制 `originalTitleCache` 模式 — in-memory 缓存 + `warmCreditsEnCache()` fire-and-forget 预热
-- **影单搜索串扩展**：`title + director + original_title + en/zh director + en/zh cast`，cache miss 时跳过空 concat
+### 英文导演/演员搜索（重建）
+- **`searchIndex` 零阻塞搜索系统**：`buildSearchIndex()` 同步构建 `{entryId: "title|director|..."}` 索引，L1 基本字段零依赖即刻可用，L2 TMDB 中英文演职员异步富化自动生效
+- **Worker `/credits` POST 端点**：批量获取中英文演职员，前端 50/批分片发送覆盖全部条目，5 个一批并发+50 ID 上限
+- **`loadAllData` 去阻塞**：`warmCreditsEnCache` 纯 fire-and-forget，页面加载不再等待 Worker，影单列表立即渲染
+- **4 个索引重建触发点**：缓存渲染前、新数据获取后、originalTitleCache/creditsEnCache 异步到达后自动 `renderList()`
 
 ### 单设备登录互踢
 - **`session_token` 机制**：登录时 `crypto.randomUUID()` 生成 token → `sessionStorage`（tab 隔离）+ DB `user_preferences.session_token`

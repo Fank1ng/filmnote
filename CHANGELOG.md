@@ -1,5 +1,26 @@
 # FD&Ceci 更新日志
 
+## 2026-05-09
+
+### 英文导演/演员搜索
+- **Worker `/credits` POST 端点**：批量获取中英文演职员（en + zh-CN），返回 `d`/`c`/`d_zh`/`c_zh`，5个一批并发+50 ID上限
+- **前端 `creditsEnCache`**：完全复制 `originalTitleCache` 模式 — in-memory 缓存 + `warmCreditsEnCache()` fire-and-forget 预热
+- **影单搜索串扩展**：`title + director + original_title + en/zh director + en/zh cast`，cache miss 时跳过空 concat
+
+### 单设备登录互踢
+- **`session_token` 机制**：登录时 `crypto.randomUUID()` 生成 token → `sessionStorage`（tab 隔离）+ DB `user_preferences.session_token`
+- **多触发点**：`loadAllData()` 校验、10s 轮询、visibilitychange 切回前台、Realtime `session_token` 变更检测
+- **Realtime 优化**：仅 `session_token` 实际变更时触发 `loadAllData()`，避免自己写 prefs 导致双次加载
+
+### 注册用户名去重
+- **DB 约束**：`user_preferences.display_name` UNIQUE 约束
+- **前端查重**：注册 + 改名时查询 `display_name` 是否已被占用
+
+### simplify 审查清理
+- `SESSION_KEY` 常量替换 6 处裸字符串、删除 `checkSessionOnFocus` 冗余函数及 6 处 WHAT 注释
+- `warmCreditsEnCache` 从阻塞 `await` 改为 fire-and-forget、`renderActiveTab` 移除 session 检测
+- 搜索热路径 cache miss 时 guard 跳过空 concat、`sessionStorage` 双读合并
+
 ## 2026-05-07
 
 ### 电影详情永久缓存体系

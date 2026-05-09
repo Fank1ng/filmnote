@@ -936,6 +936,41 @@ export default {
       }
     }
 
+    // ── Batch English credits endpoint ──
+    if (url.pathname === '/credits' && request.method === 'POST') {
+      try {
+        const body = await request.json();
+        const ids = body.tmdb_ids;
+        if (!Array.isArray(ids) || !ids.length) {
+          return new Response(JSON.stringify({ error: 'Missing or invalid tmdb_ids' }), {
+            status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+          });
+        }
+        const unique = [...new Set(ids.filter(id => Number.isFinite(id) && id > 0))];
+        const results = {};
+        await Promise.all(unique.map(async id => {
+          try {
+            const credits = await fetchTmdb(`/movie/${id}/credits`, env);
+            const director = (credits.crew || []).find(c => c.job === 'Director');
+            const cast = (credits.cast || []).slice(0, 6).map(c => c.name);
+            if (director || cast.length) {
+              results[id] = {
+                d: director ? director.name : '',
+                c: cast.join('|')
+              };
+            }
+          } catch (e) {}
+        }));
+        return new Response(JSON.stringify({ results }), {
+          headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+        });
+      } catch (e) {
+        return new Response(JSON.stringify({ error: e.message }), {
+          status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+        });
+      }
+    }
+
     // ── Trending endpoint ──
     if (url.pathname === '/trending' && request.method === 'GET') {
       const data = await fetchTmdb('/trending/movie/week?language=zh-CN', env);

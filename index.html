@@ -983,6 +983,7 @@ let allSeasonRatings = [];
 let allProfiles = {};
 let realtimeChannel = null;
 let realtimeDebounce = null;
+let sessionCheckTimer = null;
 
 const authOverlay = $['authOverlay'];
 const mainApp = $['mainApp'];
@@ -1031,6 +1032,10 @@ $['regSignupBtn'].addEventListener('click', async ()=>{
     // Validate invite code
     const {data: valid, error: rpcErr} = await db.rpc('claim_invite_code', { p_code: inviteCode });
     if (rpcErr || !valid) { showAuthError('邀请码无效或已用完', true); btn.textContent=origText; btn.disabled=false; return; }
+
+    // Check duplicate username
+    const {data: dupName} = await db.from('user_preferences').select('user_id').eq('display_name', name).maybeSingle();
+    if (dupName) { showAuthError('该用户名已被使用，请换一个', true); btn.textContent=origText; btn.disabled=false; return; }
 
     const {data, error} = await db.auth.signUp({
       email, password,
@@ -1154,7 +1159,12 @@ $['nameSaveBtn'].addEventListener('click', async ()=>{
   const name = $['nameInput'].value.trim();
   if (!name) return;
   if (!/^[a-zA-Z0-9]{1,6}$/.test(name)) { toast('用户名仅支持英文和数字，最多6位'); return; }
-  await db.from('user_preferences').upsert({ user_id: currentUser.id, display_name: name });
+  // Check if name already taken by another user
+  const {data: dup} = await db.from('user_preferences').select('user_id').eq('display_name', name).maybeSingle();
+  if (dup && dup.user_id !== currentUser.id) { toast('该用户名已被使用'); return; }
+  const sessionToken = sessionStorage.getItem('__filmnote_session') || crypto.randomUUID();
+  if (!sessionStorage.getItem('__filmnote_session')) sessionStorage.setItem('__filmnote_session', sessionToken);
+  await db.from('user_preferences').upsert({ user_id: currentUser.id, display_name: name, session_token: sessionToken });
   currentProfile = { user_id: currentUser.id, display_name: name };
   nameOverlay.classList.remove('open');
   $['headerUser'].textContent = name;
@@ -1172,6 +1182,10 @@ async function initApp(user) {
 
   const {data:pref} = await db.from('user_preferences').select('*').eq('user_id', user.id).maybeSingle();
   if (pref) {
+    // Generate session token — invalidates any other active session for this account
+    const sessionToken = crypto.randomUUID();
+    sessionStorage.setItem('__filmnote_session', sessionToken);
+    await db.from('user_preferences').update({ session_token: sessionToken }).eq('user_id', user.id);
     currentProfile = pref;
     $['headerUser'].textContent = pref.display_name;
     $['headerUser'].style.color = getUserColor(user.id).main;
@@ -1180,6 +1194,21 @@ async function initApp(user) {
     checkMigration();
     await loadAllData();
     subscribeToRealtime();
+    // Visibility change: re-validate session when tab returns to foreground
+    document.addEventListener('visibilitychange', checkSessionOnFocus);
+    // Polling fallback: check session every 30s
+    clearInterval(sessionCheckTimer);
+    sessionCheckTimer = setInterval(async () => {
+      if (!currentUser) return;
+      try {
+        const {data:pref} = await db.from('user_preferences').select('session_token').eq('user_id', currentUser.id).maybeSingle();
+        const myToken = sessionStorage.getItem('__filmnote_session');
+        if (pref && myToken && pref.session_token !== myToken) {
+          toast('账号已在其他位置登录');
+          doLogout();
+        }
+      } catch(e) {}
+    }, 30000);
     // Show invite management for fank1ng/ceci
     const uname = getUserName(user.id);
     $['inviteMenuBtn'].classList.toggle('hidden', uname !== 'fank1ng' && uname !== 'ceci');
@@ -1193,6 +1222,9 @@ async function initApp(user) {
 
 function doLogout() {
   unsubscribeRealtime();
+  document.removeEventListener('visibilitychange', checkSessionOnFocus);
+  clearInterval(sessionCheckTimer);
+  sessionStorage.removeItem('__filmnote_session');
   currentUser = null;
   currentProfile = null;
   allEntries = [];
@@ -1201,6 +1233,19 @@ function doLogout() {
   mainApp.classList.add('hidden');
   nameOverlay.classList.remove('open');
   $['migrateBanner'].classList.add('hidden');
+}
+
+// Check session validity when tab returns to foreground
+async function checkSessionOnFocus() {
+  if (document.hidden || !currentUser) return;
+  try {
+    const {data:pref} = await db.from('user_preferences').select('session_token').eq('user_id', currentUser.id).maybeSingle();
+    const myToken = sessionStorage.getItem('__filmnote_session');
+    if (pref && myToken && pref.session_token !== myToken) {
+      toast('账号已在其他位置登录');
+      doLogout();
+    }
+  } catch(e) {}
 }
 
 // ===== MIGRATION =====
@@ -1380,10 +1425,22 @@ async function loadAllData() {
     allProfiles = {};
     (prefs||[]).forEach(p=>{ allProfiles[p.user_id]=p; });
 
+    // Session check: if another device logged in, this session is stale
+    const myToken = sessionStorage.getItem('__filmnote_session');
+    const dbToken = allProfiles[currentUser.id]?.session_token;
+    if (myToken && dbToken && myToken !== dbToken) {
+      toast('账号已在其他位置登录');
+      doLogout();
+      return;
+    }
+
     // Update cache
     setCache('entries_' + uid, allEntries);
     setCache('seasons_' + uid, allSeasonRatings);
     setCache('prefs_' + uid, allProfiles);
+
+    // Warm movieCache with director+cast before first render (so search works immediately)
+    await Promise.allSettled([warmCreditsEnCache()]);
 
     updateHeaderCount();
     // Background: prefetch missing overviews (non-blocking, fills before user clicks)
@@ -1562,6 +1619,24 @@ async function warmOriginalTitleCache() {
   } catch(e) { console.warn('warmOriginalTitleCache failed:', e); }
 }
 
+// Background: warm English credits cache (director + cast) for search
+async function warmCreditsEnCache() {
+  const uncached = allEntries.filter(e => e.tmdb_id && !creditsEnCache[e.tmdb_id]);
+  if (!uncached.length) return;
+  const ids = [...new Set(uncached.map(e => e.tmdb_id))];
+  try {
+    const res = await fetch(TMDB_PROXY + '/credits', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tmdb_ids: ids })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      Object.assign(creditsEnCache, data.results);
+    }
+  } catch(e) { console.warn('warmCreditsEnCache failed:', e); }
+}
+
 // One-time KV cache backfill — collects all unique movie tmdb_ids and pre-warms via Worker
 async function backfillKvCache() {
   if (!TMDB_PROXY) return;
@@ -1634,9 +1709,10 @@ function subscribeToRealtime() {
 }
 
 function handleRealtimeChange(payload, source) {
-  // Skip own changes (already reflected in UI)
+  // Skip own changes (already reflected in UI), except user_preferences which
+  // may carry session_token updates from another device
   const uid = payload.new?.user_id || payload.old?.user_id;
-  if (uid === currentUser?.id) return;
+  if (uid === currentUser?.id && source !== 'prefs') return;
 
   // Debounce rapid changes
   clearTimeout(realtimeDebounce);
@@ -2071,6 +2147,7 @@ function getUserColor(userId) {
 // ===== TMDB DETAIL FETCH (shared cache) =====
 const tmdbDetailCache = {};
 const originalTitleCache = {}; // { [tmdbId]: original_title } — populated on detail fetch, used for English search
+const creditsEnCache = {}; // { [tmdbId]: { d: "director", c: "cast1|cast2|..." } } — English credits for search
 
 async function fetchTmdbDetail(tmdbId) {
   if (!tmdbId) return null;
@@ -2123,7 +2200,8 @@ function getFilteredSortedGroups() {
     if (ownerFilter==='me' && e.user_id!==currentUser.id) return false;
     if (query) {
       const orig = e.tmdb_id ? (originalTitleCache[e.tmdb_id]||'') : '';
-      const hay = (e.title + (e.director||'') + orig).toLowerCase();
+      const ec = e.tmdb_id ? creditsEnCache[e.tmdb_id] : null;
+      const hay = (e.title + (e.director||'') + orig + (ec?.d||'') + (ec?.c||'')).toLowerCase();
       if (!hay.includes(query)) return false;
     }
     return true;

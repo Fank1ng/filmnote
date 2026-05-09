@@ -37,3 +37,7 @@ CREATE POLICY "Users can delete own blocked movies"
 
 -- 5. Store TMDB overview in entries for instant detail display
 ALTER TABLE entries ADD COLUMN IF NOT EXISTS overview TEXT;
+
+-- 6. Unique display_name to prevent duplicate usernames
+ALTER TABLE user_preferences ADD COLUMN IF NOT EXISTS session_token TEXT;
+ALTER TABLE user_preferences ADD CONSTRAINT unique_display_name UNIQUE (display_name);

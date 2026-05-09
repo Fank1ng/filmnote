@@ -2202,7 +2202,7 @@ function getFilteredSortedGroups() {
     if (query) {
       const orig = e.tmdb_id ? (originalTitleCache[e.tmdb_id]||'') : '';
       const ec = e.tmdb_id ? creditsEnCache[e.tmdb_id] : null;
-      const hay = (e.title + (e.director||'') + orig + (ec?.d||'') + (ec?.c||'')).toLowerCase();
+      const hay = (e.title + (e.director||'') + orig + (ec?.d||'') + (ec?.c||'') + (ec?.d_zh||'') + (ec?.c_zh||'')).toLowerCase();
       if (!hay.includes(query)) return false;
     }
     return true;

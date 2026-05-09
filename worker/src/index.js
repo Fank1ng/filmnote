@@ -936,7 +936,7 @@ export default {
       }
     }
 
-    // ── Batch English credits endpoint ──
+    // ── Batch credits endpoint (en + zh) ──
     if (url.pathname === '/credits' && request.method === 'POST') {
       try {
         const body = await request.json();
@@ -950,15 +950,20 @@ export default {
         const results = {};
         await Promise.all(unique.map(async id => {
           try {
-            const credits = await fetchTmdb(`/movie/${id}/credits`, env);
-            const director = (credits.crew || []).find(c => c.job === 'Director');
-            const cast = (credits.cast || []).slice(0, 6).map(c => c.name);
-            if (director || cast.length) {
-              results[id] = {
-                d: director ? director.name : '',
-                c: cast.join('|')
-              };
-            }
+            const [creditsEn, creditsZh] = await Promise.all([
+              fetchTmdb(`/movie/${id}/credits`, env),
+              fetchTmdb(`/movie/${id}/credits?language=zh-CN`, env)
+            ]);
+            const directorEn = (creditsEn.crew || []).find(c => c.job === 'Director');
+            const castEn = (creditsEn.cast || []).slice(0, 6).map(c => c.name);
+            const directorZh = (creditsZh.crew || []).find(c => c.job === 'Director');
+            const castZh = (creditsZh.cast || []).slice(0, 6).map(c => c.name);
+            results[id] = {
+              d: directorEn ? directorEn.name : '',
+              c: castEn.join('|'),
+              d_zh: directorZh ? directorZh.name : '',
+              c_zh: castZh.join('|')
+            };
           } catch (e) {}
         }));
         return new Response(JSON.stringify({ results }), {

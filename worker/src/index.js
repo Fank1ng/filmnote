@@ -946,26 +946,29 @@ export default {
             status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
           });
         }
-        const unique = [...new Set(ids.filter(id => Number.isFinite(id) && id > 0))];
+        const unique = [...new Set(ids.filter(id => Number.isFinite(id) && id > 0))].slice(0, 50);
         const results = {};
-        await Promise.all(unique.map(async id => {
-          try {
-            const [creditsEn, creditsZh] = await Promise.all([
-              fetchTmdb(`/movie/${id}/credits`, env),
-              fetchTmdb(`/movie/${id}/credits?language=zh-CN`, env)
-            ]);
-            const directorEn = (creditsEn.crew || []).find(c => c.job === 'Director');
-            const castEn = (creditsEn.cast || []).slice(0, 6).map(c => c.name);
-            const directorZh = (creditsZh.crew || []).find(c => c.job === 'Director');
-            const castZh = (creditsZh.cast || []).slice(0, 6).map(c => c.name);
-            results[id] = {
-              d: directorEn ? directorEn.name : '',
-              c: castEn.join('|'),
-              d_zh: directorZh ? directorZh.name : '',
-              c_zh: castZh.join('|')
-            };
-          } catch (e) {}
-        }));
+        for (let i = 0; i < unique.length; i += 5) {
+          const batch = unique.slice(i, i + 5);
+          await Promise.allSettled(batch.map(async id => {
+            try {
+              const [creditsEn, creditsZh] = await Promise.all([
+                fetchTmdb(`/movie/${id}/credits`, env),
+                fetchTmdb(`/movie/${id}/credits?language=zh-CN`, env)
+              ]);
+              const directorEn = (creditsEn.crew || []).find(c => c.job === 'Director');
+              const castEn = (creditsEn.cast || []).slice(0, 6).map(c => c.name);
+              const directorZh = (creditsZh.crew || []).find(c => c.job === 'Director');
+              const castZh = (creditsZh.cast || []).slice(0, 6).map(c => c.name);
+              results[id] = {
+                d: directorEn ? directorEn.name : '',
+                c: castEn.join('|'),
+                d_zh: directorZh ? directorZh.name : '',
+                c_zh: castZh.join('|')
+              };
+            } catch (e) {}
+          }));
+        }
         return new Response(JSON.stringify({ results }), {
           headers: { 'Content-Type': 'application/json', ...corsHeaders() },
         });

@@ -763,6 +763,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const TMDB_KEY = 'bedbd15b921f0127d7d8921337ea5a06';
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w185';
 const TMDB_PROXY = 'https://filmnote.lccf1223.workers.dev';
+const SESSION_KEY = '__filmnote_session';
 function tmdbFetch(path, opts = {}) {
   if (TMDB_PROXY) return fetch(TMDB_PROXY + '/tmdb' + path, opts);
   const sep = path.includes('?') ? '&' : '?';
@@ -1033,7 +1034,6 @@ $['regSignupBtn'].addEventListener('click', async ()=>{
     const {data: valid, error: rpcErr} = await db.rpc('claim_invite_code', { p_code: inviteCode });
     if (rpcErr || !valid) { showAuthError('邀请码无效或已用完', true); btn.textContent=origText; btn.disabled=false; return; }
 
-    // Check duplicate username
     const {data: dupName} = await db.from('user_preferences').select('user_id').eq('display_name', name).maybeSingle();
     if (dupName) { showAuthError('该用户名已被使用，请换一个', true); btn.textContent=origText; btn.disabled=false; return; }
 
@@ -1159,11 +1159,10 @@ $['nameSaveBtn'].addEventListener('click', async ()=>{
   const name = $['nameInput'].value.trim();
   if (!name) return;
   if (!/^[a-zA-Z0-9]{1,6}$/.test(name)) { toast('用户名仅支持英文和数字，最多6位'); return; }
-  // Check if name already taken by another user
   const {data: dup} = await db.from('user_preferences').select('user_id').eq('display_name', name).maybeSingle();
   if (dup && dup.user_id !== currentUser.id) { toast('该用户名已被使用'); return; }
-  const sessionToken = sessionStorage.getItem('__filmnote_session') || crypto.randomUUID();
-  if (!sessionStorage.getItem('__filmnote_session')) sessionStorage.setItem('__filmnote_session', sessionToken);
+  let sessionToken = sessionStorage.getItem(SESSION_KEY);
+  if (!sessionToken) { sessionToken = crypto.randomUUID(); sessionStorage.setItem(SESSION_KEY, sessionToken); }
   await db.from('user_preferences').upsert({ user_id: currentUser.id, display_name: name, session_token: sessionToken });
   currentProfile = { user_id: currentUser.id, display_name: name };
   nameOverlay.classList.remove('open');
@@ -1184,7 +1183,7 @@ async function initApp(user) {
   if (pref) {
     // Generate session token — invalidates any other active session for this account
     const sessionToken = crypto.randomUUID();
-    sessionStorage.setItem('__filmnote_session', sessionToken);
+    sessionStorage.setItem(SESSION_KEY, sessionToken);
     await db.from('user_preferences').update({ session_token: sessionToken }).eq('user_id', user.id);
     currentProfile = pref;
     $['headerUser'].textContent = pref.display_name;
@@ -1194,9 +1193,7 @@ async function initApp(user) {
     checkMigration();
     await loadAllData();
     subscribeToRealtime();
-    // Visibility change: re-validate session when tab returns to foreground
-    document.addEventListener('visibilitychange', checkSessionOnFocus);
-    // Polling fallback: check session every 10s
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) checkSessionToken(); });
     clearInterval(sessionCheckTimer);
     sessionCheckTimer = setInterval(() => checkSessionToken(), 10000);
     // Show invite management for fank1ng/ceci
@@ -1212,9 +1209,9 @@ async function initApp(user) {
 
 function doLogout() {
   unsubscribeRealtime();
-  document.removeEventListener('visibilitychange', checkSessionOnFocus);
   clearInterval(sessionCheckTimer);
-  sessionStorage.removeItem('__filmnote_session');
+  sessionStorage.removeItem(SESSION_KEY);
+  for (const k of Object.keys(creditsEnCache)) delete creditsEnCache[k];
   currentUser = null;
   currentProfile = null;
   allEntries = [];
@@ -1225,27 +1222,20 @@ function doLogout() {
   $['migrateBanner'].classList.add('hidden');
 }
 
-// Shared session token check — called from polling, visibilitychange, and tab switches
 let lastSessionCheck = 0;
 async function checkSessionToken() {
   if (!currentUser) return;
   const now = Date.now();
-  if (now - lastSessionCheck < 5000) return;  // max once per 5s
+  if (now - lastSessionCheck < 5000) return;
   lastSessionCheck = now;
   try {
     const {data:pref} = await db.from('user_preferences').select('session_token').eq('user_id', currentUser.id).maybeSingle();
-    const myToken = sessionStorage.getItem('__filmnote_session');
+    const myToken = sessionStorage.getItem(SESSION_KEY);
     if (pref && myToken && pref.session_token !== myToken) {
       toast('账号已在其他位置登录');
       doLogout();
     }
   } catch(e) {}
-}
-
-// Check session validity when tab returns to foreground
-async function checkSessionOnFocus() {
-  if (document.hidden) return;
-  await checkSessionToken();
 }
 
 // ===== MIGRATION =====
@@ -1425,8 +1415,7 @@ async function loadAllData() {
     allProfiles = {};
     (prefs||[]).forEach(p=>{ allProfiles[p.user_id]=p; });
 
-    // Session check: if another device logged in, this session is stale
-    const myToken = sessionStorage.getItem('__filmnote_session');
+    const myToken = sessionStorage.getItem(SESSION_KEY);
     const dbToken = allProfiles[currentUser.id]?.session_token;
     if (myToken && dbToken && myToken !== dbToken) {
       toast('账号已在其他位置登录');
@@ -1439,9 +1428,6 @@ async function loadAllData() {
     setCache('seasons_' + uid, allSeasonRatings);
     setCache('prefs_' + uid, allProfiles);
 
-    // Warm movieCache with director+cast before first render (so search works immediately)
-    await Promise.allSettled([warmCreditsEnCache()]);
-
     updateHeaderCount();
     // Background: prefetch missing overviews (non-blocking, fills before user clicks)
     prefetchOverviews();
@@ -1449,8 +1435,8 @@ async function loadAllData() {
     // Init discover refresh state
     discoverRatedCount = allEntries.filter(e=>e.user_id===currentUser?.id && e.type==='movie').length;
     updateRecTabLabel();
-    // Background: warm original_title cache for English search
     warmOriginalTitleCache();
+    warmCreditsEnCache();
     // Load blocked movies
     loadBlockedMovies();
     // One-time KV backfill for recommendation engine (runs once per deployment)
@@ -1619,7 +1605,6 @@ async function warmOriginalTitleCache() {
   } catch(e) { console.warn('warmOriginalTitleCache failed:', e); }
 }
 
-// Background: warm English credits cache (director + cast) for search
 async function warmCreditsEnCache() {
   const uncached = allEntries.filter(e => e.tmdb_id && !creditsEnCache[e.tmdb_id]);
   if (!uncached.length) return;
@@ -1664,7 +1649,6 @@ function getActiveTab() {
 let skipListRender = false;
 
 function renderActiveTab() {
-  checkSessionToken(); // cross-device session validation (debounced internally)
   const tab = getActiveTab();
   if (tab==='list' && !skipListRender) renderList();
   if (tab==='stats') renderStats();
@@ -1710,8 +1694,7 @@ function subscribeToRealtime() {
 }
 
 function handleRealtimeChange(payload, source) {
-  // Skip own changes (already reflected in UI), except user_preferences which
-  // may carry session_token updates from another device
+  // user_preferences changes from another device carry session_token updates
   const uid = payload.new?.user_id || payload.old?.user_id;
   if (uid === currentUser?.id && source !== 'prefs') return;
 

@@ -1392,6 +1392,7 @@ async function loadAllData() {
     movieCache.applyOverviewTo(allEntries);
     allSeasonRatings = cachedSeasons || [];
     allProfiles = cachedPrefs || {};
+    buildSearchIndex();
     updateHeaderCount();
     renderActiveTab();
   }
@@ -1427,17 +1428,15 @@ async function loadAllData() {
     setCache('entries_' + uid, allEntries);
     setCache('seasons_' + uid, allSeasonRatings);
     setCache('prefs_' + uid, allProfiles);
-
-    await warmCreditsEnCache();
+    buildSearchIndex();
 
     updateHeaderCount();
-    // Background: prefetch missing overviews (non-blocking, fills before user clicks)
     prefetchOverviews();
     renderActiveTab();
-    // Init discover refresh state
     discoverRatedCount = allEntries.filter(e=>e.user_id===currentUser?.id && e.type==='movie').length;
     updateRecTabLabel();
     warmOriginalTitleCache();
+    warmCreditsEnCache();
     // Load blocked movies
     loadBlockedMovies();
     // One-time KV backfill for recommendation engine (runs once per deployment)
@@ -1606,6 +1605,8 @@ async function warmOriginalTitleCache() {
     if (res.ok) {
       const data = await res.json();
       Object.assign(originalTitleCache, data.results);
+      buildSearchIndex();
+      if (getActiveTab()==='list') renderList();
     }
   } catch(e) { console.warn('warmOriginalTitleCache failed:', e); }
 }
@@ -1627,6 +1628,8 @@ async function warmCreditsEnCache() {
     if (res.ok) {
       const data = await res.json();
       Object.assign(creditsEnCache, data.results);
+      buildSearchIndex();
+      if (getActiveTab()==='list') renderList();
     }
   } catch(e) { console.warn('warmCreditsEnCache failed:', e); }
 }
@@ -2141,7 +2144,20 @@ function getUserColor(userId) {
 // ===== TMDB DETAIL FETCH (shared cache) =====
 const tmdbDetailCache = {};
 const originalTitleCache = {}; // { [tmdbId]: original_title } — populated on detail fetch, used for English search
-const creditsEnCache = {}; // { [tmdbId]: { d: "director", c: "cast1|cast2|..." } } — English credits for search
+const creditsEnCache = {};
+const searchIndex = {}; // { [entryId]: "lowercase search string" } — built sync, enriched async
+
+function buildSearchIndex() {
+  for (const e of allEntries) {
+    let s = (e.title + '|' + (e.director||''));
+    if (e.tmdb_id && originalTitleCache[e.tmdb_id]) s += '|' + originalTitleCache[e.tmdb_id];
+    if (e.tmdb_id && creditsEnCache[e.tmdb_id]) {
+      const ec = creditsEnCache[e.tmdb_id];
+      s += '|' + (ec.d||'') + '|' + (ec.c||'') + '|' + (ec.d_zh||'') + '|' + (ec.c_zh||'');
+    }
+    searchIndex[e.id] = s.toLowerCase();
+  }
+}
 
 async function fetchTmdbDetail(tmdbId) {
   if (!tmdbId) return null;
@@ -2193,10 +2209,8 @@ function getFilteredSortedGroups() {
     if (e.type!==listType) return false;
     if (ownerFilter==='me' && e.user_id!==currentUser.id) return false;
     if (query) {
-      const orig = e.tmdb_id ? (originalTitleCache[e.tmdb_id]||'') : '';
-      const ec = e.tmdb_id ? creditsEnCache[e.tmdb_id] : null;
-      const hay = (e.title + (e.director||'') + orig + (ec?.d||'') + (ec?.c||'') + (ec?.d_zh||'') + (ec?.c_zh||'')).toLowerCase();
-      if (!hay.includes(query)) return false;
+      const idx = searchIndex[e.id];
+      if (!idx || !idx.includes(query)) return false;
     }
     return true;
   });

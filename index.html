@@ -1694,9 +1694,10 @@ function subscribeToRealtime() {
 }
 
 function handleRealtimeChange(payload, source) {
-  // user_preferences changes from another device carry session_token updates
   const uid = payload.new?.user_id || payload.old?.user_id;
   if (uid === currentUser?.id && source !== 'prefs') return;
+  // Only react to user_preferences when session_token actually changed
+  if (source === 'prefs' && payload.new?.session_token === payload.old?.session_token) return;
 
   // Debounce rapid changes
   clearTimeout(realtimeDebounce);
@@ -2184,8 +2185,10 @@ function getFilteredSortedGroups() {
     if (ownerFilter==='me' && e.user_id!==currentUser.id) return false;
     if (query) {
       const orig = e.tmdb_id ? (originalTitleCache[e.tmdb_id]||'') : '';
+      let hay = (e.title + (e.director||'') + orig);
       const ec = e.tmdb_id ? creditsEnCache[e.tmdb_id] : null;
-      const hay = (e.title + (e.director||'') + orig + (ec?.d||'') + (ec?.c||'') + (ec?.d_zh||'') + (ec?.c_zh||'')).toLowerCase();
+      if (ec) hay += (ec.d||'') + (ec.c||'') + (ec.d_zh||'') + (ec.c_zh||'');
+      hay = hay.toLowerCase();
       if (!hay.includes(query)) return false;
     }
     return true;

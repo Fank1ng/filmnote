@@ -7,3 +7,6 @@ compatibility_date = "2025-05-01"
 kv_namespaces = [
   { binding = "TMDB_CACHE", id = "c963baf99e644d6b964b146904a7fd9b" }
 ]
+
+[vars]
+ALLOWED_ORIGINS = "null,https://fank1ng.github.io,https://filmnote.lccf1223.workers.dev,http://localhost:8000,http://127.0.0.1:8000,http://localhost:8787,http://127.0.0.1:8787"

@@ -1,5 +1,37 @@
 # FD&Ceci 更新日志
 
+## 2026-05-13
+
+### Worker 安全与部署修复
+- **移除 TMDB 明文 Key fallback**：前端与 Worker 不再硬编码 TMDB API Key，改为 Cloudflare Worker Secret `TMDB_API_KEY`
+- **兼容 TMDB v4 读访问令牌**：Worker 自动识别 JWT 读令牌并使用 `Authorization: Bearer` 请求 TMDB，同时保留 v3 `api_key` 兼容
+- **CORS 白名单修复**：允许 `file://` 对应的 `Origin: null`，本地直接打开 HTML 时也可访问 Worker/TMDB 数据
+- **Worker 配置修复**：修正 `wrangler.toml` 中 `[vars]` 位置，恢复 `TMDB_CACHE` KV binding
+- **线上验证**：`/health` 返回 `tmdbKeyConfigured=true`、`kvConfigured=true`，`/trending` 正常返回 TMDB 数据
+
+### 推荐接口加固
+- **修复推荐运行时 bug**：`enrichAndScorePhase2` 补传 `env`，避免个性化推荐二阶段访问 TMDB 时失败
+- **统一 JSON/CORS 响应**：新增 `jsonResponse`/`errorResponse`，接口错误状态更明确
+- **输入上限**：`/prefetch` 50 ID、`/titles` 100 ID、`/credits` 50 ID、`/recommend` 1000 条评分、请求体 256KB
+- **推荐缓存版本化**：推荐 Cache Key 增加 `REC_CACHE_VERSION=v2`，算法/输入结构升级后自动破旧缓存
+- **推荐请求瘦身**：前端只发送 `user_id/type/tmdb_id/total_score/created_at`，不再把短评、简介等整包数据发给 Worker
+
+### 推荐解释与负反馈
+- **“为什么推荐”标签**：Worker 返回 `reasons`，推荐卡片展示“相似高分片 / 常看类型 / 高分年代 / 语种偏好”等解释
+- **不再推荐原因**：`blocked_movies` 增加 `reason` 字段，屏蔽电影时可记录“已看过 / 类型不喜欢 / 太热门 / 太旧”等原因
+- **Supabase 升级脚本**：新增 `supabase_upgrade_2026_05.sql`，包含 `blocked_movies.reason`、索引和基础 RLS 策略
+
+### 想看清单
+- **发现页一键想看**：未评分电影卡片新增 `☆/★` 想看按钮，本周热门、Top100、个性化推荐均可加入
+- **用户菜单管理入口**：新增“想看清单”弹窗，支持分页查看、移出想看、直接进入快速评分
+- **评分后自动移出**：从想看清单评分成功后，自动从 `watchlist_movies` 移除
+- **Supabase 持久化**：新增 `watchlist_movies` 表升级 SQL，RLS 仅允许用户管理自己的想看数据
+
+### 本地与工程维护
+- **账号加载错误提示**：登录恢复、用户资料读取、会话 token 更新失败时显示具体错误，不再静默卡住
+- **依赖锁定**：新增 `worker/package-lock.json`，部署环境可复现安装 Wrangler 依赖
+- **忽略本地依赖目录**：`.gitignore` 增加 `worker/node_modules/` 与 `node_modules/`
+
 ## 2026-05-09
 
 ### 英文导演/演员搜索（重建）

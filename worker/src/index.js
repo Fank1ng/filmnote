@@ -1,9 +1,27 @@
 // FilmNote Cloudflare Worker — TMDB proxy + recommendation + KV persistence
 const TMDB_BASE = 'https://api.themoviedb.org/3';
-const TMDB_KEY_FALLBACK = 'bedbd15b921f0127d7d8921337ea5a06';
+const DEFAULT_ALLOWED_ORIGINS = [
+  'null',
+  'https://fank1ng.github.io',
+  'https://filmnote.lccf1223.workers.dev',
+  'http://localhost:8000',
+  'http://127.0.0.1:8000',
+  'http://localhost:8787',
+  'http://127.0.0.1:8787',
+];
+const MAX_PREFETCH_IDS = 50;
+const MAX_TITLE_IDS = 100;
+const MAX_CREDIT_IDS = 50;
+const MAX_RECOMMEND_ENTRIES = 1000;
+const MAX_JSON_BYTES = 256 * 1024;
+const REC_CACHE_VERSION = 'v2';
 
 function getTmdbKey(env) {
-  return (env && env.TMDB_API_KEY) || TMDB_KEY_FALLBACK;
+  return env && env.TMDB_API_KEY;
+}
+
+function isTmdbReadToken(value) {
+  return typeof value === 'string' && value.split('.').length === 3;
 }
 
 // L1 memory cache (fast, isolate-scoped, LRU eviction)
@@ -23,13 +41,66 @@ function cacheSet(key, value) {
   memCache.set(key, value);
 }
 
-function corsHeaders() {
+function getAllowedOrigins(env) {
+  const configured = env && env.ALLOWED_ORIGINS;
+  if (!configured) return DEFAULT_ALLOWED_ORIGINS;
+  return configured.split(',').map(o => o.trim()).filter(Boolean);
+}
+
+function corsHeaders(request, env) {
+  const origin = request && request.headers.get('Origin');
+  const allowedOrigins = getAllowedOrigins(env);
+  const allowOrigin = origin && allowedOrigins.includes(origin)
+    ? origin
+    : allowedOrigins[0];
   return {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': allowOrigin,
+    'Vary': 'Origin',
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Access-Control-Max-Age': '86400',
   };
+}
+
+function jsonResponse(data, request, env, status = 200, extraHeaders = {}) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      ...extraHeaders,
+      ...corsHeaders(request, env),
+    },
+  });
+}
+
+function errorResponse(message, request, env, status = 400, extra = {}) {
+  return jsonResponse({ error: message, ...extra }, request, env, status);
+}
+
+async function readJsonBody(request, maxBytes = MAX_JSON_BYTES) {
+  const len = Number(request.headers.get('Content-Length') || 0);
+  if (len && len > maxBytes) throw new Error('Request body too large');
+  const text = await request.text();
+  if (text.length > maxBytes) throw new Error('Request body too large');
+  return JSON.parse(text);
+}
+
+function normalizeIds(ids, limit) {
+  if (!Array.isArray(ids) || !ids.length) return null;
+  return [...new Set(ids.map(id => Number(id)).filter(id => Number.isFinite(id) && id > 0))]
+    .slice(0, limit);
+}
+
+function sanitizeEntries(entries) {
+  if (!Array.isArray(entries)) return null;
+  return entries.slice(0, MAX_RECOMMEND_ENTRIES).map(e => ({
+    user_id: e.user_id,
+    type: e.type === 'series' ? 'series' : 'movie',
+    tmdb_id: Number.isFinite(Number(e.tmdb_id)) ? Number(e.tmdb_id) : null,
+    total_score: Number.isFinite(Number(e.total_score)) ? Number(e.total_score) : null,
+    score: Number.isFinite(Number(e.score)) ? Number(e.score) : null,
+    created_at: e.created_at || '',
+  }));
 }
 
 // KV expiration: permanent for static data, TTL for dynamic lists
@@ -45,6 +116,10 @@ function getKvTtl(path) {
 
 // Fetch TMDB data through L1(memory) → L2(KV) → L3(TMDB API)
 async function fetchTmdb(path, env) {
+  const tmdbKey = getTmdbKey(env);
+  if (!tmdbKey) {
+    return { success: false, status_code: 500, status_message: 'TMDB_API_KEY is not configured' };
+  }
   const kvKey = 'p:' + path;
 
   // L1: memory
@@ -63,20 +138,28 @@ async function fetchTmdb(path, env) {
   }
 
   // L3: TMDB API
+  const useBearerToken = isTmdbReadToken(tmdbKey);
   const sep = path.includes('?') ? '&' : '?';
-  const url = TMDB_BASE + path + sep + 'api_key=' + getTmdbKey(env);
+  const url = useBearerToken ? TMDB_BASE + path : TMDB_BASE + path + sep + 'api_key=' + tmdbKey;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 10000);
   let res;
   try {
     res = await fetch(url, {
-      headers: { 'Accept': 'application/json' },
+      headers: {
+        'Accept': 'application/json',
+        ...(useBearerToken ? { 'Authorization': 'Bearer ' + tmdbKey } : {})
+      },
       signal: controller.signal
     });
   } finally {
     clearTimeout(timer);
   }
-  const data = await res.json();
+  const data = await res.json().catch(() => ({
+    success: false,
+    status_code: res.status,
+    status_message: 'Invalid TMDB response',
+  }));
 
   if (res.ok) {
     // Store in L1
@@ -89,7 +172,11 @@ async function fetchTmdb(path, env) {
       try { await env.TMDB_CACHE.put(kvKey, JSON.stringify(data), opts); } catch(e) {}
     }
   }
-  return data;
+  return res.ok ? data : {
+    success: false,
+    status_code: res.status,
+    status_message: data.status_message || res.statusText || 'TMDB request failed',
+  };
 }
 
 // ── Scoring helpers ──
@@ -473,7 +560,7 @@ function scorePhase1(candidates, profile, avoidSeeds, advanced) {
 }
 
 // ── Phase 2: enrich top candidates with full details + rescore ──
-async function enrichAndScorePhase2(candidates, profile, partnerProfile, avoidSeeds, advanced) {
+async function enrichAndScorePhase2(candidates, profile, partnerProfile, avoidSeeds, advanced, env) {
   if (!candidates.length) return;
 
   const avoidGenreSet = buildAvoidGenreSet(avoidSeeds);
@@ -616,6 +703,52 @@ function applyExplorationBudget(selected, allCandidates, profile, targetCount) {
 }
 
 // ── Recommendation engine ──
+function attachRecommendationReasons(movies, profile, partnerProfile) {
+  const routeLabels = {
+    rec: '来自你的高分片相似推荐',
+    rec2: '来自你的高分片延展推荐',
+    similar: '和你喜欢的电影类型相近',
+    genre: '符合你的常看类型',
+    keyword: '命中你的偏好关键词',
+    quality: '高口碑候选',
+    director: '贴近你喜欢的创作者',
+    actor: '贴近你喜欢的演员阵容',
+    language: '符合你常看的语种',
+    partner_rec: '结合朋友的高分片偏好',
+  };
+  const partnerGenres = partnerProfile ? new Set(Object.keys(partnerProfile.genrePref)) : null;
+  return movies.map(m => {
+    const reasons = [];
+    if (routeLabels[m._route]) reasons.push(routeLabels[m._route]);
+    if ((m._sourceScore || 0) >= 8) reasons.push('源自你给过高分的片');
+    const releaseYear = parseInt((m.release_date || '').slice(0, 4));
+    if (releaseYear) {
+      const decade = Math.floor(releaseYear / 10) * 10;
+      if ((profile.decadeProfile[decade] || 0) >= 7) reasons.push(`${decade}s 是你的高分年代`);
+    }
+    if (m._detail?.original_language && m._detail.original_language === profile.langPref) {
+      reasons.push('语种偏好匹配');
+    }
+    if (partnerGenres && (m.genre_ids || []).some(g => partnerGenres.has(String(g)))) {
+      reasons.push('也贴近朋友的类型偏好');
+    }
+    return {
+      id: m.id,
+      title: m.title,
+      original_title: m.original_title,
+      overview: m.overview,
+      release_date: m.release_date,
+      poster_path: m.poster_path,
+      genre_ids: m.genre_ids || [],
+      vote_average: m.vote_average || 0,
+      vote_count: m.vote_count || 0,
+      popularity: m.popularity || 0,
+      original_language: m.original_language,
+      reasons: [...new Set(reasons)].slice(0, 3),
+    };
+  });
+}
+
 // ── Post-MMR: enrich final pool with keywords and compute final scores ──
 async function enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoidSeeds, advanced, env) {
   if (!final.length) return;
@@ -742,7 +875,7 @@ async function loadRecommendations(env, entries, userId, blockedIds, excludeIds)
   // Also enrich avoid seeds if they're in the pool
   await enrichEntries(avoidSeeds.filter(s => s.tmdb_id), env, advanced);
 
-  await enrichAndScorePhase2(topPool, profile, partnerProfile, avoidSeeds, advanced);
+  await enrichAndScorePhase2(topPool, profile, partnerProfile, avoidSeeds, advanced, env);
   topPool.sort((a, b) => b._score - a._score);
 
   // Phase 6: MMR diversity (using Phase2 scores without keywords)
@@ -763,6 +896,7 @@ async function loadRecommendations(env, entries, userId, blockedIds, excludeIds)
     const excludeSet = new Set(excludeIds);
     final = final.filter(m => !excludeSet.has(m.id));
   }
+  final = attachRecommendationReasons(final, profile, partnerProfile);
   return { movies: final.slice(0, finalCount), totalRated };
 }
 
@@ -786,7 +920,7 @@ function makeRecKey(userId, entries, blockedIds, excludeIds) {
   const excludeHash = excludeIds && excludeIds.length
     ? 'x:' + [...excludeIds].sort((a, b) => a - b).join(',')
     : '';
-  let keyBase = userId + '-' + movieIds.length + '-' + hash;
+  let keyBase = REC_CACHE_VERSION + '-' + userId + '-' + movieIds.length + '-' + hash;
   if (blockedHash) {
     let bh = 0;
     for (let i = 0; i < blockedHash.length; i++) {
@@ -812,22 +946,27 @@ export default {
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') {
-      return new Response(null, { status: 204, headers: corsHeaders() });
+      return new Response(null, { status: 204, headers: corsHeaders(request, env) });
     }
 
     if (url.pathname === '/health') {
-      return new Response(JSON.stringify({ status: 'ok', memCache: memCache.size, ts: Date.now() }), {
-        headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-      });
+      return jsonResponse({
+        status: 'ok',
+        memCache: memCache.size,
+        tmdbKeyConfigured: !!getTmdbKey(env),
+        kvConfigured: !!(env && env.TMDB_CACHE),
+        allowedOrigins: getAllowedOrigins(env),
+        recCacheVersion: REC_CACHE_VERSION,
+        ts: Date.now()
+      }, request, env);
     }
 
     // ── TMDB Proxy ──
     if (url.pathname.startsWith('/tmdb/')) {
       const tmdbPath = url.pathname.replace('/tmdb', '') + url.search;
       const data = await fetchTmdb(tmdbPath, env);
-      return new Response(JSON.stringify(data), {
-        headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-      });
+      const status = data.success === false && data.status_code >= 400 ? data.status_code : 200;
+      return jsonResponse(data, request, env, status);
     }
 
     // ── Combined detail+credits endpoint ──
@@ -838,23 +977,18 @@ export default {
         fetchTmdb(`/movie/${tmdbId}?language=zh-CN`, env),
         fetchTmdb(`/movie/${tmdbId}/credits?language=zh-CN`, env)
       ]);
-      return new Response(JSON.stringify({ details, credits }), {
-        headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-      });
+      return jsonResponse({ details, credits }, request, env);
     }
 
     // ── Prefetch endpoint (warm KV for movie details + credits) ──
     if (url.pathname === '/prefetch' && request.method === 'POST') {
       try {
-        const body = await request.json();
-        const ids = body.tmdb_ids;
-        if (!Array.isArray(ids) || !ids.length) {
-          return new Response(JSON.stringify({ error: 'Missing or invalid tmdb_ids' }), {
-            status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-          });
+        const body = await readJsonBody(request);
+        const unique = normalizeIds(body.tmdb_ids, MAX_PREFETCH_IDS);
+        if (!unique) {
+          return errorResponse('Missing or invalid tmdb_ids', request, env, 400);
         }
         const returnOverviews = body.return_overviews === true;
-        const unique = [...new Set(ids.filter(id => Number.isFinite(id) && id > 0))];
         let cached = 0, errors = 0;
         const overviews = {};
         const details = {};
@@ -898,27 +1032,21 @@ export default {
           resp.overviews = overviews;
           resp.details = details;
         }
-        return new Response(JSON.stringify(resp), {
-          headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-        });
+        return jsonResponse(resp, request, env);
       } catch (e) {
-        return new Response(JSON.stringify({ error: e.message }), {
-          status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-        });
+        const status = e.message === 'Request body too large' ? 413 : 500;
+        return errorResponse(e.message, request, env, status);
       }
     }
 
     // ── Batch original_title endpoint ──
     if (url.pathname === '/titles' && request.method === 'POST') {
       try {
-        const body = await request.json();
-        const ids = body.tmdb_ids;
-        if (!Array.isArray(ids) || !ids.length) {
-          return new Response(JSON.stringify({ error: 'Missing or invalid tmdb_ids' }), {
-            status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-          });
+        const body = await readJsonBody(request);
+        const unique = normalizeIds(body.tmdb_ids, MAX_TITLE_IDS);
+        if (!unique) {
+          return errorResponse('Missing or invalid tmdb_ids', request, env, 400);
         }
-        const unique = [...new Set(ids.filter(id => Number.isFinite(id) && id > 0))];
         const results = {};
         await Promise.all(unique.map(async id => {
           try {
@@ -926,27 +1054,21 @@ export default {
             if (detail && detail.original_title) results[id] = detail.original_title;
           } catch (e) {}
         }));
-        return new Response(JSON.stringify({ results }), {
-          headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-        });
+        return jsonResponse({ results }, request, env);
       } catch (e) {
-        return new Response(JSON.stringify({ error: e.message }), {
-          status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-        });
+        const status = e.message === 'Request body too large' ? 413 : 500;
+        return errorResponse(e.message, request, env, status);
       }
     }
 
     // ── Batch credits endpoint (en + zh) ──
     if (url.pathname === '/credits' && request.method === 'POST') {
       try {
-        const body = await request.json();
-        const ids = body.tmdb_ids;
-        if (!Array.isArray(ids) || !ids.length) {
-          return new Response(JSON.stringify({ error: 'Missing or invalid tmdb_ids' }), {
-            status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-          });
+        const body = await readJsonBody(request);
+        const unique = normalizeIds(body.tmdb_ids, MAX_CREDIT_IDS);
+        if (!unique) {
+          return errorResponse('Missing or invalid tmdb_ids', request, env, 400);
         }
-        const unique = [...new Set(ids.filter(id => Number.isFinite(id) && id > 0))].slice(0, 50);
         const results = {};
         for (let i = 0; i < unique.length; i += 5) {
           const batch = unique.slice(i, i + 5);
@@ -969,13 +1091,10 @@ export default {
             } catch (e) {}
           }));
         }
-        return new Response(JSON.stringify({ results }), {
-          headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-        });
+        return jsonResponse({ results }, request, env);
       } catch (e) {
-        return new Response(JSON.stringify({ error: e.message }), {
-          status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-        });
+        const status = e.message === 'Request body too large' ? 413 : 500;
+        return errorResponse(e.message, request, env, status);
       }
     }
 
@@ -983,9 +1102,7 @@ export default {
     if (url.pathname === '/trending' && request.method === 'GET') {
       const data = await fetchTmdb('/trending/movie/week?language=zh-CN', env);
       const results = (data.results || []).sort((a, b) => (b.popularity || 0) - (a.popularity || 0)).slice(0, 12);
-      return new Response(JSON.stringify({ results }), {
-        headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-      });
+      return jsonResponse({ results }, request, env);
     }
 
     // ── Top Rated endpoint ──
@@ -997,9 +1114,7 @@ export default {
           data.results.forEach(r => { if ((r.vote_count || 0) >= 500) results.push(r); });
         } else break;
       }
-      return new Response(JSON.stringify({ results: results.slice(0, 100) }), {
-        headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-      });
+      return jsonResponse({ results: results.slice(0, 100) }, request, env);
     }
 
     // ── Search endpoint (with auto-credits for director) ──
@@ -1007,29 +1122,32 @@ export default {
       const q = url.searchParams.get('q');
       const type = url.searchParams.get('type') || 'movie';
       if (!q) {
-        return new Response(JSON.stringify({ error: 'Missing query' }), {
-          status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-        });
+        return errorResponse('Missing query', request, env, 400);
+      }
+      if (!['movie', 'tv'].includes(type)) {
+        return errorResponse('Invalid search type', request, env, 400);
+      }
+      if (q.length > 80) {
+        return errorResponse('Query is too long', request, env, 400);
       }
       const data = await fetchTmdb(`/search/${type}?query=${encodeURIComponent(q)}&language=zh-CN`, env);
-      return new Response(JSON.stringify(data), {
-        headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-      });
+      return jsonResponse(data, request, env);
     }
 
     // ── Recommendation endpoint ──
     if (url.pathname === '/recommend' && request.method === 'POST') {
       try {
-        const body = await request.json();
+        const body = await readJsonBody(request);
         const { entries, userId, blockedIds, excludeIds } = body;
+        const cleanEntries = sanitizeEntries(entries);
+        const cleanBlockedIds = Array.isArray(blockedIds) ? normalizeIds(blockedIds, 500) || [] : [];
+        const cleanExcludeIds = Array.isArray(excludeIds) ? normalizeIds(excludeIds, 200) || [] : [];
 
-        if (!entries || !userId) {
-          return new Response(JSON.stringify({ error: 'Missing entries or userId' }), {
-            status: 400, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-          });
+        if (!cleanEntries || !userId) {
+          return errorResponse('Missing entries or userId', request, env, 400);
         }
 
-        const recKey = makeRecKey(userId, entries, blockedIds, excludeIds);
+        const recKey = makeRecKey(userId, cleanEntries, cleanBlockedIds, cleanExcludeIds);
         const cacheKeyUrl = 'https://rec-cache.local/recommend/' + recKey;
         const cacheKey = new Request(cacheKeyUrl, { method: 'GET' });
         const cache = caches.default;
@@ -1038,12 +1156,10 @@ export default {
         let cachedRes = await cache.match(cacheKey);
         if (cachedRes) {
           const data = await cachedRes.json();
-          return new Response(JSON.stringify({ ...data, cached: true }), {
-            headers: { 'Content-Type': 'application/json', 'X-Rec-Cache': 'HIT', ...corsHeaders() },
-          });
+          return jsonResponse({ ...data, cached: true }, request, env, 200, { 'X-Rec-Cache': 'HIT' });
         }
 
-        const result = await loadRecommendations(env, entries, userId, blockedIds, excludeIds);
+        const result = await loadRecommendations(env, cleanEntries, userId, cleanBlockedIds, cleanExcludeIds);
 
         if (result.movies) {
           const resToCache = new Response(JSON.stringify(result), {
@@ -1052,16 +1168,13 @@ export default {
           ctx.waitUntil(cache.put(cacheKey, resToCache));
         }
 
-        return new Response(JSON.stringify({ ...result, cached: false }), {
-          headers: { 'Content-Type': 'application/json', 'X-Rec-Cache': 'MISS', ...corsHeaders() },
-        });
+        return jsonResponse({ ...result, cached: false }, request, env, 200, { 'X-Rec-Cache': 'MISS' });
       } catch (e) {
-        return new Response(JSON.stringify({ error: e.message }), {
-          status: 500, headers: { 'Content-Type': 'application/json', ...corsHeaders() },
-        });
+        const status = e.message === 'Request body too large' ? 413 : 500;
+        return errorResponse(e.message, request, env, status);
       }
     }
 
-    return new Response('FilmNote Worker', { status: 404, headers: corsHeaders() });
+    return new Response('FilmNote Worker', { status: 404, headers: corsHeaders(request, env) });
   },
 };

@@ -379,6 +379,8 @@
   .dc-meta { font-size: 0.72rem; color: var(--text2); }
   .dc-genres { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
   .dc-genre { font-size: 0.62rem; padding: 1px 6px; border-radius: 4px; background: rgba(255,255,255,0.06); color: var(--text2); }
+  .dc-reasons { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 2px; }
+  .dc-reason { font-size: 0.62rem; padding: 1px 6px; border-radius: 4px; background: rgba(212,175,55,0.12); color: var(--gold); }
   .dc-action { margin-top: auto; padding-top: 8px; }
   .dc-action .btn { width: 100%; }
   .dc-rated-badge { text-align: center; font-size: 0.75rem; color: var(--text2); padding: 6px 0; }
@@ -391,6 +393,12 @@
     line-height: 1; transition: var(--t); flex-shrink: 0;
   }
   .dc-block-btn:hover { color: #e74c3c; border-color: #e74c3c; background: rgba(231,76,60,0.08); }
+  .dc-watch-btn {
+    background: transparent; border: 1px solid transparent; color: var(--text2);
+    cursor: pointer; padding: 2px 6px; border-radius: 4px; font-size: 0.85rem;
+    line-height: 1; transition: var(--t); flex-shrink: 0;
+  }
+  .dc-watch-btn:hover, .dc-watch-btn.active { color: var(--gold); border-color: var(--gold); background: var(--gold-dim); }
   .discover-card.blocked-removing {
     opacity: 0; transform: scale(0.9); transition: opacity 0.3s ease, transform 0.3s ease;
     pointer-events: none;
@@ -554,6 +562,7 @@
         <div class="user-dropdown" id="userDropdown">
           <button id="changePwBtn">修改密码</button>
           <button id="inviteMenuBtn" class="hidden">邀请码管理</button>
+          <button id="watchlistMgmtBtn">想看清单</button>
           <button id="blockedMgmtBtn">管理屏蔽</button>
           <button id="logoutBtn">退出</button>
         </div>
@@ -753,6 +762,18 @@
   </div>
 </div>
 
+<!-- Watchlist Modal -->
+<div class="modal-overlay" id="watchlistModal">
+  <div class="modal" style="max-width:680px">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <h3 style="margin:0;color:var(--text2)">想看清单 (<span id="watchlistCount">0</span>)</h3>
+      <button class="btn btn-xs btn-secondary" id="watchlistModalClose">关闭</button>
+    </div>
+    <div class="discover-grid" id="watchlistMovieGrid"></div>
+    <div id="watchlistPagination"></div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
@@ -760,14 +781,12 @@
 // ===== CONFIG =====
 const SUPABASE_URL = 'https://rkkakwmxzipxmofgrlwa.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJra2Frd214emlweG1vZmdybHdhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzczNjQ2NjUsImV4cCI6MjA5Mjk0MDY2NX0.r3L82v1z2QBmIkg2KbyD6S_dT0bAomIZ7cU4sS6vdNo';
-const TMDB_KEY = 'bedbd15b921f0127d7d8921337ea5a06';
 const TMDB_IMG = 'https://image.tmdb.org/t/p/w185';
 const TMDB_PROXY = 'https://filmnote.lccf1223.workers.dev';
 const SESSION_KEY = '__filmnote_session';
 function tmdbFetch(path, opts = {}) {
   if (TMDB_PROXY) return fetch(TMDB_PROXY + '/tmdb' + path, opts);
-  const sep = path.includes('?') ? '&' : '?';
-  return fetch('https://api.themoviedb.org/3' + path + sep + 'api_key=' + TMDB_KEY, opts);
+  return Promise.reject(new Error('TMDB proxy is not configured'));
 }
 
 const WEIGHTS = { story:0.25, character:0.20, visual:0.15, editing:0.10, sound:0.10, emotion:0.20 };
@@ -862,6 +881,12 @@ const $ = {
   get totalScorePreview() { return document.getElementById('totalScorePreview'); },
   get userMenu() { return document.getElementById('userMenu'); },
   get userDropdown() { return document.getElementById('userDropdown'); },
+  get watchlistMgmtBtn() { return document.getElementById('watchlistMgmtBtn'); },
+  get watchlistModal() { return document.getElementById('watchlistModal'); },
+  get watchlistMovieGrid() { return document.getElementById('watchlistMovieGrid'); },
+  get watchlistCount() { return document.getElementById('watchlistCount'); },
+  get watchlistPagination() { return document.getElementById('watchlistPagination'); },
+  get watchlistModalClose() { return document.getElementById('watchlistModalClose'); },
   get year() { return document.getElementById('year'); },
   // Discover
   get discoverContent() { return document.getElementById('discoverContent'); },
@@ -1011,6 +1036,15 @@ function toast(msg) {
 function getGroupKey(e) { return e.tmdb_id ? 'tmdb_'+e.tmdb_id : 'title_'+e.title.toLowerCase().trim()+'_'+(e.year||0); }
 function getUserName(uid) { return (allProfiles[uid]?.display_name||currentProfile?.user_id===uid&&currentProfile?.display_name||'').toLowerCase(); }
 const isPrivileged = () => ['fank1ng','ceci'].includes((currentProfile?.display_name||'').toLowerCase());
+function buildRecommendationEntries() {
+  return allEntries.map(e => ({
+    user_id: e.user_id,
+    type: e.type,
+    tmdb_id: e.tmdb_id || null,
+    total_score: e.total_score || null,
+    created_at: e.created_at || ''
+  }));
+}
 
 // ===== AUTH BUTTONS =====
 // Register with invite code
@@ -1179,12 +1213,24 @@ async function initApp(user) {
   authOverlay.classList.add('hidden');
   mainApp.classList.remove('hidden');
 
-  const {data:pref} = await db.from('user_preferences').select('*').eq('user_id', user.id).maybeSingle();
+  const {data:pref, error: prefError} = await db.from('user_preferences').select('*').eq('user_id', user.id).maybeSingle();
+  if (prefError) {
+    console.error('Load profile failed:', prefError);
+    toast('账号信息加载失败：' + prefError.message);
+    doLogout();
+    return;
+  }
   if (pref) {
     // Generate session token — invalidates any other active session for this account
     const sessionToken = crypto.randomUUID();
     sessionStorage.setItem(SESSION_KEY, sessionToken);
-    await db.from('user_preferences').update({ session_token: sessionToken }).eq('user_id', user.id);
+    const { error: tokenError } = await db.from('user_preferences').update({ session_token: sessionToken }).eq('user_id', user.id);
+    if (tokenError) {
+      console.error('Update session token failed:', tokenError);
+      toast('会话刷新失败：' + tokenError.message);
+      doLogout();
+      return;
+    }
     currentProfile = pref;
     $['headerUser'].textContent = pref.display_name;
     $['headerUser'].style.color = getUserColor(user.id).main;
@@ -1437,8 +1483,9 @@ async function loadAllData() {
     updateRecTabLabel();
     warmOriginalTitleCache();
     warmCreditsEnCache();
-    // Load blocked movies
+    // Load secondary user lists
     loadBlockedMovies();
+    await loadWatchlist();
     // One-time KV backfill for recommendation engine (runs once per deployment)
     if (!localStorage.getItem('kv_backfilled_v1')) {
       localStorage.setItem('kv_backfilled_v1', '1');
@@ -1539,53 +1586,56 @@ async function prefetchOverviews() {
   const missing = allEntries.filter(e => e.tmdb_id && !e.overview);
   if (!missing.length) return;
   const ids = [...new Set(missing.map(e => e.tmdb_id))];
-  try {
-    const res = await fetch(TMDB_PROXY + '/prefetch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tmdb_ids: ids, return_overviews: true })
-    });
-    if (res.ok) {
-      const data = await res.json();
-      // Prefer full detail objects (genres, rating, director, cast); fallback to overview-only
-      if (data.details) {
-        movieCache.setBatch(data.details);
-      } else if (data.overviews) {
-        movieCache.setBatch(data.overviews);
-      }
-      // Backfill overviews to in-memory entries + DB
-      const overviews = data.overviews || (data.details ? Object.fromEntries(
-        Object.entries(data.details).map(([id, d]) => [id, d.overview]).filter(([,ov]) => ov)
-      ) : {});
-      if (Object.keys(overviews).length) {
-        const byTmdbId = {};
-        for (const entry of missing) {
-          if (!byTmdbId[entry.tmdb_id]) byTmdbId[entry.tmdb_id] = [];
-          byTmdbId[entry.tmdb_id].push(entry);
+  const byTmdbId = {};
+  for (const entry of missing) {
+    if (!byTmdbId[entry.tmdb_id]) byTmdbId[entry.tmdb_id] = [];
+    byTmdbId[entry.tmdb_id].push(entry);
+  }
+  for (let offset = 0; offset < ids.length; offset += 50) {
+    const idBatch = ids.slice(offset, offset + 50);
+    try {
+      const res = await fetch(TMDB_PROXY + '/prefetch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tmdb_ids: idBatch, return_overviews: true })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Prefer full detail objects (genres, rating, director, cast); fallback to overview-only
+        if (data.details) {
+          movieCache.setBatch(data.details);
+        } else if (data.overviews) {
+          movieCache.setBatch(data.overviews);
         }
-        // Batch DB updates by overview value, max 50 per batch
-        const byOverview = {};
-        for (const [tmdbId, overview] of Object.entries(overviews)) {
-          const entries = byTmdbId[parseInt(tmdbId)];
-          if (entries) {
-            for (const entry of entries) {
-              entry.overview = overview;
-              if (entry.user_id === currentUser?.id && entry.id) {
-                if (!byOverview[overview]) byOverview[overview] = [];
-                byOverview[overview].push(entry.id);
+        // Backfill overviews to in-memory entries + DB
+        const overviews = data.overviews || (data.details ? Object.fromEntries(
+          Object.entries(data.details).map(([id, d]) => [id, d.overview]).filter(([,ov]) => ov)
+        ) : {});
+        if (Object.keys(overviews).length) {
+          // Batch DB updates by overview value, max 50 per batch
+          const byOverview = {};
+          for (const [tmdbId, overview] of Object.entries(overviews)) {
+            const entries = byTmdbId[parseInt(tmdbId)];
+            if (entries) {
+              for (const entry of entries) {
+                entry.overview = overview;
+                if (entry.user_id === currentUser?.id && entry.id) {
+                  if (!byOverview[overview]) byOverview[overview] = [];
+                  byOverview[overview].push(entry.id);
+                }
               }
             }
           }
-        }
-        for (const [overview, entryIds] of Object.entries(byOverview)) {
-          for (let i = 0; i < entryIds.length; i += 50) {
-            const batch = entryIds.slice(i, i + 50);
-            db.from('entries').update({ overview }).in('id', batch).then(()=>{}).catch(()=>{});
+          for (const [overview, entryIds] of Object.entries(byOverview)) {
+            for (let i = 0; i < entryIds.length; i += 50) {
+              const batch = entryIds.slice(i, i + 50);
+              db.from('entries').update({ overview }).in('id', batch).then(()=>{}).catch(()=>{});
+            }
           }
         }
       }
-    }
-  } catch(e) { console.warn('prefetchOverviews failed:', e); }
+    } catch(e) { console.warn('prefetchOverviews failed:', e); }
+  }
 }
 
 async function warmOriginalTitleCache() {
@@ -1645,17 +1695,20 @@ async function backfillKvCache() {
     allEntries.filter(e => e.tmdb_id && e.type === 'movie').map(e => e.tmdb_id)
   )];
   if (!movieIds.length) return;
-  try {
-    const res = await fetch(TMDB_PROXY + '/prefetch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tmdb_ids: movieIds })
-    });
-    if (res.ok) {
-      const data = await res.json();
-      console.log('KV backfill done:', data);
-    }
-  } catch (e) { console.warn('backfillKvCache failed:', e); }
+  for (let i = 0; i < movieIds.length; i += 50) {
+    const batch = movieIds.slice(i, i + 50);
+    try {
+      const res = await fetch(TMDB_PROXY + '/prefetch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tmdb_ids: batch })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        console.log('KV backfill done:', data);
+      }
+    } catch (e) { console.warn('backfillKvCache failed:', e); }
+  }
 }
 
 function getActiveTab() {
@@ -1681,7 +1734,7 @@ function updateHeaderCount() {
 function subscribeToRealtime() {
   if (realtimeChannel) return;
   try {
-    realtimeChannel = db.channel('filmnote-changes')
+    let channel = db.channel('filmnote-changes')
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'entries' },
         (payload) => handleRealtimeChange(payload, 'entries')
@@ -1697,7 +1750,14 @@ function subscribeToRealtime() {
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'blocked_movies' },
         () => { loadBlockedMovies(); }
-      )
+      );
+    if (watchlistAvailable) {
+      channel = channel.on('postgres_changes',
+        { event: '*', schema: 'public', table: 'watchlist_movies' },
+        () => { loadWatchlist(); }
+      );
+    }
+    realtimeChannel = channel
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') console.log('Realtime: connected');
         if (status === 'CHANNEL_ERROR') { console.warn('Realtime error, retrying...'); realtimeChannel = null; setTimeout(subscribeToRealtime, 3000); }
@@ -2826,17 +2886,68 @@ let discoverRatedCount = 0;
 let discoverRefreshStreak = 0;
 let discoverLastShownIds = [];
 
+// Watchlist (想看)
+let watchlistMovies = {};
+let watchlistIds = new Set();
+let watchlistPage = 1;
+let watchlistAvailable = false;
+
 // Blocked movies (不再推荐)
 let blockedMovieIds = new Set();
+let blockedMovieReasons = {};
 let blockedPage = 1;
+
+async function loadWatchlist() {
+  if (!currentUser) return;
+  let { data, error } = await db.from('watchlist_movies')
+    .select('*')
+    .eq('user_id', currentUser.id)
+    .order('created_at', { ascending: false });
+  if (error) {
+    if (/watchlist_movies|schema cache|does not exist|relation/i.test(error.message || '')) {
+      watchlistMovies = {};
+      watchlistIds = new Set();
+      watchlistAvailable = false;
+    } else {
+      console.warn('loadWatchlist failed:', error.message);
+    }
+    return;
+  }
+  watchlistAvailable = true;
+  watchlistMovies = {};
+  watchlistIds = new Set();
+  (data || []).forEach(m => {
+    watchlistIds.add(m.tmdb_id);
+    watchlistMovies[m.tmdb_id] = m;
+    if (!discoverMovieMap[m.tmdb_id]) {
+      discoverMovieMap[m.tmdb_id] = {
+        id: m.tmdb_id,
+        title: m.title,
+        release_date: m.year ? String(m.year) : '',
+        poster_path: m.poster_path || ''
+      };
+    }
+  });
+  if ($['watchlistModal']?.classList.contains('open')) renderWatchlistPanel();
+  if (getActiveTab() === 'discover') renderDiscover();
+}
 
 async function loadBlockedMovies() {
   if (!currentUser) return;
-  const { data, error } = await db.from('blocked_movies')
-    .select('tmdb_id')
+  let { data, error } = await db.from('blocked_movies')
+    .select('tmdb_id, reason')
     .eq('user_id', currentUser.id);
+  if (error && /reason|column/i.test(error.message || '')) {
+    const fallback = await db.from('blocked_movies')
+      .select('tmdb_id')
+      .eq('user_id', currentUser.id);
+    data = fallback.data;
+    error = fallback.error;
+  }
   if (!error && data) {
     blockedMovieIds = new Set(data.map(r => r.tmdb_id));
+    blockedMovieReasons = {};
+    data.forEach(r => { if (r.reason) blockedMovieReasons[r.tmdb_id] = r.reason; });
   }
 }
 
@@ -2951,6 +3062,16 @@ $['discoverContent'].addEventListener('click', e => {
   blockMovie(tmdbId, btn.closest('.discover-card'));
 });
 
+// Delegated click for watchlist buttons in discover grid
+$['discoverContent'].addEventListener('click', e => {
+  const btn = e.target.closest('.dc-watch-btn');
+  if (!btn) return;
+  e.stopPropagation();
+  const tmdbId = parseInt(btn.dataset.tmdbId);
+  if (!tmdbId) return;
+  toggleWatchlist(tmdbId);
+});
+
 // Delegated click for discover cards → movie detail
 $['discoverContent'].addEventListener('click', e=>{
   // Ignore clicks on buttons or inside rate-btn
@@ -2963,6 +3084,132 @@ $['discoverContent'].addEventListener('click', e=>{
 });
 
 // ===== BLOCKED MOVIES MANAGEMENT =====
+async function toggleWatchlist(tmdbId) {
+  if (!currentUser || !tmdbId) return;
+  const movie = discoverMovieMap[tmdbId];
+  if (watchlistIds.has(tmdbId)) {
+    const { error } = await db.from('watchlist_movies')
+      .delete()
+      .eq('user_id', currentUser.id)
+      .eq('tmdb_id', tmdbId);
+    if (error) { toast('移除想看失败: ' + error.message); return; }
+    watchlistIds.delete(tmdbId);
+    delete watchlistMovies[tmdbId];
+    toast('已移出想看');
+  } else {
+    const year = parseInt((movie?.release_date || '').slice(0, 4)) || null;
+    const { error } = await db.from('watchlist_movies').insert({
+      user_id: currentUser.id,
+      tmdb_id: tmdbId,
+      title: movie?.title || ('TMDB #' + tmdbId),
+      year,
+      poster_path: movie?.poster_path || ''
+    });
+    if (error) {
+      toast(/watchlist_movies|schema cache|does not exist|relation/i.test(error.message || '')
+        ? '想看清单表尚未创建，请先执行升级 SQL'
+        : '加入想看失败: ' + error.message);
+      return;
+    }
+    watchlistIds.add(tmdbId);
+    watchlistMovies[tmdbId] = { tmdb_id: tmdbId, title: movie?.title || ('TMDB #' + tmdbId), year, poster_path: movie?.poster_path || '' };
+    toast('已加入想看');
+  }
+  renderDiscover();
+  if ($['watchlistModal']?.classList.contains('open')) renderWatchlistPanel();
+}
+
+// Open watchlist modal from user dropdown
+$['watchlistMgmtBtn'].addEventListener('click', () => {
+  $['userMenu'].classList.remove('open');
+  watchlistPage = 1;
+  renderWatchlistPanel();
+  $['watchlistModal'].classList.add('open');
+});
+
+// Close watchlist modal
+$['watchlistModalClose'].addEventListener('click', () => {
+  $['watchlistModal'].classList.remove('open');
+});
+$['watchlistModal'].addEventListener('click', e => {
+  if (e.target === e.currentTarget) $['watchlistModal'].classList.remove('open');
+});
+
+// Delegated clicks inside watchlist modal: rate + remove + pagination
+$['watchlistModal'].addEventListener('click', e => {
+  const rateBtn = e.target.closest('.dc-watch-rate-btn');
+  if (rateBtn) {
+    e.stopPropagation();
+    const tmdbId = parseInt(rateBtn.dataset.tmdbId);
+    const movie = discoverMovieMap[tmdbId] || watchlistMovies[tmdbId];
+    if (movie) {
+      $['watchlistModal'].classList.remove('open');
+      openQuickRate({ id: tmdbId, title: movie.title, year: movie.year, poster_path: movie.poster_path });
+    }
+    return;
+  }
+  const removeBtn = e.target.closest('.dc-watch-remove-btn');
+  if (removeBtn) {
+    e.stopPropagation();
+    const tmdbId = parseInt(removeBtn.dataset.tmdbId);
+    if (tmdbId) toggleWatchlist(tmdbId);
+    return;
+  }
+  const pgBtn = e.target.closest('button[data-wl-pg]');
+  if (pgBtn) {
+    watchlistPage = parseInt(pgBtn.getAttribute('data-wl-pg'));
+    if (!isNaN(watchlistPage)) {
+      renderWatchlistPanel();
+      $['watchlistModal'].querySelector('.modal').scrollTop = 0;
+    }
+  }
+});
+
+function renderWatchlistPanel() {
+  const ids = [...watchlistIds];
+  if ($['watchlistCount']) $['watchlistCount'].textContent = ids.length;
+  if (!$['watchlistMovieGrid']) return;
+
+  if (!ids.length) {
+    $['watchlistMovieGrid'].innerHTML = '<div class="empty-state"><p style="font-size:0.85rem">暂无想看的电影</p></div>';
+    if ($['watchlistPagination']) $['watchlistPagination'].innerHTML = '';
+    return;
+  }
+
+  const pageSize = 12;
+  const totalPages = Math.ceil(ids.length / pageSize);
+  if (watchlistPage > totalPages) watchlistPage = totalPages;
+  const start = (watchlistPage - 1) * pageSize;
+  const pageIds = ids.slice(start, start + pageSize);
+
+  $['watchlistMovieGrid'].innerHTML = pageIds.map(tmdbId => {
+    const movie = discoverMovieMap[tmdbId] || watchlistMovies[tmdbId];
+    const title = movie ? movie.title : 'TMDB #' + tmdbId;
+    const poster = movie && movie.poster_path ? posterUrl(movie.poster_path) : '';
+    const year = movie ? (movie.year || (movie.release_date || '').slice(0, 4)) : '';
+    return `
+      <div class="discover-card" data-tmdb-id="${tmdbId}">
+        <div class="dc-poster-wrap">
+          ${poster ? `<img src="${poster}" alt="${esc(title)}" loading="lazy">` : '<div class="dc-no-poster">☆</div>'}
+        </div>
+        <div class="dc-info">
+          <div class="dc-title">${esc(title)}</div>
+          <div class="dc-meta">${year || '未知'}</div>
+          <div class="dc-action">
+            <div class="dc-action-row">
+              <button class="btn btn-sm btn-secondary dc-watch-rate-btn" data-tmdb-id="${tmdbId}">＋我的评分</button>
+              <button class="btn btn-xs dc-watch-remove-btn dc-watch-btn active" data-tmdb-id="${tmdbId}" title="移出想看">★</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  if ($['watchlistPagination']) {
+    $['watchlistPagination'].innerHTML = buildPaginationHTML(watchlistPage, totalPages, 'data-wl-pg', 'list-pages');
+  }
+}
 
 // Open blocked movies modal from user dropdown
 $['blockedMgmtBtn'].addEventListener('click', () => {
@@ -2991,6 +3238,7 @@ $['blockedModal'].addEventListener('click', e => {
     db.from('blocked_movies').delete().eq('user_id', currentUser.id).eq('tmdb_id', tmdbId).then(({error}) => {
       if (!error) {
         blockedMovieIds.delete(tmdbId);
+        delete blockedMovieReasons[tmdbId];
         discoverCache.recommend = null;
         const idsRemaining = blockedMovieIds.size;
         const totalPages = Math.ceil(idsRemaining / 12);
@@ -3084,7 +3332,9 @@ async function renderDiscover() {
       movies = await loadTopRated();
     }
   } catch(e) {
-    if (discoverTab === tab) container.innerHTML = '<div class="empty-state"><p>加载失败，请稍后重试</p></div>';
+    if (discoverTab === tab) {
+      container.innerHTML = `<div class="empty-state"><p>加载失败，请稍后重试</p><p style="font-size:0.8rem;color:var(--text2);margin-top:8px">${esc(e.message || '网络或接口异常')}</p></div>`;
+    }
     return;
   }
 
@@ -3113,10 +3363,20 @@ async function renderDiscover() {
 
 async function blockMovie(tmdbId, cardEl) {
   if (!currentUser || !tmdbId) return;
-  const { error } = await db.from('blocked_movies').insert({
+  const reason = prompt('为什么不再推荐？可填：已看过 / 类型不喜欢 / 太热门 / 太旧 / 不想看这个导演', '类型不喜欢');
+  if (reason === null) return;
+  let { error } = await db.from('blocked_movies').insert({
     user_id: currentUser.id,
-    tmdb_id: tmdbId
+    tmdb_id: tmdbId,
+    reason: reason.trim().slice(0, 40)
   });
+  if (error && /reason|column/i.test(error.message || '')) {
+    const retry = await db.from('blocked_movies').insert({
+      user_id: currentUser.id,
+      tmdb_id: tmdbId
+    });
+    error = retry.error;
+  }
   if (error) {
     if (!error.message.includes('duplicate') && !error.message.includes('unique')) {
       toast('操作失败: ' + error.message);
@@ -3124,6 +3384,7 @@ async function blockMovie(tmdbId, cardEl) {
     }
   }
   blockedMovieIds.add(tmdbId);
+  if (reason.trim()) blockedMovieReasons[tmdbId] = reason.trim().slice(0, 40);
   discoverCache.recommend = null;
   if (cardEl) {
     cardEl.classList.add('blocked-removing');
@@ -3160,6 +3421,7 @@ function renderBlockedPanel() {
     const title = movie ? movie.title : 'TMDB #' + tmdbId;
     const poster = movie && movie.poster_path ? posterUrl(movie.poster_path) : '';
     const year = movie ? (movie.release_date || '').slice(0, 4) : '';
+    const reason = blockedMovieReasons[tmdbId] || '';
     return `
       <div class="discover-card" data-tmdb-id="${tmdbId}">
         <div class="dc-poster-wrap">
@@ -3168,6 +3430,7 @@ function renderBlockedPanel() {
         <div class="dc-info">
           <div class="dc-title">${esc(title)}</div>
           <div class="dc-meta">${year || '未知'}</div>
+          ${reason ? `<div class="dc-reasons"><span class="dc-reason">${esc(reason)}</span></div>` : ''}
           <div class="dc-action">
             <button class="btn btn-xs btn-secondary dc-unblock-btn" data-tmdb-id="${tmdbId}" style="width:100%">恢复推荐</button>
           </div>
@@ -3253,9 +3516,11 @@ function renderDiscoverCard(m, ratedTmdbIds, showBlockBtn) {
   const tmdbId = m.id || m.tmdb_id;
   const key = tmdbId ? 'tmdb_'+tmdbId : '';
   const isRated = key && ratedTmdbIds.has(key);
+  const isWatchlisted = tmdbId && watchlistIds.has(tmdbId);
   const poster = m.poster_path ? posterUrl(m.poster_path) : '';
   const year = (m.release_date||'').slice(0,4);
   const genres = (m.genre_ids||[]).slice(0,3).map(id=>genreMap[id]||'').filter(Boolean);
+  const reasons = Array.isArray(m.reasons) ? m.reasons.slice(0, 2) : [];
 
   return `
     <div class="discover-card" data-tmdb-id="${tmdbId||''}">
@@ -3267,15 +3532,20 @@ function renderDiscoverCard(m, ratedTmdbIds, showBlockBtn) {
         <div class="dc-title">${esc(m.title)}</div>
         <div class="dc-meta">${year||'未知'}${m.original_language ? ' · ' + m.original_language.toUpperCase() : ''}</div>
         ${genres.length ? `<div class="dc-genres">${genres.map(g=>`<span class="dc-genre">${g}</span>`).join('')}</div>` : ''}
+        ${reasons.length ? `<div class="dc-reasons">${reasons.map(r=>`<span class="dc-reason">${esc(r)}</span>`).join('')}</div>` : ''}
         <div class="dc-action">
           ${isRated
             ? '<div class="dc-rated-badge">已评价 ✓</div>'
             : showBlockBtn
               ? `<div class="dc-action-row">
                    <button class="btn btn-sm btn-secondary dc-rate-btn" data-tmdb-id="${tmdbId}">＋我的评分</button>
+                   <button class="btn btn-xs dc-watch-btn ${isWatchlisted?'active':''}" data-tmdb-id="${tmdbId}" title="${isWatchlisted?'移出想看':'加入想看'}">${isWatchlisted?'★':'☆'}</button>
                    <button class="btn btn-xs dc-block-btn" data-tmdb-id="${tmdbId}" title="不再推荐">🚫</button>
                  </div>`
-              : `<button class="btn btn-sm btn-secondary dc-rate-btn" data-tmdb-id="${tmdbId}">＋我的评分</button>`
+              : `<div class="dc-action-row">
+                   <button class="btn btn-sm btn-secondary dc-rate-btn" data-tmdb-id="${tmdbId}">＋我的评分</button>
+                   <button class="btn btn-xs dc-watch-btn ${isWatchlisted?'active':''}" data-tmdb-id="${tmdbId}" title="${isWatchlisted?'移出想看':'加入想看'}">${isWatchlisted?'★':'☆'}</button>
+                 </div>`
           }
         </div>
       </div>
@@ -3309,18 +3579,23 @@ async function loadRecommendations() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          entries: allEntries,
+          entries: buildRecommendationEntries(),
           userId: currentUser.id,
           blockedIds: [...blockedMovieIds],
           excludeIds: discoverLastShownIds
         }),
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || `推荐接口异常 (${res.status})`);
       if (data.movies) {
         discoverCache.recommend = data.movies;
         return discoverCache.recommend;
       }
-    } catch(e) { console.warn('Recommend fetch failed:', e.message); }
+      throw new Error(data.error || '推荐接口未返回结果');
+    } catch(e) {
+      console.warn('Recommend fetch failed:', e.message);
+      throw e;
+    }
   }
 
   // Recommendation engine now runs exclusively in the Worker
@@ -3446,6 +3721,19 @@ $['qrSubmit'].addEventListener('click', async ()=>{
   }
 
   toast(isEdit ? '评价已更新！' : '评价已保存！');
+  if (!isEdit && quickRateMovie.tmdb_id && watchlistIds.has(quickRateMovie.tmdb_id)) {
+    const savedTmdbId = quickRateMovie.tmdb_id;
+    db.from('watchlist_movies')
+      .delete()
+      .eq('user_id', currentUser.id)
+      .eq('tmdb_id', savedTmdbId)
+      .then(({error}) => {
+        if (!error) {
+          watchlistIds.delete(savedTmdbId);
+          delete watchlistMovies[savedTmdbId];
+        }
+      });
+  }
   // Fire-and-forget: backfill overview for new entries (non-blocking)
   if (!isEdit && quickRateMovie.tmdb_id) {
     fetchOverview(quickRateMovie.tmdb_id).then(overview => {
@@ -3609,9 +3897,15 @@ db.auth.onAuthStateChange((event, session) => {
 
 // ===== PAGE LOAD INIT =====
 (async ()=>{
-  const {data:{session}} = await db.auth.getSession();
-  if (session?.user) {
-    await initApp(session.user);
+  try {
+    const {data:{session}, error} = await db.auth.getSession();
+    if (error) throw error;
+    if (session?.user) {
+      await initApp(session.user);
+    }
+  } catch(e) {
+    console.error('Session restore failed:', e);
+    toast('登录状态恢复失败：' + (e.message || e));
   }
 })();
 </script>

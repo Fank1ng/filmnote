@@ -29,6 +29,8 @@
 
 ### 本地与工程维护
 - **账号加载错误提示**：登录恢复、用户资料读取、会话 token 更新失败时显示具体错误，不再静默卡住
+- **localStorage 缓存版本化**：`filmnote_cache_*` 增加 `CACHE_VERSION`，结构升级后自动丢弃旧缓存
+- **前端入口拆分**：`index.html` 拆出 `styles.css`、`api.js`、`app.js`，并预留 `tmdb-cache.js`、`recommend-ui.js` 模块边界
 - **依赖锁定**：新增 `worker/package-lock.json`，部署环境可复现安装 Wrangler 依赖
 - **忽略本地依赖目录**：`.gitignore` 增加 `worker/node_modules/` 与 `node_modules/`
 

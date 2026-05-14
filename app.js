@@ -551,7 +551,7 @@ function setCache(key, data) {
   try { localStorage.setItem(CACHE_KEY + key, JSON.stringify({data, ts: Date.now(), version: CACHE_VERSION})); } catch {}
 }
 
-// Movie cache: permanent localStorage for TMDB detail (overview, genres, vote, director, cast)
+// Movie cache: permanent localStorage for normalized TMDB detail
 const movieCache = (() => {
   const KEY = 'filmnote_movie_cache';
   const OLD_KEY = 'filmnote_overviews';
@@ -566,7 +566,7 @@ const movieCache = (() => {
         const old = JSON.parse(oldRaw);
         const migrated = {};
         for (const [id, overview] of Object.entries(old)) {
-          migrated[id] = { overview };
+          migrated[id] = normalizeMovieDetail({ overview });
         }
         saveAll(migrated);
         localStorage.removeItem(OLD_KEY);
@@ -583,20 +583,20 @@ const movieCache = (() => {
   return {
     get(tmdbId) {
       if (!tmdbId) return null;
-      return loadAll()[tmdbId] || null;
+      const cached = loadAll()[tmdbId] || null;
+      return cached ? normalizeMovieDetail(cached) : null;
     },
     hasFull(tmdbId) {
-      const c = loadAll()[tmdbId];
-      return !!(c && (c.director || (c.cast && c.cast.length)));
+      return !needsMovieDetailFetch(this.get(tmdbId));
     },
 
     set(tmdbId, data) {
       if (!tmdbId || !data) return;
       const all = loadAll();
       if (typeof data === 'string') {
-        all[tmdbId] = { ...(all[tmdbId] || {}), overview: data };
+        all[tmdbId] = mergeMovieDetail(all[tmdbId], { overview: data });
       } else {
-        all[tmdbId] = { ...(all[tmdbId] || {}), ...data };
+        all[tmdbId] = mergeMovieDetail(all[tmdbId], data);
       }
       saveAll(all);
     },
@@ -605,21 +605,21 @@ const movieCache = (() => {
       const all = loadAll();
       for (const [id, val] of Object.entries(map)) {
         if (typeof val === 'string') {
-          all[id] = { ...(all[id] || {}), overview: val };
+          all[id] = mergeMovieDetail(all[id], { overview: val });
         } else {
-          all[id] = { ...(all[id] || {}), ...val };
+          all[id] = mergeMovieDetail(all[id], val);
         }
       }
       saveAll(all);
     },
-    applyOverviewTo(entries) {
+    applyDetailsTo(entries) {
       const all = loadAll();
       for (const e of entries) {
-        if (!e.overview && e.tmdb_id && all[e.tmdb_id]?.overview) {
-          e.overview = all[e.tmdb_id].overview;
-        }
+        if (!e.tmdb_id || !all[e.tmdb_id]) continue;
+        applyMovieDetailToEntry(e, normalizeMovieDetail(all[e.tmdb_id]));
       }
-    }
+    },
+    applyOverviewTo(entries) { this.applyDetailsTo(entries); }
   };
 })();
 
@@ -710,13 +710,126 @@ function checkOverviewOverflow(ovId) {
   });
 }
 
-async function fetchOverview(tmdbId) {
-  if (!tmdbId) return '';
+const MOVIE_DETAIL_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
+
+function normalizeMovieDetail(input, credits) {
+  if (!input) return null;
+  if (input.movie) return normalizeMovieDetail(input.movie);
+  if (input.details) return extractMovieDetail(input.details, input.credits || credits);
+
+  const cast = Array.isArray(input.cast)
+    ? input.cast.map(c => typeof c === 'string' ? c : c?.name).filter(Boolean).slice(0, 8)
+    : [];
+  const genres = Array.isArray(input.genres)
+    ? input.genres.map(g => typeof g === 'string' ? g : g?.name).filter(Boolean)
+    : [];
+
+  return {
+    id: input.id || input.tmdb_id || null,
+    title: input.title || input.name || '',
+    original_title: input.original_title || input.original_name || '',
+    overview: input.overview || '',
+    release_date: input.release_date || input.first_air_date || '',
+    year: input.year || parseInt(String(input.release_date || input.first_air_date || '').slice(0, 4)) || null,
+    poster_path: input.poster_path || '',
+    genres,
+    genre_ids: input.genre_ids || [],
+    vote_average: Number(input.vote_average || 0),
+    vote_count: Number(input.vote_count || 0),
+    popularity: Number(input.popularity || 0),
+    runtime: Number(input.runtime || 0),
+    director: input.director || '',
+    cast,
+    original_language: input.original_language || '',
+    fetched_at: input.fetched_at || 0
+  };
+}
+
+function mergeMovieDetail(existing, incoming) {
+  const prev = normalizeMovieDetail(existing) || {};
+  const next = normalizeMovieDetail(incoming) || {};
+  return {
+    ...prev,
+    ...next,
+    title: next.title || prev.title || '',
+    original_title: next.original_title || prev.original_title || '',
+    overview: next.overview || prev.overview || '',
+    release_date: next.release_date || prev.release_date || '',
+    year: next.year || prev.year || null,
+    poster_path: next.poster_path || prev.poster_path || '',
+    genres: next.genres?.length ? next.genres : (prev.genres || []),
+    genre_ids: next.genre_ids?.length ? next.genre_ids : (prev.genre_ids || []),
+    vote_average: next.vote_average || prev.vote_average || 0,
+    vote_count: next.vote_count || prev.vote_count || 0,
+    popularity: next.popularity || prev.popularity || 0,
+    runtime: next.runtime || prev.runtime || 0,
+    director: next.director || prev.director || '',
+    cast: next.cast?.length ? next.cast : (prev.cast || []),
+    original_language: next.original_language || prev.original_language || '',
+    fetched_at: next.fetched_at || prev.fetched_at || 0
+  };
+}
+
+function needsMovieDetailFetch(detail) {
+  if (!detail) return true;
+  const stale = !detail.fetched_at || Date.now() - detail.fetched_at > MOVIE_DETAIL_REFRESH_MS;
+  const missingCore = !detail.overview && !detail.director && !(detail.cast && detail.cast.length) && !detail.vote_average;
+  const legacyPartial = !detail.fetched_at && (!detail.overview || !detail.director || !(detail.cast && detail.cast.length));
+  return stale || missingCore || legacyPartial;
+}
+
+function applyMovieDetailToEntry(entry, detail) {
+  if (!entry || !detail) return {};
+  const updates = {};
+  if (detail.overview && !entry.overview) {
+    entry.overview = detail.overview;
+    updates.overview = detail.overview;
+  }
+  if (detail.director && !entry.director) {
+    entry.director = detail.director;
+    updates.director = detail.director;
+  }
+  if (detail.poster_path && !entry.poster_path) {
+    entry.poster_path = detail.poster_path;
+    updates.poster_path = detail.poster_path;
+  }
+  if (detail.year && !entry.year) {
+    entry.year = detail.year;
+    updates.year = detail.year;
+  }
+  return updates;
+}
+
+async function backfillMovieDetailToDB(entry, detail) {
+  if (!entry || !detail || !entry.id || entry.user_id !== currentUser?.id) return;
+  const updates = applyMovieDetailToEntry(entry, detail);
+  if (!Object.keys(updates).length) return;
+  db.from('entries').update(updates).eq('id', entry.id).then(()=>{}).catch(()=>{});
+}
+
+async function fetchMovieDetail(tmdbId, opts = {}) {
+  if (!tmdbId) return null;
+  const cached = movieCache.get(tmdbId);
+  if (!opts.force && cached && !needsMovieDetailFetch(cached)) return cached;
+  if (!opts.force && tmdbDetailCache[tmdbId]) return tmdbDetailCache[tmdbId];
   try {
-    const d = await fetchTmdbDetail(tmdbId);
-    if (d) movieCache.set(tmdbId, extractMovieDetail(d.details, d.credits));
-    return d?.details?.overview || '';
-  } catch(e) { return ''; }
+    const res = await fetch(TMDB_PROXY + '/detail/' + tmdbId);
+    if (!res.ok) return cached || null;
+    const result = await res.json();
+    const detail = normalizeMovieDetail(result.movie || result);
+    if (!detail) return cached || null;
+    tmdbDetailCache[tmdbId] = detail;
+    movieCache.set(tmdbId, detail);
+    if (detail.original_title) originalTitleCache[tmdbId] = detail.original_title;
+    return detail;
+  } catch(e) {
+    return cached || null;
+  }
+}
+
+async function fetchOverview(tmdbId) {
+  const detail = await fetchMovieDetail(tmdbId);
+  return detail?.overview || '';
 }
 
 function editActionForEntry(entry) {
@@ -730,9 +843,8 @@ function buildDimTagsHTML(ratings, userColor) {
 }
 
 async function backfillOverviewToDB(entry, overview) {
-  if (!overview || !entry.id || entry.user_id !== currentUser?.id) return;
-  entry.overview = overview;
-  db.from('entries').update({ overview }).eq('id', entry.id).then(()=>{}).catch(()=>{});
+  if (!overview) return;
+  await backfillMovieDetailToDB(entry, { overview });
 }
 
 
@@ -740,14 +852,25 @@ async function backfillOverviewToDB(entry, overview) {
 function extractMovieDetail(details, credits) {
   const director = (credits?.crew || []).find(c => c.job === 'Director');
   const cast = (credits?.cast || []).slice(0, 6);
-  return {
+  if (!details || details.success === false) return null;
+  return normalizeMovieDetail({
+    id: details?.id || null,
+    title: details?.title || details?.name || '',
+    original_title: details?.original_title || details?.original_name || '',
     overview: details?.overview || '',
+    release_date: details?.release_date || details?.first_air_date || '',
+    poster_path: details?.poster_path || '',
     genres: (details?.genres || []).map(g => g.name),
+    genre_ids: (details?.genres || []).map(g => g.id),
     vote_average: details?.vote_average || 0,
+    vote_count: details?.vote_count || 0,
+    popularity: details?.popularity || 0,
     runtime: details?.runtime || 0,
     director: director ? director.name : '',
     cast: cast.map(c => c.name),
-  };
+    original_language: details?.original_language || '',
+    fetched_at: Date.now()
+  });
 }
 
 // Build complete TMDB detail section HTML from cached data
@@ -779,9 +902,9 @@ function buildTmdbDetailHTML(cached, ovId) {
   return parts.join('');
 }
 
-// Batch-prefetch missing overviews after data load (hits Worker cache, non-blocking)
+// Batch-prefetch missing/stale movie details after data load (hits Worker cache, non-blocking)
 async function prefetchOverviews() {
-  const missing = allEntries.filter(e => e.tmdb_id && !e.overview);
+  const missing = allEntries.filter(e => e.tmdb_id && needsMovieDetailFetch(movieCache.get(e.tmdb_id)));
   if (!missing.length) return;
   const ids = [...new Set(missing.map(e => e.tmdb_id))];
   const byTmdbId = {};
@@ -799,37 +922,21 @@ async function prefetchOverviews() {
       });
       if (res.ok) {
         const data = await res.json();
-        // Prefer full detail objects (genres, rating, director, cast); fallback to overview-only
-        if (data.details) {
-          movieCache.setBatch(data.details);
-        } else if (data.overviews) {
-          movieCache.setBatch(data.overviews);
-        }
-        // Backfill overviews to in-memory entries + DB
-        const overviews = data.overviews || (data.details ? Object.fromEntries(
-          Object.entries(data.details).map(([id, d]) => [id, d.overview]).filter(([,ov]) => ov)
+        const detailMap = data.details || (data.overviews ? Object.fromEntries(
+          Object.entries(data.overviews).map(([id, overview]) => [id, { id: Number(id), overview }])
         ) : {});
-        if (Object.keys(overviews).length) {
-          // Batch DB updates by overview value, max 50 per batch
-          const byOverview = {};
-          for (const [tmdbId, overview] of Object.entries(overviews)) {
+        if (Object.keys(detailMap).length) {
+          movieCache.setBatch(detailMap);
+          for (const [tmdbId, rawDetail] of Object.entries(detailMap)) {
+            const detail = normalizeMovieDetail(rawDetail);
             const entries = byTmdbId[parseInt(tmdbId)];
-            if (entries) {
-              for (const entry of entries) {
-                entry.overview = overview;
-                if (entry.user_id === currentUser?.id && entry.id) {
-                  if (!byOverview[overview]) byOverview[overview] = [];
-                  byOverview[overview].push(entry.id);
-                }
-              }
+            if (!detail || !entries) continue;
+            for (const entry of entries) {
+              backfillMovieDetailToDB(entry, detail);
             }
           }
-          for (const [overview, entryIds] of Object.entries(byOverview)) {
-            for (let i = 0; i < entryIds.length; i += 50) {
-              const batch = entryIds.slice(i, i + 50);
-              db.from('entries').update({ overview }).in('id', batch).then(()=>{}).catch(()=>{});
-            }
-          }
+          buildSearchIndex();
+          if (getActiveTab()==='list') renderList();
         }
       }
     } catch(e) { console.warn('prefetchOverviews failed:', e); }
@@ -1177,18 +1284,22 @@ async function searchTmdb(query) {
         $['tmdbSearch'].value = '';
         container.classList.remove('open');
 
-        // Fetch director
+        // Fetch normalized detail once; the same cache feeds save, detail modal, and search
         try {
           const type = entryType==='series' ? 'tv' : 'movie';
-          const credRes = await tmdbFetch(`/${type}/${tmdbId}/credits?language=zh-CN`);
-          const credData = await credRes.json();
           let director = '';
           if (entryType==='series') {
+            const credRes = await tmdbFetch(`/${type}/${tmdbId}/credits?language=zh-CN`);
+            const credData = await credRes.json();
             const creator = (credData.crew||[]).find(c=>c.job==='Director'||c.job==='Executive Producer');
             director = creator?.name || '';
           } else {
-            const dir = (credData.crew||[]).find(c=>c.job==='Director');
-            director = dir?.name || '';
+            const detail = await fetchMovieDetail(tmdbId);
+            director = detail?.director || '';
+            if (detail?.overview || detail?.poster_path || detail?.year) {
+              if (detail.year && !$['year'].value) $['year'].value = detail.year;
+              if (detail.poster_path && !$['posterPath'].value) $['posterPath'].value = detail.poster_path;
+            }
           }
           if (director) $['director'].value = director;
         } catch(e){}
@@ -1222,10 +1333,11 @@ $['movieForm'].addEventListener('submit', async e=>{
     if ($['year'].value && (isNaN(yearVal) || yearVal < 1900 || yearVal > 2100)) { toast('年份需在 1900-2100 之间'); btn.textContent=origText; btn.disabled=false; return; }
 
     const ratings = getMainRatings();
+    const tmdbIdVal = parseInt($['tmdbId'].value) || null;
     const entryData = {
       user_id: currentUser.id,
       type: entryType,
-      tmdb_id: parseInt($['tmdbId'].value) || null,
+      tmdb_id: tmdbIdVal,
       title,
       year: parseInt($['year'].value) || null,
       director: $['director'].value.trim(),
@@ -1235,6 +1347,10 @@ $['movieForm'].addEventListener('submit', async e=>{
       comment: $['comment'].value.trim(),
       updated_at: new Date().toISOString()
     };
+    if (entryType === 'movie' && tmdbIdVal) {
+      const cachedDetail = movieCache.get(tmdbIdVal);
+      if (cachedDetail) applyMovieDetailToEntry(entryData, cachedDetail);
+    }
 
     let entryId = editingEntryId;
 
@@ -1279,14 +1395,12 @@ $['movieForm'].addEventListener('submit', async e=>{
     }
 
     toast(editingEntryId ? '评价已更新' : '评价已保存');
-    // Fire-and-forget: warm KV cache + backfill overview to saved entry
+    // Fire-and-forget: warm KV cache + backfill normalized movie detail to saved entry
     if (entryType === 'movie' && entryData.tmdb_id) {
-      fetchOverview(entryData.tmdb_id).then(overview => {
-        if (overview && entryId) {
-          db.from('entries').update({ overview }).eq('id', entryId).then(()=>{}).catch(()=>{});
-          // Update local entry if still in allEntries
-          const e = allEntries.find(x => x.id === entryId);
-          if (e) e.overview = overview;
+      fetchMovieDetail(entryData.tmdb_id).then(detail => {
+        if (detail && entryId) {
+          const e = allEntries.find(x => x.id === entryId) || { ...entryData, id: entryId };
+          backfillMovieDetailToDB(e, detail);
         }
       });
     }
@@ -1422,19 +1536,8 @@ function buildSearchIndex() {
 }
 
 async function fetchTmdbDetail(tmdbId) {
-  if (!tmdbId) return null;
-  if (tmdbDetailCache[tmdbId]) return tmdbDetailCache[tmdbId];
-  try {
-    const res = await fetch(TMDB_PROXY + '/detail/' + tmdbId);
-    if (!res.ok) { tmdbDetailCache[tmdbId] = null; return null; }
-    const result = await res.json();
-    tmdbDetailCache[tmdbId] = result;
-    if (result.details?.original_title) originalTitleCache[tmdbId] = result.details.original_title;
-    return result;
-  } catch(e) {
-    tmdbDetailCache[tmdbId] = null;
-    return null;
-  }
+  const movie = await fetchMovieDetail(tmdbId);
+  return movie ? { movie, details: movie, credits: null } : null;
 }
 
 // ===== RENDER LIST =====
@@ -1704,8 +1807,9 @@ async function showDetail(id) {
   const entry = allEntries.find(e=>e.id===id);
   if (!entry) return;
   const cached = entry.tmdb_id ? movieCache.get(entry.tmdb_id) : null;
-  const hasFullCache = cached && (cached.director || (cached.cast && cached.cast.length));
-  if (!entry.overview && cached?.overview) entry.overview = cached.overview;
+  const shouldFetchDetail = entry.tmdb_id && needsMovieDetailFetch(cached);
+  const hasDetailCache = cached && !shouldFetchDetail;
+  if (cached) applyMovieDetailToEntry(entry, cached);
 
   const isMine = entry.user_id===currentUser.id;
   const ownerName = allProfiles[entry.user_id]?.display_name||'未知';
@@ -1769,7 +1873,7 @@ async function showDetail(id) {
     ${(() => {
       if (!entry.tmdb_id) return '';
       const ovId = 'tmdbOv-' + entry.id;
-      if (hasFullCache) return `<div class="tmdb-section" id="tmdbDetail-${entry.id}">${buildTmdbDetailHTML(cached, ovId)}</div>`;
+      if (hasDetailCache) return `<div class="tmdb-section" id="tmdbDetail-${entry.id}">${buildTmdbDetailHTML(cached, ovId)}</div>`;
       if (cached?.overview) return `<div class="tmdb-section" id="tmdbDetail-${entry.id}">${buildOverviewHTML(ovId, cached.overview)}<div class="detail-spinner"></div> 加载演职员信息...</div>`;
       return `<div class="tmdb-section" id="tmdbDetail-${entry.id}"><div class="detail-spinner"></div> 加载电影详情...</div>`;
     })()}
@@ -1780,12 +1884,12 @@ async function showDetail(id) {
   `;
   modal.classList.add('open');
 
-  if (entry.overview) checkOverviewOverflow('tmdbOv-' + entry.id);
+  if (entry.overview || cached?.overview) checkOverviewOverflow('tmdbOv-' + entry.id);
 
-  // Async: only fetch if full TMDB detail not already cached
-  if (entry.tmdb_id && !hasFullCache) {
+  // Async: fetch when normalized movie detail is missing, stale, or legacy-partial
+  if (shouldFetchDetail) {
     fetchAndRenderTmdbDetail(entry.tmdb_id, 'tmdbDetail-' + entry.id, 'tmdbOv-' + entry.id,
-      overview => { if (!entry.overview) backfillOverviewToDB(entry, overview); });
+      detail => backfillMovieDetailToDB(entry, detail));
   }
 }
 
@@ -1793,18 +1897,15 @@ async function showDetail(id) {
 async function fetchAndRenderTmdbDetail(tmdbId, sectionId, ovId, onBackfill) {
   const section = document.getElementById(sectionId);
   if (!section) return;
-  const data = await fetchTmdbDetail(tmdbId);
-  if (!data) {
+  const detail = await fetchMovieDetail(tmdbId, { force: true });
+  if (!detail) {
     if (section.querySelector('.detail-spinner')) {
       section.innerHTML = '<p style="font-size:0.8rem;color:var(--text2)">暂无详细信息</p>';
     }
     return;
   }
-  const { details, credits } = data;
-  const cached = extractMovieDetail(details, credits);
-  movieCache.set(tmdbId, cached);
-  if (onBackfill && details.overview) onBackfill(details.overview);
-  section.innerHTML = buildTmdbDetailHTML(cached, ovId);
+  if (onBackfill) onBackfill(detail);
+  section.innerHTML = buildTmdbDetailHTML(detail, ovId) || '<p style="font-size:0.8rem;color:var(--text2)">暂无详细信息</p>';
   checkOverviewOverflow(ovId);
 }
 
@@ -1814,8 +1915,9 @@ async function showMovieDetail(tmdbId) {
   if (!movie) return;
 
   const cached = movieCache.get(tmdbId);
-  const hasFullCache = cached && (cached.director || (cached.cast && cached.cast.length));
-  if (!movie.overview && cached?.overview) movie.overview = cached.overview;
+  const shouldFetchDetail = needsMovieDetailFetch(cached);
+  const hasDetailCache = cached && !shouldFetchDetail;
+  if (cached?.overview && !movie.overview) movie.overview = cached.overview;
 
   const ratedTmdbIds = new Set(allEntries.filter(e=>e.user_id===currentUser.id && e.tmdb_id).map(e=>'tmdb_'+e.tmdb_id));
   const isRated = ratedTmdbIds.has('tmdb_'+tmdbId);
@@ -1841,7 +1943,7 @@ async function showMovieDetail(tmdbId) {
       </div>
     </div>
     <div class="tmdb-section" id="tmdbDiscoverDetail">
-      ${hasFullCache ? buildTmdbDetailHTML(cached, ovId) : (cached?.overview ? buildOverviewHTML(ovId, cached.overview) + '<div class="detail-spinner"></div> 加载演职员信息...' : '<div class="detail-spinner"></div> 加载电影详情...')}
+      ${hasDetailCache ? buildTmdbDetailHTML(cached, ovId) : (cached?.overview ? buildOverviewHTML(ovId, cached.overview) + '<div class="detail-spinner"></div> 加载演职员信息...' : '<div class="detail-spinner"></div> 加载电影详情...')}
     </div>
     <div class="btn-group" style="justify-content:flex-end;margin-top:8px">
       ${!isRated ? `<button class="btn btn-primary btn-sm" onclick="closeModal();openQuickRate({id:${tmdbId},title:'${esc(movie.title).replace(/'/g,"\\'")}',release_date:'${movie.release_date||''}',poster_path:'${movie.poster_path||''}'})">＋我的评分</button>` : ''}
@@ -1850,11 +1952,13 @@ async function showMovieDetail(tmdbId) {
   `;
   $['detailModal'].classList.add('open');
 
-  if (movie.overview || hasFullCache) checkOverviewOverflow(ovId);
+  if (movie.overview || cached?.overview || hasDetailCache) checkOverviewOverflow(ovId);
 
-  if (!hasFullCache) {
+  if (shouldFetchDetail) {
     fetchAndRenderTmdbDetail(tmdbId, 'tmdbDiscoverDetail', ovId,
-      overview => { if (!movie.overview) movie.overview = overview; });
+      detail => {
+        if (!movie.overview && detail?.overview) movie.overview = detail.overview;
+      });
   }
 }
 
@@ -2913,6 +3017,7 @@ $['qrSubmit'].addEventListener('click', async ()=>{
   const comment = $['qrComment'].value.trim();
   const total = calcTotal(ratings);
   const isEdit = !!quickEditEntryId;
+  const savedTmdbId = quickRateMovie.tmdb_id || null;
 
   const btn = $['qrSubmit'];
   const origText = btn.textContent;
@@ -2929,7 +3034,7 @@ $['qrSubmit'].addEventListener('click', async ()=>{
     const entryData = {
       user_id: currentUser.id,
       type: 'movie',
-      tmdb_id: quickRateMovie.tmdb_id || null,
+      tmdb_id: savedTmdbId,
       title: quickRateMovie.title,
       year: quickRateMovie.year || null,
       poster_path: quickRateMovie.poster_path || '',
@@ -2939,6 +3044,8 @@ $['qrSubmit'].addEventListener('click', async ()=>{
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
+    const cachedDetail = savedTmdbId ? movieCache.get(savedTmdbId) : null;
+    if (cachedDetail) applyMovieDetailToEntry(entryData, cachedDetail);
     const {error: insertErr} = await db.from('entries').insert(entryData);
     error = insertErr;
   }
@@ -2950,8 +3057,7 @@ $['qrSubmit'].addEventListener('click', async ()=>{
   }
 
   toast(isEdit ? '评价已更新！' : '评价已保存！');
-  if (!isEdit && quickRateMovie.tmdb_id && watchlistIds.has(quickRateMovie.tmdb_id)) {
-    const savedTmdbId = quickRateMovie.tmdb_id;
+  if (!isEdit && savedTmdbId && watchlistIds.has(savedTmdbId)) {
     db.from('watchlist_movies')
       .delete()
       .eq('user_id', currentUser.id)
@@ -2963,13 +3069,22 @@ $['qrSubmit'].addEventListener('click', async ()=>{
         }
       });
   }
-  // Fire-and-forget: backfill overview for new entries (non-blocking)
-  if (!isEdit && quickRateMovie.tmdb_id) {
-    fetchOverview(quickRateMovie.tmdb_id).then(overview => {
-      if (overview) {
-        db.from('entries').update({ overview }).eq('tmdb_id', quickRateMovie.tmdb_id).eq('user_id', currentUser.id).then(()=>{}).catch(()=>{});
-        const e = allEntries.find(x => x.tmdb_id === quickRateMovie.tmdb_id && x.user_id === currentUser.id);
-        if (e) e.overview = overview;
+  // Fire-and-forget: backfill normalized movie detail for new entries (non-blocking)
+  if (savedTmdbId) {
+    fetchMovieDetail(savedTmdbId).then(detail => {
+      if (!detail) return;
+      const e = allEntries.find(x => x.tmdb_id === savedTmdbId && x.user_id === currentUser.id);
+      if (e) {
+        backfillMovieDetailToDB(e, detail);
+      } else if (!isEdit) {
+        const updates = {};
+        if (detail.overview) updates.overview = detail.overview;
+        if (detail.director) updates.director = detail.director;
+        if (detail.poster_path) updates.poster_path = detail.poster_path;
+        if (detail.year) updates.year = detail.year;
+        if (Object.keys(updates).length) {
+          db.from('entries').update(updates).eq('tmdb_id', savedTmdbId).eq('user_id', currentUser.id).then(()=>{}).catch(()=>{});
+        }
       }
     });
   }

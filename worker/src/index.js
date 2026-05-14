@@ -192,6 +192,30 @@ async function fetchTmdb(path, env) {
   };
 }
 
+function normalizeTmdbMovieDetail(details, credits) {
+  if (!details || details.success === false) return null;
+  const director = (credits?.crew || []).find(c => c.job === 'Director');
+  return {
+    id: details.id || null,
+    title: details.title || details.name || '',
+    original_title: details.original_title || details.original_name || '',
+    overview: details.overview || '',
+    release_date: details.release_date || details.first_air_date || '',
+    year: parseInt(String(details.release_date || details.first_air_date || '').slice(0, 4)) || null,
+    poster_path: details.poster_path || '',
+    genres: (details.genres || []).map(g => g.name).filter(Boolean),
+    genre_ids: (details.genres || []).map(g => g.id).filter(Boolean),
+    vote_average: details.vote_average || 0,
+    vote_count: details.vote_count || 0,
+    popularity: details.popularity || 0,
+    runtime: details.runtime || 0,
+    director: director ? director.name : '',
+    cast: (credits?.cast || []).slice(0, 8).map(c => c.name).filter(Boolean),
+    original_language: details.original_language || '',
+    fetched_at: Date.now()
+  };
+}
+
 // ── Scoring helpers ──
 function getEntryTotalScore(entry) { return entry.total_score || 5; }
 function jaccard(a, b) {
@@ -1130,7 +1154,12 @@ export default {
         fetchTmdb(`/movie/${tmdbId}?language=zh-CN`, env),
         fetchTmdb(`/movie/${tmdbId}/credits?language=zh-CN`, env)
       ]);
-      return jsonResponse({ details, credits }, request, env);
+      const movie = normalizeTmdbMovieDetail(details, credits);
+      if (!movie) {
+        const status = details.status_code >= 400 && details.status_code <= 599 ? details.status_code : 502;
+        return errorResponse(details.status_message || 'TMDB detail not found', request, env, status);
+      }
+      return jsonResponse({ movie, details, credits }, request, env);
     }
 
     // ── Prefetch endpoint (warm KV for movie details + credits) ──
@@ -1160,21 +1189,14 @@ export default {
             for (let j = 0; j < batch.length; j++) {
               const detailResult = results[j * 3];
               const creditsResult = results[j * 3 + 1];
-              if (detailResult.status === 'fulfilled' && detailResult.value?.overview) {
-                overviews[batch[j]] = detailResult.value.overview;
-              }
               if (detailResult.status === 'fulfilled') {
                 const d = detailResult.value || {};
                 const credits = (creditsResult.status === 'fulfilled' && creditsResult.value) || {};
-                const director = (credits.crew || []).find(c => c.job === 'Director');
-                details[batch[j]] = {
-                  overview: d.overview || '',
-                  genres: (d.genres || []).map(g => g.name),
-                  vote_average: d.vote_average || 0,
-                  runtime: d.runtime || 0,
-                  director: director ? director.name : '',
-                  cast: (credits.cast || []).slice(0, 6).map(c => c.name),
-                };
+                const movie = normalizeTmdbMovieDetail(d, credits);
+                if (movie) {
+                  details[batch[j]] = movie;
+                  if (movie.overview) overviews[batch[j]] = movie.overview;
+                }
               }
             }
           }

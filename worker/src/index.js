@@ -14,7 +14,7 @@ const MAX_TITLE_IDS = 100;
 const MAX_CREDIT_IDS = 50;
 const MAX_RECOMMEND_ENTRIES = 1000;
 const MAX_JSON_BYTES = 256 * 1024;
-const REC_CACHE_VERSION = 'v2';
+const REC_CACHE_VERSION = 'v3';
 
 function getTmdbKey(env) {
   return env && env.TMDB_API_KEY;
@@ -101,6 +101,19 @@ function sanitizeEntries(entries) {
     score: Number.isFinite(Number(e.score)) ? Number(e.score) : null,
     created_at: e.created_at || '',
   }));
+}
+
+function sanitizeBlockedFeedback(blockedMovies, blockedIds) {
+  if (Array.isArray(blockedMovies)) {
+    return blockedMovies.slice(0, 500)
+      .map(m => ({
+        tmdb_id: Number.isFinite(Number(m.tmdb_id)) ? Number(m.tmdb_id) : null,
+        reason: String(m.reason || '').slice(0, 60)
+      }))
+      .filter(m => m.tmdb_id);
+  }
+  const ids = normalizeIds(blockedIds, 500) || [];
+  return ids.map(id => ({ tmdb_id: id, reason: '' }));
 }
 
 // KV expiration: permanent for static data, TTL for dynamic lists
@@ -253,6 +266,126 @@ function computeAvoidPenalty(candidate, avoidSeeds, avoidGenreSet, fullGenres, c
   }
   const combinedOverlap = Math.max(gOverlap * 0.5 + kwOverlap * 0.5, gOverlap);
   return combinedOverlap > 0.4 ? Math.min(combinedOverlap * 0.15, 0.15) : 0;
+}
+
+function addWeighted(obj, key, weight) {
+  if (key === undefined || key === null || key === '') return;
+  obj[String(key)] = (obj[String(key)] || 0) + weight;
+}
+
+function getFeedbackFlags(reason) {
+  const text = String(reason || '').trim().toLowerCase();
+  const variant = /版本|翻拍|重制|重拍|改编|系列|续集|前传|衍生|同.?故事|其他版|remake|reboot|sequel|prequel|version/.test(text);
+  const seen = /已看|看过|已阅|看了|seen|watched/.test(text);
+  const tooPopular = /太热门|热门|爆款|网红|大众|跟风|popular|mainstream/.test(text);
+  const tooObscure = /太冷门|冷门|小众|没人看|评分人数少|投票少|太糊|obscure|niche/.test(text);
+  const tooOld = /太旧|老片|年代太久|古早|太老|old/.test(text);
+  const director = /导演|主创|作者|director/.test(text);
+  const genre = /类型|题材|风格|不喜欢|恐怖|血腥|爱情|动画|科幻|动作|喜剧|文艺|genre|style/.test(text);
+  const hasReason = text.length > 0;
+  return {
+    hasReason,
+    seenOnly: seen && !variant && !genre && !director && !tooPopular && !tooObscure && !tooOld,
+    variant,
+    tooPopular,
+    tooObscure,
+    tooOld,
+    director,
+    genre,
+    general: hasReason && !seen,
+  };
+}
+
+async function buildFeedbackProfile(blockedFeedback, env, advanced) {
+  const profile = {
+    count: 0,
+    genreWeight: {},
+    keywordWeight: {},
+    directorWeight: {},
+    tooPopular: 0,
+    tooObscure: 0,
+    tooOld: 0,
+  };
+  const actionable = (blockedFeedback || [])
+    .map(item => ({ ...item, flags: getFeedbackFlags(item.reason) }))
+    .filter(item => item.flags.hasReason && !item.flags.seenOnly)
+    .slice(0, 40);
+
+  if (!actionable.length) return profile;
+  profile.count = actionable.length;
+
+  await Promise.all(actionable.map(async item => {
+    const flags = item.flags;
+    if (flags.tooPopular) profile.tooPopular++;
+    if (flags.tooObscure) profile.tooObscure++;
+    if (flags.tooOld) profile.tooOld++;
+
+    const movieSpecific = flags.genre || flags.variant || flags.director || (
+      flags.general && !flags.tooPopular && !flags.tooObscure && !flags.tooOld
+    );
+    if (!movieSpecific) return;
+
+    try {
+      const [detail, credits, keywords] = await Promise.all([
+        fetchTmdb(`/movie/${item.tmdb_id}?language=zh-CN`, env),
+        flags.director ? fetchTmdb(`/movie/${item.tmdb_id}/credits?language=zh-CN`, env) : Promise.resolve(null),
+        (advanced || flags.variant) ? fetchTmdb(`/movie/${item.tmdb_id}/keywords`, env) : Promise.resolve(null),
+      ]);
+      const baseWeight = flags.variant ? 0.75 : 1;
+      if (flags.genre || flags.variant || flags.general) {
+        (detail.genres || []).forEach(g => addWeighted(profile.genreWeight, g.id, baseWeight));
+      }
+      if ((flags.variant || flags.general) && keywords && keywords.keywords) {
+        keywords.keywords.forEach(k => addWeighted(profile.keywordWeight, k.id, baseWeight));
+      }
+      if (flags.director && credits) {
+        (credits.crew || [])
+          .filter(c => c.job === 'Director')
+          .forEach(c => addWeighted(profile.directorWeight, c.name, 1));
+      }
+    } catch (e) { /* feedback profile is best-effort */ }
+  }));
+
+  return profile;
+}
+
+function computeFeedbackPenalty(candidate, feedbackProfile, fullGenres, candidateKeywords, directors, releaseYear, popNorm) {
+  if (!feedbackProfile || !feedbackProfile.count) return 0;
+  let penalty = 0;
+
+  const genres = (fullGenres || candidate.genre_ids || []).map(g => String(g));
+  if (genres.length) {
+    let genreHit = 0;
+    genres.forEach(g => { genreHit += feedbackProfile.genreWeight[g] || 0; });
+    penalty += Math.min(genreHit / Math.max(genres.length, 1), 1) * 0.10;
+  }
+
+  const keywords = (candidateKeywords || []).map(k => String(k));
+  if (keywords.length) {
+    let keywordHit = 0;
+    keywords.forEach(k => { keywordHit += feedbackProfile.keywordWeight[k] || 0; });
+    penalty += Math.min(keywordHit / Math.max(keywords.length, 1), 1) * 0.08;
+  }
+
+  if (directors && directors.length) {
+    const directorHit = directors.some(name => feedbackProfile.directorWeight[String(name)]);
+    if (directorHit) penalty += 0.12;
+  }
+
+  const feedbackScale = n => Math.min(n / Math.max(feedbackProfile.count, 1), 1);
+  if (feedbackProfile.tooPopular && popNorm > 0.65) {
+    penalty += feedbackScale(feedbackProfile.tooPopular) * Math.min((popNorm - 0.65) / 0.35, 1) * 0.08;
+  }
+  if (feedbackProfile.tooObscure && ((candidate.vote_count || 0) < 120 || popNorm < 0.12)) {
+    const obscurity = (candidate.vote_count || 0) < 120 ? 1 : Math.min((0.12 - popNorm) / 0.12, 1);
+    penalty += feedbackScale(feedbackProfile.tooObscure) * obscurity * 0.08;
+  }
+  if (feedbackProfile.tooOld && releaseYear) {
+    const age = new Date().getFullYear() - releaseYear;
+    if (age > 15) penalty += feedbackScale(feedbackProfile.tooOld) * Math.min((age - 15) / 35, 1) * 0.08;
+  }
+
+  return Math.min(penalty, 0.24);
 }
 
 // ── User profile builder ──
@@ -515,7 +648,7 @@ async function collectCandidates(seeds, profile, partnerProfile, env, advanced, 
 }
 
 // ── Phase 1: cheap scoring using list-response data (genre_ids only) ──
-function scorePhase1(candidates, profile, avoidSeeds, advanced) {
+function scorePhase1(candidates, profile, avoidSeeds, advanced, feedbackProfile) {
   const maxPop = Math.max(...candidates.map(r => r.popularity || 0), 1);
   const maxVote = Math.max(...candidates.map(r => r.vote_average || 0), 1);
   const now = new Date();
@@ -549,18 +682,20 @@ function scorePhase1(candidates, profile, avoidSeeds, advanced) {
       }
     }
 
+    const feedbackPenalty = computeFeedbackPenalty(r, feedbackProfile, r.genre_ids || [], null, [], releaseYear, popNorm);
+
     if (advanced) {
       r._score = 0.22 * genreScore + 0.18 * voteNorm + 0.15 * sourceNorm + 0.13 * decadeBonus
-                + 0.10 * directorBonus + 0.08 * popNorm + 0.07 * freshness + 0.07 * exploreBonus - avoidPenalty;
+                + 0.10 * directorBonus + 0.08 * popNorm + 0.07 * freshness + 0.07 * exploreBonus - avoidPenalty - feedbackPenalty;
     } else {
       r._score = 0.28 * genreScore + 0.20 * voteNorm + 0.18 * sourceNorm + 0.12 * decadeBonus
-                + 0.10 * directorBonus + 0.07 * popNorm + 0.05 * freshness;
+                + 0.10 * directorBonus + 0.07 * popNorm + 0.05 * freshness - feedbackPenalty;
     }
   });
 }
 
 // ── Phase 2: enrich top candidates with full details + rescore ──
-async function enrichAndScorePhase2(candidates, profile, partnerProfile, avoidSeeds, advanced, env) {
+async function enrichAndScorePhase2(candidates, profile, partnerProfile, avoidSeeds, advanced, feedbackProfile, env) {
   if (!candidates.length) return;
 
   const avoidGenreSet = buildAvoidGenreSet(avoidSeeds);
@@ -623,17 +758,18 @@ async function enrichAndScorePhase2(candidates, profile, partnerProfile, avoidSe
     }
 
     const avoidPenalty = computeAvoidPenalty(r, avoidSeeds, avoidGenreSet, fullGenres, r._keywords, avoidKwSets);
+    const feedbackPenalty = computeFeedbackPenalty(r, feedbackProfile, fullGenres, r._keywords, dirs, releaseYear, popNorm);
 
     if (advanced) {
       // Phase 2 scoring without keywords (added after MMR in final rescore)
       r._score = 0.18 * genreScore + 0.14 * voteNorm + 0.12 * dirScore
                + 0.12 * sourceNorm + 0.11 * actorScore + 0.11 * decadeBonus
                + 0.06 * Math.min(r._detail && r._detail.original_language === profile.langPref ? 1 : 0.3, 1)
-               + 0.05 * popNorm + 0.06 * freshness - avoidPenalty;
+               + 0.05 * popNorm + 0.06 * freshness - avoidPenalty - feedbackPenalty;
     } else {
       // Phase 2 scoring without keywords (added after MMR in final rescore)
       r._score = 0.26 * genreScore + 0.21 * voteNorm + 0.18 * sourceNorm
-               + 0.14 * dirScore + 0.10 * decadeBonus + 0.06 * popNorm + 0.05 * freshness;
+               + 0.14 * dirScore + 0.10 * decadeBonus + 0.06 * popNorm + 0.05 * freshness - feedbackPenalty;
     }
   });
 }
@@ -750,7 +886,7 @@ function attachRecommendationReasons(movies, profile, partnerProfile) {
 }
 
 // ── Post-MMR: enrich final pool with keywords and compute final scores ──
-async function enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoidSeeds, advanced, env) {
+async function enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoidSeeds, advanced, feedbackProfile, env) {
   if (!final.length) return;
 
   // Fetch keywords for all final candidates
@@ -807,23 +943,24 @@ async function enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoid
     }
 
     const avoidPenalty = computeAvoidPenalty(r, avoidSeeds, avoidGenreSet, fullGenres, r._keywords, avoidKwSets);
+    const feedbackPenalty = computeFeedbackPenalty(r, feedbackProfile, fullGenres, r._keywords, dirs, releaseYear, popNorm);
 
     // Full scoring WITH keywords
     if (advanced) {
       r._score = 0.16 * kwScore + 0.13 * genreScore + 0.12 * voteNorm + 0.10 * dirScore
                + 0.10 * sourceNorm + 0.09 * actorScore + 0.09 * decadeBonus + partnerSignal
                + 0.05 * Math.min(r._detail && r._detail.original_language === profile.langPref ? 1 : 0.3, 1)
-               + 0.04 * popNorm + 0.05 * freshness - avoidPenalty;
+               + 0.04 * popNorm + 0.05 * freshness - avoidPenalty - feedbackPenalty;
     } else {
       r._score = 0.18 * kwScore + 0.20 * genreScore + 0.17 * voteNorm + 0.15 * sourceNorm
-               + 0.12 * dirScore + 0.08 * decadeBonus + 0.05 * popNorm + 0.05 * freshness;
+               + 0.12 * dirScore + 0.08 * decadeBonus + 0.05 * popNorm + 0.05 * freshness - feedbackPenalty;
     }
   });
 
   final.sort((a, b) => b._score - a._score);
 }
 
-async function loadRecommendations(env, entries, userId, blockedIds, excludeIds) {
+async function loadRecommendations(env, entries, userId, blockedIds, excludeIds, blockedFeedback) {
   const myMovies = entries.filter(e => e.user_id === userId && e.tmdb_id && e.type === 'movie');
   const totalRated = entries.filter(e => e.user_id === userId && e.type === 'movie').length;
 
@@ -840,12 +977,13 @@ async function loadRecommendations(env, entries, userId, blockedIds, excludeIds)
     ? entries.filter(e => e.user_id === partnerId && e.tmdb_id && e.type === 'movie')
     : [];
 
-  const [profile, partnerProfile] = await Promise.all([
+  const [profile, partnerProfile, feedbackProfile] = await Promise.all([
     buildUserProfile(scored, env, advanced),
     partnerId ? buildUserProfile(
       partnerMovies.map(e => ({ ...e, score: getEntryTotalScore(e) })).sort((a, b) => b.score - a.score),
       env, false
-    ) : Promise.resolve(null)
+    ) : Promise.resolve(null),
+    buildFeedbackProfile(blockedFeedback, env, advanced)
   ]);
 
   // Phase 1: Select seeds
@@ -865,7 +1003,7 @@ async function loadRecommendations(env, entries, userId, blockedIds, excludeIds)
   if (!candidates.length) return { movies: [], totalRated };
 
   // Phase 3: Cheap scoring
-  scorePhase1(candidates, profile, avoidSeeds, advanced);
+  scorePhase1(candidates, profile, avoidSeeds, advanced, feedbackProfile);
   candidates.sort((a, b) => b._score - a._score);
 
   // Phase 4+5: Enrich top pool and rescore
@@ -875,7 +1013,7 @@ async function loadRecommendations(env, entries, userId, blockedIds, excludeIds)
   // Also enrich avoid seeds if they're in the pool
   await enrichEntries(avoidSeeds.filter(s => s.tmdb_id), env, advanced);
 
-  await enrichAndScorePhase2(topPool, profile, partnerProfile, avoidSeeds, advanced, env);
+  await enrichAndScorePhase2(topPool, profile, partnerProfile, avoidSeeds, advanced, feedbackProfile, env);
   topPool.sort((a, b) => b._score - a._score);
 
   // Phase 6: MMR diversity (using Phase2 scores without keywords)
@@ -889,7 +1027,7 @@ async function loadRecommendations(env, entries, userId, blockedIds, excludeIds)
   }
 
   // Phase 8: Enrich final pool with keywords and compute full scores
-  await enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoidSeeds, advanced, env);
+  await enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoidSeeds, advanced, feedbackProfile, env);
 
   // Filter out previously shown movies (freshness)
   if (excludeIds && excludeIds.length) {
@@ -901,7 +1039,7 @@ async function loadRecommendations(env, entries, userId, blockedIds, excludeIds)
 }
 
 // Cache key for recommendations
-function makeRecKey(userId, entries, blockedIds, excludeIds) {
+function makeRecKey(userId, entries, blockedIds, excludeIds, blockedFeedback) {
   const movieIds = entries
     .filter(e => e.user_id === userId && e.type === 'movie' && e.tmdb_id)
     .map(e => e.tmdb_id + ':' + (e.total_score || 0))
@@ -920,6 +1058,13 @@ function makeRecKey(userId, entries, blockedIds, excludeIds) {
   const excludeHash = excludeIds && excludeIds.length
     ? 'x:' + [...excludeIds].sort((a, b) => a - b).join(',')
     : '';
+  // Include free-text feedback in cache key so changing "not interested" reasons recalculates scores
+  const feedbackHash = blockedFeedback && blockedFeedback.length
+    ? 'f:' + blockedFeedback
+        .map(m => `${m.tmdb_id}:${String(m.reason || '').trim()}`)
+        .sort()
+        .join('|')
+    : '';
   let keyBase = REC_CACHE_VERSION + '-' + userId + '-' + movieIds.length + '-' + hash;
   if (blockedHash) {
     let bh = 0;
@@ -936,6 +1081,14 @@ function makeRecKey(userId, entries, blockedIds, excludeIds) {
       xh |= 0;
     }
     keyBase += '-x' + xh;
+  }
+  if (feedbackHash) {
+    let fh = 0;
+    for (let i = 0; i < feedbackHash.length; i++) {
+      fh = ((fh << 5) - fh) + feedbackHash.charCodeAt(i);
+      fh |= 0;
+    }
+    keyBase += '-f' + fh;
   }
   return keyBase;
 }
@@ -1138,16 +1291,17 @@ export default {
     if (url.pathname === '/recommend' && request.method === 'POST') {
       try {
         const body = await readJsonBody(request);
-        const { entries, userId, blockedIds, excludeIds } = body;
+        const { entries, userId, blockedIds, blockedMovies, excludeIds } = body;
         const cleanEntries = sanitizeEntries(entries);
-        const cleanBlockedIds = Array.isArray(blockedIds) ? normalizeIds(blockedIds, 500) || [] : [];
+        const cleanBlockedFeedback = sanitizeBlockedFeedback(blockedMovies, blockedIds);
+        const cleanBlockedIds = cleanBlockedFeedback.map(m => m.tmdb_id);
         const cleanExcludeIds = Array.isArray(excludeIds) ? normalizeIds(excludeIds, 200) || [] : [];
 
         if (!cleanEntries || !userId) {
           return errorResponse('Missing entries or userId', request, env, 400);
         }
 
-        const recKey = makeRecKey(userId, cleanEntries, cleanBlockedIds, cleanExcludeIds);
+        const recKey = makeRecKey(userId, cleanEntries, cleanBlockedIds, cleanExcludeIds, cleanBlockedFeedback);
         const cacheKeyUrl = 'https://rec-cache.local/recommend/' + recKey;
         const cacheKey = new Request(cacheKeyUrl, { method: 'GET' });
         const cache = caches.default;
@@ -1159,7 +1313,7 @@ export default {
           return jsonResponse({ ...data, cached: true }, request, env, 200, { 'X-Rec-Cache': 'HIT' });
         }
 
-        const result = await loadRecommendations(env, cleanEntries, userId, cleanBlockedIds, cleanExcludeIds);
+        const result = await loadRecommendations(env, cleanEntries, userId, cleanBlockedIds, cleanExcludeIds, cleanBlockedFeedback);
 
         if (result.movies) {
           const resToCache = new Response(JSON.stringify(result), {

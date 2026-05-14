@@ -2093,7 +2093,15 @@ let watchlistAvailable = false;
 // Blocked movies (不再推荐)
 let blockedMovieIds = new Set();
 let blockedMovieReasons = {};
+let blockedMovieDetails = {};
 let blockedPage = 1;
+
+function buildBlockedFeedback() {
+  return [...blockedMovieIds].map(tmdbId => ({
+    tmdb_id: tmdbId,
+    reason: blockedMovieReasons[tmdbId] || ''
+  }));
+}
 
 async function loadWatchlist() {
   if (!currentUser) return;
@@ -2147,6 +2155,25 @@ async function loadBlockedMovies() {
     blockedMovieReasons = {};
     data.forEach(r => { if (r.reason) blockedMovieReasons[r.tmdb_id] = r.reason; });
   }
+}
+
+async function hydrateBlockedMovieDetails(tmdbIds) {
+  const missing = tmdbIds.filter(id => !discoverMovieMap[id] && !blockedMovieDetails[id]);
+  if (!missing.length) return;
+  await Promise.allSettled(missing.map(async id => {
+    const res = await tmdbFetch(`/movie/${id}?language=zh-CN`);
+    if (!res.ok) return;
+    const d = await res.json();
+    if (d && d.id) {
+      blockedMovieDetails[id] = {
+        id,
+        title: d.title || d.name || ('TMDB #' + id),
+        release_date: d.release_date || '',
+        poster_path: d.poster_path || ''
+      };
+    }
+  }));
+  if ($['blockedModal']?.classList.contains('open')) renderBlockedPanel(false);
 }
 
 function updateRecTabLabel() {
@@ -2561,8 +2588,10 @@ async function renderDiscover() {
 
 async function blockMovie(tmdbId, cardEl) {
   if (!currentUser || !tmdbId) return;
-  const reason = prompt('为什么不再推荐？可填：已看过 / 类型不喜欢 / 太热门 / 太旧 / 不想看这个导演', '类型不喜欢');
+  const reason = prompt('为什么不再推荐？可填：已看过 / 类型不喜欢 / 太热门 / 太冷门 / 太旧 / 看过其他版本 / 不想看这个导演', '类型不喜欢');
   if (reason === null) return;
+  const movie = discoverMovieMap[tmdbId];
+  if (movie) blockedMovieDetails[tmdbId] = movie;
   let { error } = await db.from('blocked_movies').insert({
     user_id: currentUser.id,
     tmdb_id: tmdbId,
@@ -2597,7 +2626,7 @@ async function blockMovie(tmdbId, cardEl) {
   toast('已加入不再推荐列表');
 }
 
-function renderBlockedPanel() {
+function renderBlockedPanel(shouldHydrate = true) {
   const ids = [...blockedMovieIds];
   if ($['blockedCount']) $['blockedCount'].textContent = ids.length;
   if (!$['blockedMovieGrid']) return;
@@ -2613,9 +2642,10 @@ function renderBlockedPanel() {
   if (blockedPage > totalPages) blockedPage = totalPages;
   const start = (blockedPage - 1) * pageSize;
   const pageIds = ids.slice(start, start + pageSize);
+  if (shouldHydrate) hydrateBlockedMovieDetails(pageIds);
 
   $['blockedMovieGrid'].innerHTML = pageIds.map(tmdbId => {
-    const movie = discoverMovieMap[tmdbId];
+    const movie = discoverMovieMap[tmdbId] || blockedMovieDetails[tmdbId];
     const title = movie ? movie.title : 'TMDB #' + tmdbId;
     const poster = movie && movie.poster_path ? posterUrl(movie.poster_path) : '';
     const year = movie ? (movie.release_date || '').slice(0, 4) : '';
@@ -2780,6 +2810,7 @@ async function loadRecommendations() {
           entries: buildRecommendationEntries(),
           userId: currentUser.id,
           blockedIds: [...blockedMovieIds],
+          blockedMovies: buildBlockedFeedback(),
           excludeIds: discoverLastShownIds
         }),
       });

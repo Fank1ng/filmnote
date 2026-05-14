@@ -200,6 +200,7 @@ function normalizeTmdbMovieDetail(details, credits) {
     title: details.title || details.name || '',
     original_title: details.original_title || details.original_name || '',
     overview: details.overview || '',
+    overview_missing: !details.overview,
     release_date: details.release_date || details.first_air_date || '',
     year: parseInt(String(details.release_date || details.first_air_date || '').slice(0, 4)) || null,
     poster_path: details.poster_path || '',
@@ -213,6 +214,43 @@ function normalizeTmdbMovieDetail(details, credits) {
     cast: (credits?.cast || []).slice(0, 8).map(c => c.name).filter(Boolean),
     original_language: details.original_language || '',
     fetched_at: Date.now()
+  };
+}
+
+async function fetchMovieDetailBundle(tmdbId, env) {
+  const [detailsZh, creditsZh] = await Promise.all([
+    fetchTmdb(`/movie/${tmdbId}?language=zh-CN`, env),
+    fetchTmdb(`/movie/${tmdbId}/credits?language=zh-CN`, env)
+  ]);
+  if (detailsZh?.success === false) {
+    return { details: detailsZh, credits: creditsZh, movie: null };
+  }
+
+  let details = detailsZh || {};
+  const needsOverviewFallback = !details.overview;
+  if (needsOverviewFallback) {
+    const fallbacks = await Promise.allSettled([
+      fetchTmdb(`/movie/${tmdbId}?language=zh-TW`, env),
+      fetchTmdb(`/movie/${tmdbId}?language=en-US`, env)
+    ]);
+    const fallbackDetail = fallbacks
+      .map(r => r.status === 'fulfilled' ? r.value : null)
+      .find(d => d && d.success !== false && d.overview);
+    if (fallbackDetail) {
+      details = {
+        ...fallbackDetail,
+        ...details,
+        overview: fallbackDetail.overview,
+        tagline: details.tagline || fallbackDetail.tagline || '',
+        runtime: details.runtime || fallbackDetail.runtime || 0,
+      };
+    }
+  }
+
+  return {
+    details,
+    credits: creditsZh,
+    movie: normalizeTmdbMovieDetail(details, creditsZh)
   };
 }
 
@@ -1150,16 +1188,16 @@ export default {
     const detailMatch = url.pathname.match(/^\/detail\/(\d+)$/);
     if (detailMatch && request.method === 'GET') {
       const tmdbId = parseInt(detailMatch[1]);
-      const [details, credits] = await Promise.all([
-        fetchTmdb(`/movie/${tmdbId}?language=zh-CN`, env),
-        fetchTmdb(`/movie/${tmdbId}/credits?language=zh-CN`, env)
-      ]);
-      const movie = normalizeTmdbMovieDetail(details, credits);
+      const { details, credits, movie } = await fetchMovieDetailBundle(tmdbId, env);
       if (!movie) {
-        const status = details.status_code >= 400 && details.status_code <= 599 ? details.status_code : 502;
-        return errorResponse(details.status_message || 'TMDB detail not found', request, env, status);
+        const statusCode = details?.status_code;
+        const status = statusCode >= 400 && statusCode <= 599 ? statusCode : 502;
+        return errorResponse(details?.status_message || 'TMDB detail not found', request, env, status);
       }
-      return jsonResponse({ movie, details, credits }, request, env);
+      if (url.searchParams.get('raw') === '1') {
+        return jsonResponse({ movie, details, credits }, request, env);
+      }
+      return jsonResponse({ movie }, request, env);
     }
 
     // ── Prefetch endpoint (warm KV for movie details + credits) ──
@@ -1178,21 +1216,14 @@ export default {
         for (let i = 0; i < unique.length; i += 5) {
           const batch = unique.slice(i, i + 5);
           const results = await Promise.allSettled(
-            batch.flatMap(id => [
-              fetchTmdb(`/movie/${id}?language=zh-CN`, env),
-              fetchTmdb(`/movie/${id}/credits?language=zh-CN`, env),
-              fetchTmdb(`/movie/${id}/keywords`, env)
-            ])
+            batch.map(id => fetchMovieDetailBundle(id, env))
           );
           results.forEach(r => { r.status === 'fulfilled' ? cached++ : errors++; });
           if (returnOverviews) {
             for (let j = 0; j < batch.length; j++) {
-              const detailResult = results[j * 3];
-              const creditsResult = results[j * 3 + 1];
+              const detailResult = results[j];
               if (detailResult.status === 'fulfilled') {
-                const d = detailResult.value || {};
-                const credits = (creditsResult.status === 'fulfilled' && creditsResult.value) || {};
-                const movie = normalizeTmdbMovieDetail(d, credits);
+                const movie = detailResult.value.movie;
                 if (movie) {
                   details[batch[j]] = movie;
                   if (movie.overview) overviews[batch[j]] = movie.overview;

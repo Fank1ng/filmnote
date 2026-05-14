@@ -30,6 +30,8 @@
 - **新电影简介 fallback**：未缓存的新片如果 `zh-CN` 简介为空，Worker 会继续尝试 `zh-TW` 和 `en-US`，并用 `overview_missing` 标记避免空简介重复请求
 - **静态资源强制刷新**：`index.html` 中前端脚本版本号更新到 `20260514`，避免浏览器继续使用旧的详情加载逻辑
 - **TMDB 连接错误可见**：添加评价搜索遇到 TMDB 401/连接异常时显示具体错误，不再误报“无结果”
+- **TMDB 实时连接恢复**：确认旧 v4 Read Token 对 TMDB 返回 `Invalid API key`，已改用验证可用的 v3 API Key 写入 Worker Secret；新电影搜索和详情拉取恢复正常
+- **线上验证**：`/health` 显示 `tmdbAuthMode="api_key"`，搜索 `Mickey 17` 与 `雷霆特攻队` 均可返回结果和简介
 
 ### 想看清单
 - **发现页一键想看**：未评分电影卡片新增 `☆/★` 想看按钮，本周热门、Top100、个性化推荐均可加入

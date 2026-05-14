@@ -1169,6 +1169,7 @@ export default {
         status: 'ok',
         memCache: memCache.size,
         tmdbKeyConfigured: !!getTmdbKey(env),
+        tmdbAuthMode: isTmdbReadToken(getTmdbKey(env)) ? 'bearer' : 'api_key',
         kvConfigured: !!(env && env.TMDB_CACHE),
         allowedOrigins: getAllowedOrigins(env),
         recCacheVersion: REC_CACHE_VERSION,

@@ -1282,7 +1282,10 @@ async function searchTmdb(query) {
   try {
     const type = entryType==='series' ? 'tv' : 'movie';
     const res = await fetch(TMDB_PROXY + `/search?q=${encodeURIComponent(query)}&type=${type}`, { signal: tmdbAbort.signal });
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.success === false || data.error || data.status_code) {
+      throw new Error(data.error || data.status_message || `TMDB 搜索接口异常 (${res.status})`);
+    }
     if (!data.results?.length) {
       container.innerHTML = '<div style="padding:12px;color:var(--text2);font-size:0.85rem">无结果</div>';
       container.classList.add('open');
@@ -1340,7 +1343,7 @@ async function searchTmdb(query) {
     });
   } catch(e) {
     if (e.name==='AbortError') return; // Cancelled by newer request
-    container.innerHTML = '<div style="padding:12px;color:var(--text2);font-size:0.85rem">搜索失败</div>';
+    container.innerHTML = `<div style="padding:12px;color:var(--text2);font-size:0.85rem">TMDB 连接失败：${esc(e.message || '搜索失败')}</div>`;
     container.classList.add('open');
   }
 }

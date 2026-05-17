@@ -49,6 +49,7 @@ for each row execute function public.enforce_single_active_couple();
 create table if not exists public.couple_watch_queue (
   id uuid primary key default gen_random_uuid(),
   couple_id uuid not null references public.couples(id) on delete cascade,
+  media_type text not null default 'movie',
   tmdb_id integer not null,
   title text not null,
   year integer,
@@ -60,8 +61,24 @@ create table if not exists public.couple_watch_queue (
   constraint couple_watch_queue_tmdb_positive check (tmdb_id > 0)
 );
 
-create unique index if not exists couple_watch_queue_unique_movie_idx
-on public.couple_watch_queue (couple_id, tmdb_id);
+alter table public.couple_watch_queue
+add column if not exists media_type text not null default 'movie';
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint
+    where conname = 'couple_watch_queue_media_type_check'
+      and conrelid = 'public.couple_watch_queue'::regclass
+  ) then
+    alter table public.couple_watch_queue
+      add constraint couple_watch_queue_media_type_check check (media_type in ('movie', 'series'));
+  end if;
+end $$;
+
+drop index if exists couple_watch_queue_unique_movie_idx;
+create unique index if not exists couple_watch_queue_unique_media_idx
+on public.couple_watch_queue (couple_id, media_type, tmdb_id);
 
 create index if not exists couple_watch_queue_order_idx
 on public.couple_watch_queue (couple_id, position, created_at);

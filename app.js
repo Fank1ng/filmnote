@@ -219,6 +219,7 @@ let coupleRecommendations = null;
 let coupleRecommendationLoading = false;
 let coupleRecommendationState = 'idle';
 let couplePreferenceWarmKey = '';
+let coupleTab = 'recommend';
 
 const authOverlay = $['authOverlay'];
 const mainApp = $['mainApp'];
@@ -1279,15 +1280,41 @@ $['addSeasonBtn'].addEventListener('click', ()=>{
 });
 
 // ===== TYPE TOGGLE =====
+function normalizeMediaType(type) {
+  return type === 'series' || type === 'tv' ? 'series' : 'movie';
+}
+
+function entryTypeToMediaType(type = entryType) {
+  return normalizeMediaType(type);
+}
+
+function mediaTypeToEntryType(type) {
+  return normalizeMediaType(type);
+}
+
+function mediaTypeLabel(type) {
+  return normalizeMediaType(type) === 'series' ? '剧集' : '电影';
+}
+
+function listKey(mediaTypeOrMovie, tmdbId = null) {
+  if (typeof mediaTypeOrMovie === 'object' && mediaTypeOrMovie) {
+    return `${normalizeMediaType(mediaTypeOrMovie.media_type || mediaTypeOrMovie.type)}:${Number(mediaTypeOrMovie.tmdb_id || mediaTypeOrMovie.id)}`;
+  }
+  return `${normalizeMediaType(mediaTypeOrMovie)}:${Number(tmdbId)}`;
+}
+
+function setEntryType(nextType) {
+  entryType = mediaTypeToEntryType(nextType);
+  const isSeries = entryType === 'series';
+  document.querySelectorAll('#typeToggle button').forEach(b => b.classList.toggle('active', b.dataset.type === entryType));
+  $['seasonSection'].classList.toggle('hidden', !isSeries);
+  $['formTitle'].textContent = isSeries ? '记录一部剧集' : '记录一部电影';
+  $['tmdbSearch'].placeholder = isSeries ? '🔍 从 TMDb 搜索剧集信息，自动填入...' : '🔍 从 TMDb 搜索电影信息，自动填入...';
+}
+
 document.querySelectorAll('#typeToggle button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
-    document.querySelectorAll('#typeToggle button').forEach(b=>b.classList.remove('active'));
-    btn.classList.add('active');
-    entryType = btn.dataset.type;
-    const isSeries = entryType==='series';
-    $['seasonSection'].classList.toggle('hidden', !isSeries);
-    $['formTitle'].textContent = isSeries ? '记录一部剧集' : '记录一部电影';
-    $['tmdbSearch'].placeholder = isSeries ? '🔍 从 TMDb 搜索剧集信息，自动填入...' : '🔍 从 TMDb 搜索电影信息，自动填入...';
+    setEntryType(btn.dataset.type);
   });
 });
 
@@ -1304,6 +1331,7 @@ $['tmdbSearch'].addEventListener('input', function(){
 function movieFromSearchElement(item) {
   return normalizeListMovie({
     id: item.dataset.tmdbId,
+    media_type: item.dataset.mediaType,
     title: item.dataset.title,
     year: item.dataset.year,
     release_date: item.dataset.releaseDate || '',
@@ -1313,6 +1341,8 @@ function movieFromSearchElement(item) {
 
 async function fillFromTmdbSearchItem(item) {
   const tmdbId = item.dataset.tmdbId;
+  const mediaType = normalizeMediaType(item.dataset.mediaType);
+  setEntryType(mediaType);
   $['title'].value = item.dataset.title;
   $['year'].value = item.dataset.year || '';
   $['tmdbId'].value = tmdbId;
@@ -1322,12 +1352,16 @@ async function fillFromTmdbSearchItem(item) {
 
   // Fetch normalized detail once; the same cache feeds save, detail modal, and search
   try {
-    const type = entryType==='series' ? 'tv' : 'movie';
+    const type = mediaType === 'series' ? 'tv' : 'movie';
     let director = '';
-    if (entryType==='series') {
+    if (mediaType === 'series') {
+      const detailRes = await tmdbFetch(`/${type}/${tmdbId}?language=zh-CN`);
+      const detailData = await detailRes.json().catch(() => ({}));
+      if (detailData?.first_air_date && !$['year'].value) $['year'].value = detailData.first_air_date.slice(0, 4);
+      if (detailData?.poster_path && !$['posterPath'].value) $['posterPath'].value = detailData.poster_path;
       const credRes = await tmdbFetch(`/${type}/${tmdbId}/credits?language=zh-CN`);
       const credData = await credRes.json();
-      const creator = (credData.crew||[]).find(c=>c.job==='Director'||c.job==='Executive Producer');
+      const creator = (detailData.created_by || [])[0] || (credData.crew||[]).find(c=>c.job==='Director'||c.job==='Executive Producer');
       director = creator?.name || '';
     } else {
       const detail = await fetchMovieDetail(tmdbId);
@@ -1342,13 +1376,24 @@ async function fillFromTmdbSearchItem(item) {
   toast('已自动填入信息');
 }
 
+async function fillAndAddFromTmdbSearchItem(item, action) {
+  const movie = movieFromSearchElement(item);
+  if (!movie) return;
+  await fillFromTmdbSearchItem(item);
+  if (action === 'watchlist') {
+    await addToWatchlist(movie);
+  } else if (action === 'queue') {
+    await addToCoupleQueue(movie);
+  }
+}
+
 async function searchTmdb(query) {
   const container = $['searchResults'];
   // Abort previous in-flight request
   if (tmdbAbort) tmdbAbort.abort();
   tmdbAbort = new AbortController();
   try {
-    const type = entryType==='series' ? 'tv' : 'movie';
+    const type = entryType === 'series' ? 'tv' : 'movie';
     const res = await fetch(TMDB_PROXY + `/search?q=${encodeURIComponent(query)}&type=${type}`, { signal: tmdbAbort.signal });
     const data = await res.json().catch(() => ({}));
     if (!res.ok || data.success === false || data.error || data.status_code) {
@@ -1364,8 +1409,9 @@ async function searchTmdb(query) {
       const year = (r.release_date||r.first_air_date||'').slice(0,4);
       const releaseDate = r.release_date || r.first_air_date || '';
       const poster = r.poster_path ? posterUrl(r.poster_path) : '';
+      const mediaType = type === 'tv' ? 'series' : 'movie';
       return `
-        <div class="sr-item" data-tmdb-id="${r.id}" data-title="${esc(title)}" data-year="${year}" data-release-date="${releaseDate}" data-poster="${r.poster_path||''}">
+        <div class="sr-item" data-tmdb-id="${r.id}" data-media-type="${mediaType}" data-title="${esc(title)}" data-year="${year}" data-release-date="${releaseDate}" data-poster="${r.poster_path||''}">
           ${poster ? `<img class="sr-poster" src="${poster}" alt="">` : '<div class="sr-poster"></div>'}
           <div class="sr-info sr-fill-action">
             <div class="sr-title">${esc(title)}</div>
@@ -1373,8 +1419,8 @@ async function searchTmdb(query) {
           </div>
           <div class="sr-actions">
             <button type="button" class="btn btn-xs btn-primary sr-fill-btn">填入评价</button>
-            ${entryType==='movie' ? `<button type="button" class="btn btn-xs btn-secondary sr-watch-btn">加入想看</button>` : ''}
-            ${entryType==='movie' && activeCouple ? `<button type="button" class="btn btn-xs btn-secondary sr-next-btn">加入下次看</button>` : ''}
+            <button type="button" class="btn btn-xs btn-secondary sr-watch-btn">加入想看</button>
+            <button type="button" class="btn btn-xs btn-secondary sr-next-btn">加入下次看</button>
           </div>
         </div>
       `;
@@ -1384,15 +1430,14 @@ async function searchTmdb(query) {
     // Click handler
     container.querySelectorAll('.sr-item').forEach(item=>{
       item.addEventListener('click', async e=>{
-        const movie = movieFromSearchElement(item);
         if (e.target.closest('.sr-watch-btn')) {
           e.stopPropagation();
-          await addToWatchlist(movie);
+          await fillAndAddFromTmdbSearchItem(item, 'watchlist');
           return;
         }
         if (e.target.closest('.sr-next-btn')) {
           e.stopPropagation();
-          await addToCoupleQueue(movie);
+          await fillAndAddFromTmdbSearchItem(item, 'queue');
           return;
         }
         await fillFromTmdbSearchItem(item);
@@ -1487,6 +1532,34 @@ $['movieForm'].addEventListener('submit', async e=>{
     }
 
     toast(editingEntryId ? '评价已更新' : '评价已保存');
+    const savedMediaType = entryTypeToMediaType(entryType);
+    const savedListKey = tmdbIdVal ? listKey(savedMediaType, tmdbIdVal) : '';
+    if (!editingEntryId && tmdbIdVal && watchlistIds.has(savedListKey)) {
+      db.from('watchlist_movies')
+        .delete()
+        .eq('user_id', currentUser.id)
+        .eq('media_type', savedMediaType)
+        .eq('tmdb_id', tmdbIdVal)
+        .then(({error}) => {
+          if (!error) {
+            watchlistIds.delete(savedListKey);
+            delete watchlistMovies[savedListKey];
+          }
+        });
+    }
+    if (!editingEntryId && tmdbIdVal && activeCouple && coupleQueue.some(q => listKey(q) === savedListKey)) {
+      db.from('couple_watch_queue')
+        .delete()
+        .eq('couple_id', activeCouple.id)
+        .eq('media_type', savedMediaType)
+        .eq('tmdb_id', tmdbIdVal)
+        .then(({error}) => {
+          if (!error) {
+            coupleQueue = coupleQueue.filter(q => listKey(q) !== savedListKey);
+            normalizeCoupleQueuePositions(false);
+          }
+        });
+    }
     // Fire-and-forget: warm KV cache + backfill normalized movie detail to saved entry
     if (entryType === 'movie' && entryData.tmdb_id) {
       fetchMovieDetail(entryData.tmdb_id).then(detail => {
@@ -1525,11 +1598,7 @@ function resetForm() {
   $['submitBtn'].textContent = '保存评价';
   $['cancelEditBtn'].classList.add('hidden');
   // Reset type to movie
-  entryType = 'movie';
-  document.querySelectorAll('#typeToggle button').forEach(b=>b.classList.remove('active'));
-  document.querySelector('#typeToggle button[data-type="movie"]').classList.add('active');
-  $['seasonSection'].classList.add('hidden');
-  $['formTitle'].textContent = '记录一部电影';
+  setEntryType('movie');
   // Reset sliders to defaults
   $['mainDims'].innerHTML = buildDimSliders('main', {});
   bindDimSliders('main');
@@ -1544,7 +1613,6 @@ async function editEntry(id) {
   if (!entry) return;
 
   editingEntryId = id;
-  entryType = entry.type;
   $['editId'].value = id;
   $['title'].value = entry.title;
   $['year'].value = entry.year||'';
@@ -1553,11 +1621,7 @@ async function editEntry(id) {
   $['posterPath'].value = entry.poster_path||'';
   $['comment'].value = entry.comment||'';
 
-  // Set type toggle
-  document.querySelectorAll('#typeToggle button').forEach(b=>b.classList.remove('active'));
-  const typeBtn = document.querySelector(`#typeToggle button[data-type="${entry.type}"]`);
-  if (typeBtn) typeBtn.classList.add('active');
-  $['seasonSection'].classList.toggle('hidden', entry.type!=='series');
+  setEntryType(entry.type);
   $['formTitle'].textContent = entry.type==='series'?'编辑剧集评价':'编辑电影评价';
 
   // Set dimension sliders
@@ -1599,6 +1663,22 @@ function addMyRating(entryId) {
     release_date: entry.year ? String(entry.year)+'-01-01' : '',
     poster_path: entry.poster_path
   });
+}
+
+function openEntryFormForListMovie(movieOrId) {
+  const movie = normalizeListMovie(movieOrId);
+  if (!movie) return;
+  resetForm();
+  setEntryType(movie.media_type);
+  $['title'].value = movie.title;
+  $['year'].value = movie.year || '';
+  $['tmdbId'].value = movie.tmdb_id;
+  $['posterPath'].value = movie.poster_path || '';
+  $['tmdbSearch'].value = '';
+  $['searchResults'].classList.remove('open');
+  switchTab('rate');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  toast('已填入信息，可继续评分');
 }
 
 // ===== USER COLOR =====
@@ -2347,11 +2427,15 @@ async function loadWatchlist() {
   watchlistMovies = {};
   watchlistIds = new Set();
   (data || []).forEach(m => {
-    watchlistIds.add(m.tmdb_id);
-    watchlistMovies[m.tmdb_id] = m;
-    if (!discoverMovieMap[m.tmdb_id]) {
+    const mediaType = normalizeMediaType(m.media_type);
+    const key = listKey(mediaType, m.tmdb_id);
+    const item = { ...m, media_type: mediaType };
+    watchlistIds.add(key);
+    watchlistMovies[key] = item;
+    if (mediaType === 'movie' && !discoverMovieMap[m.tmdb_id]) {
       discoverMovieMap[m.tmdb_id] = {
         id: m.tmdb_id,
+        media_type: mediaType,
         title: m.title,
         release_date: m.year ? String(m.year) : '',
         poster_path: m.poster_path || ''
@@ -2535,8 +2619,9 @@ $['discoverContent'].addEventListener('click', e => {
   if (!btn) return;
   e.stopPropagation();
   const tmdbId = parseInt(btn.dataset.tmdbId);
+  const mediaType = normalizeMediaType(btn.dataset.mediaType);
   if (!tmdbId) return;
-  toggleWatchlist(tmdbId, discoverMovieMap[tmdbId]);
+  toggleWatchlist(tmdbId, { ...(discoverMovieMap[tmdbId] || { id: tmdbId }), media_type: mediaType });
 });
 
 // Delegated click for couple queue buttons in discover grid
@@ -2545,8 +2630,9 @@ $['discoverContent'].addEventListener('click', e => {
   if (!btn) return;
   e.stopPropagation();
   const tmdbId = parseInt(btn.dataset.tmdbId);
+  const mediaType = normalizeMediaType(btn.dataset.mediaType);
   if (!tmdbId) return;
-  addToCoupleQueue(discoverMovieMap[tmdbId] || { id: tmdbId });
+  addToCoupleQueue({ ...(discoverMovieMap[tmdbId] || { id: tmdbId }), media_type: mediaType });
 });
 
 // Delegated click for discover cards → movie detail
@@ -2565,10 +2651,12 @@ function normalizeListMovie(movieOrId) {
   const raw = typeof movieOrId === 'object' && movieOrId ? movieOrId : { id: movieOrId };
   const tmdbId = Number(raw.tmdb_id || raw.id);
   if (!Number.isFinite(tmdbId) || tmdbId <= 0) return null;
+  const mediaType = normalizeMediaType(raw.media_type || raw.type || (raw.name || raw.first_air_date ? 'series' : 'movie'));
   const release = raw.release_date || raw.first_air_date || '';
   return {
     id: tmdbId,
     tmdb_id: tmdbId,
+    media_type: mediaType,
     title: raw.title || raw.name || ('TMDB #' + tmdbId),
     year: raw.year || parseInt(String(release).slice(0, 4)) || null,
     release_date: release,
@@ -2581,40 +2669,44 @@ function normalizeListMovie(movieOrId) {
 
 async function toggleWatchlist(tmdbId, movieOverride = null) {
   if (!currentUser || !tmdbId) return;
-  const movie = normalizeListMovie(movieOverride || discoverMovieMap[tmdbId] || watchlistMovies[tmdbId] || { id: tmdbId });
+  const movie = normalizeListMovie(movieOverride || discoverMovieMap[tmdbId] || { id: tmdbId });
   if (!movie) return;
-  if (watchlistIds.has(movie.tmdb_id)) {
+  const key = listKey(movie);
+  if (watchlistIds.has(key)) {
     const { error } = await db.from('watchlist_movies')
       .delete()
       .eq('user_id', currentUser.id)
+      .eq('media_type', movie.media_type)
       .eq('tmdb_id', movie.tmdb_id);
     if (error) { toast('移除想看失败: ' + error.message); return; }
-    watchlistIds.delete(movie.tmdb_id);
-    delete watchlistMovies[movie.tmdb_id];
+    watchlistIds.delete(key);
+    delete watchlistMovies[key];
     toast('已移出想看');
   } else {
     const { error } = await db.from('watchlist_movies').insert({
       user_id: currentUser.id,
+      media_type: movie.media_type,
       tmdb_id: movie.tmdb_id,
       title: movie.title,
       year: movie.year || null,
       poster_path: movie.poster_path || ''
     });
     if (error) {
-      toast(/watchlist_movies|schema cache|does not exist|relation/i.test(error.message || '')
-        ? '想看清单表尚未创建，请先执行升级 SQL'
+      toast(/watchlist_movies|schema cache|does not exist|relation|media_type|column/i.test(error.message || '')
+        ? '想看清单表尚未升级，请先执行升级 SQL'
         : '加入想看失败: ' + error.message);
       return;
     }
-    watchlistIds.add(movie.tmdb_id);
-    watchlistMovies[movie.tmdb_id] = {
+    watchlistIds.add(key);
+    watchlistMovies[key] = {
+      media_type: movie.media_type,
       tmdb_id: movie.tmdb_id,
       title: movie.title,
       year: movie.year || null,
       poster_path: movie.poster_path || '',
       release_date: movie.release_date || ''
     };
-    discoverMovieMap[movie.tmdb_id] = movie;
+    if (movie.media_type === 'movie') discoverMovieMap[movie.tmdb_id] = movie;
     toast('已加入想看');
   }
   renderDiscover();
@@ -2624,7 +2716,7 @@ async function toggleWatchlist(tmdbId, movieOverride = null) {
 async function addToWatchlist(movieOrId) {
   const movie = normalizeListMovie(movieOrId);
   if (!movie) return;
-  if (watchlistIds.has(movie.tmdb_id)) {
+  if (watchlistIds.has(listKey(movie))) {
     toast('已经在想看清单里');
     return;
   }
@@ -2637,9 +2729,11 @@ $['listWatchlistView'].addEventListener('click', e => {
   if (rateBtn) {
     e.stopPropagation();
     const tmdbId = parseInt(rateBtn.dataset.tmdbId);
-    const movie = discoverMovieMap[tmdbId] || watchlistMovies[tmdbId];
+    const mediaType = normalizeMediaType(rateBtn.dataset.mediaType);
+    const movie = watchlistMovies[listKey(mediaType, tmdbId)] || discoverMovieMap[tmdbId];
     if (movie) {
-      openQuickRate({ id: tmdbId, title: movie.title, year: movie.year, poster_path: movie.poster_path });
+      if (mediaType === 'movie') openQuickRate({ id: tmdbId, title: movie.title, year: movie.year, poster_path: movie.poster_path });
+      else openEntryFormForListMovie(movie);
     }
     return;
   }
@@ -2647,7 +2741,8 @@ $['listWatchlistView'].addEventListener('click', e => {
   if (removeBtn) {
     e.stopPropagation();
     const tmdbId = parseInt(removeBtn.dataset.tmdbId);
-    if (tmdbId) toggleWatchlist(tmdbId);
+    const mediaType = normalizeMediaType(removeBtn.dataset.mediaType);
+    if (tmdbId) toggleWatchlist(tmdbId, watchlistMovies[listKey(mediaType, tmdbId)] || { id: tmdbId, media_type: mediaType });
     return;
   }
   const pgBtn = e.target.closest('button[data-wl-pg]');
@@ -2677,23 +2772,25 @@ function renderWatchlistPanel() {
   const start = (watchlistPage - 1) * pageSize;
   const pageIds = ids.slice(start, start + pageSize);
 
-  $['watchlistMovieGrid'].innerHTML = pageIds.map(tmdbId => {
-    const movie = discoverMovieMap[tmdbId] || watchlistMovies[tmdbId];
+  $['watchlistMovieGrid'].innerHTML = pageIds.map(key => {
+    const movie = watchlistMovies[key] || null;
+    const tmdbId = movie?.tmdb_id || Number(String(key).split(':')[1]);
+    const mediaType = normalizeMediaType(movie?.media_type || String(key).split(':')[0]);
     const title = movie ? movie.title : 'TMDB #' + tmdbId;
     const poster = movie && movie.poster_path ? posterUrl(movie.poster_path) : '';
     const year = movie ? (movie.year || (movie.release_date || '').slice(0, 4)) : '';
     return `
-      <div class="discover-card" data-tmdb-id="${tmdbId}">
+      <div class="discover-card" data-tmdb-id="${tmdbId}" data-media-type="${mediaType}">
         <div class="dc-poster-wrap">
           ${poster ? `<img src="${poster}" alt="${esc(title)}" loading="lazy">` : '<div class="dc-no-poster">☆</div>'}
         </div>
         <div class="dc-info">
           <div class="dc-title">${esc(title)}</div>
-          <div class="dc-meta">${year || '未知'}</div>
+          <div class="dc-meta">${year || '未知'} · ${mediaTypeLabel(mediaType)}</div>
           <div class="dc-action">
             <div class="dc-action-row">
-              <button class="btn btn-sm btn-secondary dc-watch-rate-btn" data-tmdb-id="${tmdbId}">＋我的评分</button>
-              <button class="btn btn-xs dc-watch-remove-btn dc-watch-btn active" data-tmdb-id="${tmdbId}" title="移出想看">★</button>
+              <button class="btn btn-sm btn-secondary dc-watch-rate-btn" data-tmdb-id="${tmdbId}" data-media-type="${mediaType}">＋我的评分</button>
+              <button class="btn btn-xs dc-watch-remove-btn dc-watch-btn active" data-tmdb-id="${tmdbId}" data-media-type="${mediaType}" title="移出想看">★</button>
             </div>
           </div>
         </div>
@@ -2708,7 +2805,7 @@ function renderWatchlistPanel() {
 
 // ===== COUPLE =====
 function isMissingRelationError(error) {
-  return /schema cache|does not exist|relation|couples|couple_watch_queue/i.test(error?.message || '');
+  return /schema cache|does not exist|relation|couples|couple_watch_queue|media_type|column/i.test(error?.message || '');
 }
 
 function getCouplePartnerId(couple = activeCouple) {
@@ -2771,10 +2868,12 @@ async function loadCoupleQueue() {
     return;
   }
   coupleQueueAvailable = true;
-  coupleQueue = data || [];
+  coupleQueue = (data || []).map(m => ({ ...m, media_type: normalizeMediaType(m.media_type) }));
   coupleQueue.forEach(m => {
+    if (normalizeMediaType(m.media_type) !== 'movie') return;
     discoverMovieMap[m.tmdb_id] = {
       id: m.tmdb_id,
+      media_type: 'movie',
       title: m.title,
       year: m.year,
       release_date: m.year ? String(m.year) : '',
@@ -2845,13 +2944,14 @@ async function addToCoupleQueue(movieOrId) {
   }
   const movie = normalizeListMovie(movieOrId);
   if (!movie) return;
-  if (coupleQueue.some(m => Number(m.tmdb_id) === movie.tmdb_id)) {
+  if (coupleQueue.some(m => listKey(m) === listKey(movie))) {
     toast('已经在下次看队列里');
     return;
   }
   const maxPosition = coupleQueue.reduce((max, m) => Math.max(max, Number(m.position || 0)), 0);
   const { data, error } = await db.from('couple_watch_queue').insert({
     couple_id: activeCouple.id,
+    media_type: movie.media_type,
     tmdb_id: movie.tmdb_id,
     title: movie.title,
     year: movie.year || null,
@@ -2863,8 +2963,8 @@ async function addToCoupleQueue(movieOrId) {
     toast(isMissingRelationError(error) ? '下次看表尚未创建，请先执行升级 SQL' : '加入下次看失败: ' + error.message);
     return;
   }
-  if (data) coupleQueue.push(data);
-  discoverMovieMap[movie.tmdb_id] = movie;
+  if (data) coupleQueue.push({ ...data, media_type: normalizeMediaType(data.media_type) });
+  if (movie.media_type === 'movie') discoverMovieMap[movie.tmdb_id] = movie;
   toast('已加入下次看');
   if (getActiveTab() === 'couple') renderCouple();
 }
@@ -3053,6 +3153,8 @@ function renderDecadeChips(items, emptyText) {
 
 function renderCouplePreferenceHTML(pref) {
   const partnerName = couplePartner?.display_name || '对方';
+  const myColor = getUserColor(currentUser?.id);
+  const partnerColor = getUserColor(getCouplePartnerId());
   const dimRows = Object.entries(DIM_LABELS).map(([dim, label]) => {
     const mine = pref.mineDims[dim] || 0;
     const partner = pref.partnerDims[dim] || 0;
@@ -3060,8 +3162,8 @@ function renderCouplePreferenceHTML(pref) {
       <div class="couple-compare-row">
         <span>${esc(label)}</span>
         <div class="couple-compare-bars">
-          <i style="width:${mine * 10}%"></i>
-          <b style="width:${partner * 10}%"></b>
+          <i style="width:${mine * 10}%;background:${myColor.main}"></i>
+          <b style="width:${partner * 10}%;background:${partnerColor.main}"></b>
         </div>
         <em>${mine.toFixed(1)} / ${partner.toFixed(1)}</em>
       </div>
@@ -3072,19 +3174,19 @@ function renderCouplePreferenceHTML(pref) {
       <div class="couple-section-title">偏好对比</div>
       <div class="couple-pref-grid">
         <div>
-          <h4>我的类型</h4>
+          <h4 style="color:${myColor.main}">我的类型</h4>
           <div class="couple-chip-row">${renderPreferenceChips(pref.mineGenres, '暂无类型数据')}</div>
         </div>
         <div>
-          <h4>${esc(partnerName)} 的类型</h4>
+          <h4 style="color:${partnerColor.main}">${esc(partnerName)} 的类型</h4>
           <div class="couple-chip-row">${renderPreferenceChips(pref.partnerGenres, '暂无类型数据')}</div>
         </div>
         <div>
-          <h4>我的年代</h4>
+          <h4 style="color:${myColor.main}">我的年代</h4>
           <div class="couple-chip-row">${renderDecadeChips(pref.mineDecades, '暂无年代数据')}</div>
         </div>
         <div>
-          <h4>${esc(partnerName)} 的年代</h4>
+          <h4 style="color:${partnerColor.main}">${esc(partnerName)} 的年代</h4>
           <div class="couple-chip-row">${renderDecadeChips(pref.partnerDecades, '暂无年代数据')}</div>
         </div>
       </div>
@@ -3131,7 +3233,11 @@ async function loadCoupleRecommendations(force = false) {
       coupleRecommendations = null;
       coupleRecommendationState = 'insufficient';
     } else {
-      coupleRecommendations = data.movies || [];
+      coupleRecommendations = (data.movies || []).map(m => ({ ...m, media_type: 'movie' }));
+      coupleRecommendations.forEach(m => {
+        const tmdbId = m.id || m.tmdb_id;
+        if (tmdbId) discoverMovieMap[tmdbId] = { ...m, id: tmdbId, media_type: 'movie' };
+      });
       coupleRecommendationState = 'ready';
     }
   } catch (e) {
@@ -3177,25 +3283,27 @@ function renderCoupleQueueHTML() {
   const rows = coupleQueue.length
     ? coupleQueue.map((m, idx) => {
         const addedBy = allProfiles[m.added_by]?.display_name || '未知';
+        const addedByColor = getUserColor(m.added_by).main;
+        const mediaType = normalizeMediaType(m.media_type);
         const poster = m.poster_path ? posterUrl(m.poster_path) : '';
         return `
-          <div class="queue-row" data-queue-id="${m.id}">
+          <div class="queue-row" data-queue-id="${m.id}" data-media-type="${mediaType}">
             <div class="queue-rank">${idx + 1}</div>
             ${poster ? `<img src="${poster}" alt="">` : '<div class="queue-poster"></div>'}
             <div class="queue-info">
               <strong>${esc(m.title)}</strong>
-              <span>${m.year || '未知'} · ${esc(addedBy)} 加入</span>
+              <span>${m.year || '未知'} · ${mediaTypeLabel(mediaType)} · <em style="color:${addedByColor}">${esc(addedBy)}</em> 加入</span>
             </div>
             <div class="queue-actions">
               <button class="btn btn-xs btn-secondary" data-queue-up ${idx===0?'disabled':''}>上移</button>
               <button class="btn btn-xs btn-secondary" data-queue-down ${idx===coupleQueue.length-1?'disabled':''}>下移</button>
-              <button class="btn btn-xs btn-secondary" data-queue-rate data-tmdb-id="${m.tmdb_id}">评分</button>
+              <button class="btn btn-xs btn-secondary" data-queue-rate data-tmdb-id="${m.tmdb_id}" data-media-type="${mediaType}">评分</button>
               <button class="btn btn-xs btn-danger" data-queue-remove>移除</button>
             </div>
           </div>
         `;
       }).join('')
-    : '<div class="empty-state"><p>还没有下次看的电影</p><p style="font-size:0.8rem;color:var(--text2);margin-top:8px">可从发现页或添加评价搜索结果加入</p></div>';
+    : '<div class="empty-state"><p>还没有下次看的电影/剧集</p><p style="font-size:0.8rem;color:var(--text2);margin-top:8px">可从发现页或添加评价搜索结果加入</p></div>';
   return `
     <div class="couple-section">
       <div class="couple-section-title">下次看</div>
@@ -3259,6 +3367,19 @@ function renderCoupleSurfaces() {
   renderCouple();
 }
 
+function renderCoupleSubtabs() {
+  const tabs = [
+    ['recommend', '双人推荐'],
+    ['queue', '下次看'],
+    ['stats', '统计']
+  ];
+  return `
+    <div class="discover-subtabs couple-subtabs" id="coupleSubtabs">
+      ${tabs.map(([key, label]) => `<button class="${coupleTab === key ? 'active' : ''}" data-couple-tab="${key}">${label}</button>`).join('')}
+    </div>
+  `;
+}
+
 function renderCouple() {
   const container = $['coupleContent'];
   if (!container) return;
@@ -3272,23 +3393,18 @@ function renderCouple() {
     return;
   }
   const partnerName = couplePartner?.display_name || '对方';
+  const myColor = getUserColor(currentUser?.id);
+  const partnerColor = getUserColor(getCouplePartnerId());
   warmCouplePreferenceDetails();
   const myCount = allEntries.filter(e => e.user_id === currentUser.id && e.type === 'movie').length;
   const partnerCount = allEntries.filter(e => e.user_id === getCouplePartnerId() && e.type === 'movie').length;
   const commonPairs = getCommonCouplePairs();
   const compat = calcCoupleCompatibility();
   const pref = calcCouplePreferenceComparison();
-  container.innerHTML = `
-    <div class="couple-hero">
-      <div>
-        <p>已绑定</p>
-        <h3>${esc(currentProfile?.display_name || '我')} & ${esc(partnerName)}</h3>
-      </div>
-      <button class="btn btn-xs btn-danger" data-disconnect-couple="${activeCouple.id}">解除 Couple</button>
-    </div>
+  const statsHTML = `
     <div class="couple-stat-grid">
-      <div><strong>${myCount}</strong><span>我的电影</span></div>
-      <div><strong>${partnerCount}</strong><span>${esc(partnerName)} 的电影</span></div>
+      <div><strong style="color:${myColor.main}">${myCount}</strong><span>我的电影</span></div>
+      <div><strong style="color:${partnerColor.main}">${partnerCount}</strong><span>${esc(partnerName)} 的电影</span></div>
       <div><strong>${commonPairs.length}</strong><span>共同电影</span></div>
     </div>
     <div class="couple-section">
@@ -3301,8 +3417,22 @@ function renderCouple() {
       </div>
     </div>
     ${renderCouplePreferenceHTML(pref)}
-    ${renderCoupleRecommendationsHTML()}
-    ${renderCoupleQueueHTML()}
+  `;
+  const activeContent = coupleTab === 'queue'
+    ? renderCoupleQueueHTML()
+    : coupleTab === 'stats'
+      ? statsHTML
+      : renderCoupleRecommendationsHTML();
+  container.innerHTML = `
+    <div class="couple-hero">
+      <div>
+        <p>已绑定</p>
+        <h3><span style="color:${myColor.main}">${esc(currentProfile?.display_name || '我')}</span> & <span style="color:${partnerColor.main}">${esc(partnerName)}</span></h3>
+      </div>
+      <button class="btn btn-xs btn-danger" data-disconnect-couple="${activeCouple.id}">解除 Couple</button>
+    </div>
+    ${renderCoupleSubtabs()}
+    ${activeContent}
   `;
 }
 
@@ -3326,6 +3456,12 @@ $['coupleContent'].addEventListener('click', async e => {
     await disconnectCouple(disconnectBtn.dataset.disconnectCouple);
     return;
   }
+  const coupleTabBtn = e.target.closest('[data-couple-tab]');
+  if (coupleTabBtn) {
+    coupleTab = coupleTabBtn.dataset.coupleTab;
+    renderCouple();
+    return;
+  }
   const refreshBtn = e.target.closest('[data-couple-refresh-rec]');
   if (refreshBtn) {
     coupleRecommendations = null;
@@ -3341,7 +3477,10 @@ $['coupleContent'].addEventListener('click', async e => {
     else if (e.target.closest('[data-queue-remove]')) await removeCoupleQueueItem(queueId);
     else if (e.target.closest('[data-queue-rate]')) {
       const item = coupleQueue.find(q => q.id === queueId);
-      if (item) openQuickRate({ id: item.tmdb_id, title: item.title, year: item.year, poster_path: item.poster_path });
+      if (item) {
+        if (normalizeMediaType(item.media_type) === 'movie') openQuickRate({ id: item.tmdb_id, title: item.title, year: item.year, poster_path: item.poster_path });
+        else openEntryFormForListMovie(item);
+      }
     }
     return;
   }
@@ -3357,8 +3496,9 @@ $['coupleContent'].addEventListener('click', async e => {
   if (watchBtn) {
     e.stopPropagation();
     const tmdbId = parseInt(watchBtn.dataset.tmdbId);
+    const mediaType = normalizeMediaType(watchBtn.dataset.mediaType);
     const movie = discoverMovieMap[tmdbId] || (coupleRecommendations || []).find(m => m.id === tmdbId);
-    await toggleWatchlist(tmdbId, movie);
+    await toggleWatchlist(tmdbId, { ...(movie || { id: tmdbId }), media_type: mediaType });
     renderCouple();
     return;
   }
@@ -3366,8 +3506,9 @@ $['coupleContent'].addEventListener('click', async e => {
   if (nextBtn) {
     e.stopPropagation();
     const tmdbId = parseInt(nextBtn.dataset.tmdbId);
+    const mediaType = normalizeMediaType(nextBtn.dataset.mediaType);
     const movie = discoverMovieMap[tmdbId] || (coupleRecommendations || []).find(m => m.id === tmdbId);
-    await addToCoupleQueue(movie || { id: tmdbId });
+    await addToCoupleQueue({ ...(movie || { id: tmdbId }), media_type: mediaType });
     return;
   }
   if (e.target.closest('button')) return;
@@ -3684,17 +3825,19 @@ function discoverPaginationHTML(page, totalPages) {
 function renderDiscoverCard(m, ratedTmdbIds, showBlockBtn) {
   // TMDB uses 'id', our DB uses 'tmdb_id' — both map to the same key format
   const tmdbId = m.id || m.tmdb_id;
+  const mediaType = normalizeMediaType(m.media_type || m.type || 'movie');
   const key = tmdbId ? 'tmdb_'+tmdbId : '';
   const isRated = key && ratedTmdbIds.has(key);
-  const isWatchlisted = tmdbId && watchlistIds.has(tmdbId);
-  const isNextQueued = tmdbId && activeCouple && coupleQueue.some(q => Number(q.tmdb_id) === Number(tmdbId));
+  const listItemKey = tmdbId ? listKey(mediaType, tmdbId) : '';
+  const isWatchlisted = listItemKey && watchlistIds.has(listItemKey);
+  const isNextQueued = listItemKey && activeCouple && coupleQueue.some(q => listKey(q) === listItemKey);
   const poster = m.poster_path ? posterUrl(m.poster_path) : '';
   const year = (m.release_date||'').slice(0,4);
   const genres = (m.genre_ids||[]).slice(0,3).map(id=>genreMap[id]||'').filter(Boolean);
   const reasons = Array.isArray(m.reasons) ? m.reasons.slice(0, 2) : [];
 
   return `
-    <div class="discover-card" data-tmdb-id="${tmdbId||''}">
+    <div class="discover-card" data-tmdb-id="${tmdbId||''}" data-media-type="${mediaType}">
       <div class="dc-poster-wrap">
         ${poster ? `<img src="${poster}" alt="${esc(m.title)}" loading="lazy">` : '<div class="dc-no-poster">🎬</div>'}
         ${m.vote_average ? `<span class="dc-tmdb-score">⭐ ${m.vote_average.toFixed(1)}</span>` : ''}
@@ -3709,15 +3852,15 @@ function renderDiscoverCard(m, ratedTmdbIds, showBlockBtn) {
             ? '<div class="dc-rated-badge">已评价 ✓</div>'
             : showBlockBtn
               ? `<div class="dc-action-row">
-                   <button class="btn btn-sm btn-secondary dc-rate-btn" data-tmdb-id="${tmdbId}">＋我的评分</button>
-                   <button class="btn btn-xs dc-watch-btn ${isWatchlisted?'active':''}" data-tmdb-id="${tmdbId}" title="${isWatchlisted?'移出想看':'加入想看'}">${isWatchlisted?'★':'☆'}</button>
-                   ${activeCouple ? `<button class="btn btn-xs dc-next-btn ${isNextQueued?'active':''}" data-tmdb-id="${tmdbId}" title="${isNextQueued?'已在下次看':'加入下次看'}">▶</button>` : ''}
+                   <button class="btn btn-sm btn-secondary dc-rate-btn" data-tmdb-id="${tmdbId}" data-media-type="${mediaType}">＋我的评分</button>
+                   <button class="btn btn-xs dc-watch-btn ${isWatchlisted?'active':''}" data-tmdb-id="${tmdbId}" data-media-type="${mediaType}" title="${isWatchlisted?'移出想看':'加入想看'}">${isWatchlisted?'★':'☆'}</button>
+                   ${activeCouple ? `<button class="btn btn-xs dc-next-btn ${isNextQueued?'active':''}" data-tmdb-id="${tmdbId}" data-media-type="${mediaType}" title="${isNextQueued?'已在下次看':'加入下次看'}">▶</button>` : ''}
                    <button class="btn btn-xs dc-block-btn" data-tmdb-id="${tmdbId}" title="不再推荐">🚫</button>
                  </div>`
               : `<div class="dc-action-row">
-                   <button class="btn btn-sm btn-secondary dc-rate-btn" data-tmdb-id="${tmdbId}">＋我的评分</button>
-                   <button class="btn btn-xs dc-watch-btn ${isWatchlisted?'active':''}" data-tmdb-id="${tmdbId}" title="${isWatchlisted?'移出想看':'加入想看'}">${isWatchlisted?'★':'☆'}</button>
-                   ${activeCouple ? `<button class="btn btn-xs dc-next-btn ${isNextQueued?'active':''}" data-tmdb-id="${tmdbId}" title="${isNextQueued?'已在下次看':'加入下次看'}">▶</button>` : ''}
+                   <button class="btn btn-sm btn-secondary dc-rate-btn" data-tmdb-id="${tmdbId}" data-media-type="${mediaType}">＋我的评分</button>
+                   <button class="btn btn-xs dc-watch-btn ${isWatchlisted?'active':''}" data-tmdb-id="${tmdbId}" data-media-type="${mediaType}" title="${isWatchlisted?'移出想看':'加入想看'}">${isWatchlisted?'★':'☆'}</button>
+                   ${activeCouple ? `<button class="btn btn-xs dc-next-btn ${isNextQueued?'active':''}" data-tmdb-id="${tmdbId}" data-media-type="${mediaType}" title="${isNextQueued?'已在下次看':'加入下次看'}">▶</button>` : ''}
                  </div>`
           }
         </div>
@@ -3898,26 +4041,29 @@ $['qrSubmit'].addEventListener('click', async ()=>{
   }
 
   toast(isEdit ? '评价已更新！' : '评价已保存！');
-  if (!isEdit && savedTmdbId && watchlistIds.has(savedTmdbId)) {
+  const savedListKey = savedTmdbId ? listKey('movie', savedTmdbId) : '';
+  if (!isEdit && savedTmdbId && watchlistIds.has(savedListKey)) {
     db.from('watchlist_movies')
       .delete()
       .eq('user_id', currentUser.id)
+      .eq('media_type', 'movie')
       .eq('tmdb_id', savedTmdbId)
       .then(({error}) => {
         if (!error) {
-          watchlistIds.delete(savedTmdbId);
-          delete watchlistMovies[savedTmdbId];
+          watchlistIds.delete(savedListKey);
+          delete watchlistMovies[savedListKey];
         }
       });
   }
-  if (!isEdit && savedTmdbId && activeCouple && coupleQueue.some(q => Number(q.tmdb_id) === Number(savedTmdbId))) {
+  if (!isEdit && savedTmdbId && activeCouple && coupleQueue.some(q => listKey(q) === savedListKey)) {
     db.from('couple_watch_queue')
       .delete()
       .eq('couple_id', activeCouple.id)
+      .eq('media_type', 'movie')
       .eq('tmdb_id', savedTmdbId)
       .then(({error}) => {
         if (!error) {
-          coupleQueue = coupleQueue.filter(q => Number(q.tmdb_id) !== Number(savedTmdbId));
+          coupleQueue = coupleQueue.filter(q => listKey(q) !== savedListKey);
           normalizeCoupleQueuePositions(false);
         }
       });

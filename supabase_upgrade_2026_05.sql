@@ -8,13 +8,29 @@ CREATE INDEX IF NOT EXISTS idx_blocked_movies_user_tmdb
 CREATE TABLE IF NOT EXISTS watchlist_movies (
   id BIGSERIAL PRIMARY KEY,
   user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  media_type TEXT NOT NULL DEFAULT 'movie',
   tmdb_id INTEGER NOT NULL,
   title TEXT NOT NULL,
   year INTEGER,
   poster_path TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE(user_id, tmdb_id)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+ALTER TABLE watchlist_movies ADD COLUMN IF NOT EXISTS media_type TEXT NOT NULL DEFAULT 'movie';
+ALTER TABLE watchlist_movies DROP CONSTRAINT IF EXISTS watchlist_movies_user_id_tmdb_id_key;
+DROP INDEX IF EXISTS watchlist_movies_user_id_tmdb_id_key;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'watchlist_movies_media_type_check'
+      AND conrelid = 'watchlist_movies'::regclass
+  ) THEN
+    ALTER TABLE watchlist_movies
+      ADD CONSTRAINT watchlist_movies_media_type_check CHECK (media_type IN ('movie', 'series'));
+  END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS watchlist_movies_unique_media_idx
+  ON watchlist_movies (user_id, media_type, tmdb_id);
 CREATE INDEX IF NOT EXISTS idx_watchlist_movies_user
   ON watchlist_movies (user_id, created_at DESC);
 

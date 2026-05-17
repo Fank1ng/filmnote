@@ -14,7 +14,7 @@ const MAX_TITLE_IDS = 100;
 const MAX_CREDIT_IDS = 50;
 const MAX_RECOMMEND_ENTRIES = 1000;
 const MAX_JSON_BYTES = 256 * 1024;
-const REC_CACHE_VERSION = 'v3';
+const REC_CACHE_VERSION = 'v4';
 
 function getTmdbKey(env) {
   return env && env.TMDB_API_KEY;
@@ -535,7 +535,7 @@ async function buildUserProfile(scored, env, advanced) {
 }
 
 // ── Seed selection ──
-function selectSeeds(scored, partnerMovies, advanced) {
+function selectSeeds(scored, partnerMovies, advanced, includePartnerSeed = advanced) {
   const high = scored.filter(e => e.score >= 8);
   const mid = scored.filter(e => e.score >= 6 && e.score < 8);
   const low = scored.filter(e => e.score < 4);
@@ -553,8 +553,8 @@ function selectSeeds(scored, partnerMovies, advanced) {
   let seeds = [...hiPicks, ...midPicks];
   if (hasRecency) seeds.push({ ...recentHi, _isRecency: true });
 
-  // Partner seed (advanced only)
-  if (advanced && partnerMovies.length) {
+  // Partner seed
+  if (includePartnerSeed && partnerMovies.length) {
     const partnerScored = partnerMovies
       .map(e => ({ ...e, score: getEntryTotalScore(e) }))
       .sort((a, b) => b.score - a.score);
@@ -901,7 +901,44 @@ function applyExplorationBudget(selected, allCandidates, profile, targetCount) {
 }
 
 // ── Recommendation engine ──
-function attachRecommendationReasons(movies, profile, partnerProfile) {
+function getCandidateProfileFit(movie, profile) {
+  if (!profile) return 0;
+  const fullGenres = movie._detail ? (movie._detail.genres || []).map(g => g.id) : (movie.genre_ids || []);
+  const genreScore = computeGenreScore(fullGenres, movie._sourceGenres || [], profile.genrePref, 0.6);
+  const releaseYear = parseInt((movie.release_date || movie._detail?.release_date || '').slice(0, 4));
+  const decadeBonus = computeDecadeBonus(releaseYear, profile.decadeProfile);
+  const langBonus = movie._detail?.original_language && movie._detail.original_language === profile.langPref ? 0.12 : 0;
+  const voteBonus = Math.min((movie.vote_average || 0) / 10, 1) * 0.18;
+  return Math.max(0, Math.min(1, genreScore * 0.52 + decadeBonus * 0.18 + voteBonus + langBonus));
+}
+
+function applyCoupleScoring(movies, profile, partnerProfile) {
+  if (!partnerProfile) return;
+  const sharedGenres = new Set(
+    Object.keys(profile.genrePref || {}).filter(g => partnerProfile.genrePref && partnerProfile.genrePref[g])
+  );
+  for (const m of movies) {
+    const myFit = getCandidateProfileFit(m, profile);
+    const partnerFit = getCandidateProfileFit(m, partnerProfile);
+    const fullGenres = m._detail ? (m._detail.genres || []).map(g => g.id) : (m.genre_ids || []);
+    const sharedGenreHit = fullGenres.some(g => sharedGenres.has(String(g)));
+    const conservativeFit = Math.min(myFit, partnerFit);
+    const balanceFit = (myFit + partnerFit) / 2;
+    m._score = conservativeFit * 0.62 + balanceFit * 0.20 + (m._score || 0) * 0.18 + (sharedGenreHit ? 0.06 : 0);
+    m._coupleReasons = [];
+    if (sharedGenreHit) m._coupleReasons.push('你们都喜欢相近类型');
+    const releaseYear = parseInt((m.release_date || '').slice(0, 4));
+    if (releaseYear) {
+      const decade = Math.floor(releaseYear / 10) * 10;
+      if ((profile.decadeProfile[decade] || 0) >= 7 && (partnerProfile.decadeProfile[decade] || 0) >= 7) {
+        m._coupleReasons.push(`双方 ${decade}s 均分高`);
+      }
+    }
+    if (partnerFit >= 0.55 && myFit >= 0.55) m._coupleReasons.push('双方预测喜欢度接近');
+  }
+}
+
+function attachRecommendationReasons(movies, profile, partnerProfile, options = {}) {
   const routeLabels = {
     rec: '来自你的高分片相似推荐',
     rec2: '来自你的高分片延展推荐',
@@ -912,7 +949,7 @@ function attachRecommendationReasons(movies, profile, partnerProfile) {
     director: '贴近你喜欢的创作者',
     actor: '贴近你喜欢的演员阵容',
     language: '符合你常看的语种',
-    partner_rec: '结合朋友的高分片偏好',
+    partner_rec: options.coupleMode ? '来自对方高分片延展推荐' : '结合朋友的高分片偏好',
   };
   const partnerGenres = partnerProfile ? new Set(Object.keys(partnerProfile.genrePref)) : null;
   return movies.map(m => {
@@ -927,8 +964,10 @@ function attachRecommendationReasons(movies, profile, partnerProfile) {
     if (m._detail?.original_language && m._detail.original_language === profile.langPref) {
       reasons.push('语种偏好匹配');
     }
-    if (partnerGenres && (m.genre_ids || []).some(g => partnerGenres.has(String(g)))) {
-      reasons.push('也贴近朋友的类型偏好');
+    if (Array.isArray(m._coupleReasons)) {
+      reasons.push(...m._coupleReasons);
+    } else if (partnerGenres && (m.genre_ids || []).some(g => partnerGenres.has(String(g)))) {
+      reasons.push(options.coupleMode ? '也贴近对方的类型偏好' : '也贴近朋友的类型偏好');
     }
     return {
       id: m.id,
@@ -1022,65 +1061,78 @@ async function enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoid
   final.sort((a, b) => b._score - a._score);
 }
 
-async function loadRecommendations(env, entries, userId, blockedIds, excludeIds, blockedFeedback) {
+async function loadRecommendations(env, entries, userId, blockedIds, excludeIds, blockedFeedback, options = {}) {
+  const coupleMode = options.mode === 'couple' && !!options.partnerUserId;
   const myMovies = entries.filter(e => e.user_id === userId && e.tmdb_id && e.type === 'movie');
   const totalRated = entries.filter(e => e.user_id === userId && e.type === 'movie').length;
+  const partnerId = coupleMode
+    ? options.partnerUserId
+    : entries.find(e => e.user_id !== userId && e.tmdb_id)?.user_id;
+  const partnerMovies = partnerId
+    ? entries.filter(e => e.user_id === partnerId && e.tmdb_id && e.type === 'movie')
+    : [];
+  const partnerRated = partnerMovies.length;
 
-  if (totalRated < 25) return { movies: null, totalRated };
+  if (coupleMode) {
+    if (totalRated < 5 || partnerRated < 5 || totalRated + partnerRated < 25) {
+      return { movies: null, totalRated, partnerRated, mode: 'couple', reason: 'couple_min_rated' };
+    }
+  } else if (totalRated < 25) {
+    return { movies: null, totalRated };
+  }
 
   const scored = myMovies.map(e => ({ ...e, score: getEntryTotalScore(e) })).sort((a, b) => b.score - a.score);
   if (!scored.length) return { movies: [], totalRated };
 
-  const advanced = totalRated >= 100;
+  const advanced = coupleMode ? totalRated + partnerRated >= 100 : totalRated >= 100;
+  const engineAdvanced = advanced || coupleMode;
 
   // Phase 0: Build profiles
-  const partnerId = entries.find(e => e.user_id !== userId && e.tmdb_id)?.user_id;
-  const partnerMovies = partnerId
-    ? entries.filter(e => e.user_id === partnerId && e.tmdb_id && e.type === 'movie')
-    : [];
-
   const [profile, partnerProfile, feedbackProfile] = await Promise.all([
-    buildUserProfile(scored, env, advanced),
+    buildUserProfile(scored, env, engineAdvanced),
     partnerId ? buildUserProfile(
       partnerMovies.map(e => ({ ...e, score: getEntryTotalScore(e) })).sort((a, b) => b.score - a.score),
-      env, false
+      env, coupleMode ? engineAdvanced : false
     ) : Promise.resolve(null),
-    buildFeedbackProfile(blockedFeedback, env, advanced)
+    buildFeedbackProfile(blockedFeedback, env, engineAdvanced)
   ]);
 
   // Phase 1: Select seeds
-  const { seeds, avoidSeeds } = selectSeeds(scored, partnerMovies, advanced);
+  const { seeds, avoidSeeds } = selectSeeds(scored, partnerMovies, engineAdvanced, coupleMode || advanced);
 
   // Enrich seeds with genres (+ keywords for advanced)
   const allSeeds = [...seeds, ...avoidSeeds];
-  await enrichEntries(allSeeds, env, advanced);
+  await enrichEntries(allSeeds, env, engineAdvanced);
 
   // Phase 2: Collect candidates
-  const ratedKeys = new Set(myMovies.filter(e => e.tmdb_id).map(e => 'tmdb_' + e.tmdb_id));
+  const ratedKeys = new Set([
+    ...myMovies.filter(e => e.tmdb_id).map(e => 'tmdb_' + e.tmdb_id),
+    ...(coupleMode ? partnerMovies.filter(e => e.tmdb_id).map(e => 'tmdb_' + e.tmdb_id) : [])
+  ]);
   const blockedKeys = blockedIds && blockedIds.length
     ? new Set(blockedIds.map(id => 'tmdb_' + id))
     : new Set();
-  const candidates = await collectCandidates(seeds, profile, partnerProfile, env, advanced, ratedKeys, blockedKeys);
+  const candidates = await collectCandidates(seeds, profile, partnerProfile, env, engineAdvanced, ratedKeys, blockedKeys);
 
   if (!candidates.length) return { movies: [], totalRated };
 
   // Phase 3: Cheap scoring
-  scorePhase1(candidates, profile, avoidSeeds, advanced, feedbackProfile);
+  scorePhase1(candidates, profile, avoidSeeds, engineAdvanced, feedbackProfile);
   candidates.sort((a, b) => b._score - a._score);
 
   // Phase 4+5: Enrich top pool and rescore
-  const enrichCount = advanced ? 60 : 20;
+  const enrichCount = engineAdvanced ? 60 : 20;
   const topPool = candidates.slice(0, enrichCount);
 
   // Also enrich avoid seeds if they're in the pool
-  await enrichEntries(avoidSeeds.filter(s => s.tmdb_id), env, advanced);
+  await enrichEntries(avoidSeeds.filter(s => s.tmdb_id), env, engineAdvanced);
 
-  await enrichAndScorePhase2(topPool, profile, partnerProfile, avoidSeeds, advanced, feedbackProfile, env);
+  await enrichAndScorePhase2(topPool, profile, partnerProfile, avoidSeeds, engineAdvanced, feedbackProfile, env);
   topPool.sort((a, b) => b._score - a._score);
 
   // Phase 6: MMR diversity (using Phase2 scores without keywords)
-  const finalCount = advanced ? 60 : 30;
-  const lambda = advanced ? 0.7 : 0.75;
+  const finalCount = engineAdvanced ? 60 : 30;
+  const lambda = engineAdvanced ? 0.7 : 0.75;
   let final = mmrRerank(topPool, Math.min(finalCount, topPool.length), lambda);
 
   // Phase 7: Exploration budget (advanced only)
@@ -1089,22 +1141,28 @@ async function loadRecommendations(env, entries, userId, blockedIds, excludeIds,
   }
 
   // Phase 8: Enrich final pool with keywords and compute full scores
-  await enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoidSeeds, advanced, feedbackProfile, env);
+  await enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoidSeeds, engineAdvanced, feedbackProfile, env);
+
+  if (coupleMode) {
+    applyCoupleScoring(final, profile, partnerProfile);
+    final.sort((a, b) => b._score - a._score);
+  }
 
   // Filter out previously shown movies (freshness)
   if (excludeIds && excludeIds.length) {
     const excludeSet = new Set(excludeIds);
     final = final.filter(m => !excludeSet.has(m.id));
   }
-  final = attachRecommendationReasons(final, profile, partnerProfile);
-  return { movies: final.slice(0, finalCount), totalRated };
+  final = attachRecommendationReasons(final, profile, partnerProfile, { coupleMode });
+  return { movies: final.slice(0, finalCount), totalRated, partnerRated, mode: coupleMode ? 'couple' : 'single' };
 }
 
 // Cache key for recommendations
-function makeRecKey(userId, entries, blockedIds, excludeIds, blockedFeedback) {
+function makeRecKey(userId, entries, blockedIds, excludeIds, blockedFeedback, options = {}) {
+  const coupleMode = options.mode === 'couple' && !!options.partnerUserId;
   const movieIds = entries
-    .filter(e => e.user_id === userId && e.type === 'movie' && e.tmdb_id)
-    .map(e => e.tmdb_id + ':' + (e.total_score || 0))
+    .filter(e => (e.user_id === userId || (coupleMode && e.user_id === options.partnerUserId)) && e.type === 'movie' && e.tmdb_id)
+    .map(e => e.user_id + ':' + e.tmdb_id + ':' + (e.total_score || 0))
     .sort()
     .join(',');
   let hash = 0;
@@ -1127,7 +1185,9 @@ function makeRecKey(userId, entries, blockedIds, excludeIds, blockedFeedback) {
         .sort()
         .join('|')
     : '';
-  let keyBase = REC_CACHE_VERSION + '-' + userId + '-' + movieIds.length + '-' + hash;
+  let keyBase = REC_CACHE_VERSION + '-' + (coupleMode ? 'couple' : 'single') + '-' + userId;
+  if (coupleMode) keyBase += '-' + options.partnerUserId;
+  keyBase += '-' + movieIds.length + '-' + hash;
   if (blockedHash) {
     let bh = 0;
     for (let i = 0; i < blockedHash.length; i++) {
@@ -1346,6 +1406,8 @@ export default {
       try {
         const body = await readJsonBody(request);
         const { entries, userId, blockedIds, blockedMovies, excludeIds } = body;
+        const mode = body.mode === 'couple' ? 'couple' : 'single';
+        const partnerUserId = typeof body.partnerUserId === 'string' ? body.partnerUserId.slice(0, 120) : '';
         const cleanEntries = sanitizeEntries(entries);
         const cleanBlockedFeedback = sanitizeBlockedFeedback(blockedMovies, blockedIds);
         const cleanBlockedIds = cleanBlockedFeedback.map(m => m.tmdb_id);
@@ -1354,8 +1416,12 @@ export default {
         if (!cleanEntries || !userId) {
           return errorResponse('Missing entries or userId', request, env, 400);
         }
+        if (mode === 'couple' && !partnerUserId) {
+          return errorResponse('Missing partnerUserId for couple recommendations', request, env, 400);
+        }
 
-        const recKey = makeRecKey(userId, cleanEntries, cleanBlockedIds, cleanExcludeIds, cleanBlockedFeedback);
+        const recOptions = { mode, partnerUserId };
+        const recKey = makeRecKey(userId, cleanEntries, cleanBlockedIds, cleanExcludeIds, cleanBlockedFeedback, recOptions);
         const cacheKeyUrl = 'https://rec-cache.local/recommend/' + recKey;
         const cacheKey = new Request(cacheKeyUrl, { method: 'GET' });
         const cache = caches.default;
@@ -1367,7 +1433,7 @@ export default {
           return jsonResponse({ ...data, cached: true }, request, env, 200, { 'X-Rec-Cache': 'HIT' });
         }
 
-        const result = await loadRecommendations(env, cleanEntries, userId, cleanBlockedIds, cleanExcludeIds, cleanBlockedFeedback);
+        const result = await loadRecommendations(env, cleanEntries, userId, cleanBlockedIds, cleanExcludeIds, cleanBlockedFeedback, recOptions);
 
         if (result.movies) {
           const resToCache = new Response(JSON.stringify(result), {

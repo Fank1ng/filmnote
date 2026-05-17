@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FD&Ceci — 电影剧集评价</title>
-<link rel="stylesheet" href="styles.css?v=20260514">
+<link rel="stylesheet" href="styles.css?v=20260518">
 </head>
 <body>
 
@@ -117,7 +117,7 @@
         <div class="user-dropdown" id="userDropdown">
           <button id="changePwBtn">修改密码</button>
           <button id="inviteMenuBtn" class="hidden">邀请码管理</button>
-          <button id="watchlistMgmtBtn">想看清单</button>
+          <button id="coupleSettingsBtn">Couple 设置</button>
           <button id="blockedMgmtBtn">管理屏蔽</button>
           <button id="logoutBtn">退出</button>
         </div>
@@ -129,6 +129,7 @@
     <button class="active" data-tab="rate" role="tab" aria-selected="true" aria-label="添加评价">添加评价</button>
     <button data-tab="list" role="tab" aria-selected="false" aria-label="影单">影单</button>
     <button data-tab="discover" role="tab" aria-selected="false" aria-label="发现好片">发现</button>
+    <button data-tab="couple" role="tab" aria-selected="false" aria-label="Couple">Couple</button>
     <button data-tab="stats" role="tab" aria-selected="false" aria-label="统计分析">统计分析</button>
   </nav>
 
@@ -196,47 +197,56 @@
 
     <!-- ═══ 影单 ═══ -->
     <section class="tab-panel" id="panel-list">
-      <h2 class="section-title">我的影单</h2>
-      <div class="list-subtabs" id="listSubtabs">
-        <button class="active" data-ltype="movie">电影</button>
-        <button data-ltype="series">剧集</button>
+      <div class="section-title-switch" id="listModeTabs" aria-label="影单视图">
+        <button class="active" data-lmode="entries">我的影单</button>
+        <button data-lmode="watchlist">想看清单 <span id="watchlistCount">0</span></button>
       </div>
-      <div class="list-controls">
-        <input type="text" class="search-box" id="searchInput" placeholder="搜索名称或导演...">
-        <select id="sortBy">
-          <option value="date-desc">最近添加</option>
-          <option value="date-asc">最早添加</option>
-          <option value="score-desc">评分最高</option>
-          <option value="score-asc">评分最低</option>
-          <option value="count-desc">评价数量</option>
-          <option value="title">按片名 A-Z</option>
-        </select>
-        <select id="ownerFilter">
-          <option value="all">所有人</option>
-          <option value="me">仅自己</option>
-        </select>
-        <select id="scoreFilter">
-          <option value="all">全部分数</option>
-          <option value="10">10分</option>
-          <option value="9">9分</option>
-          <option value="8">8分</option>
-          <option value="7">7分</option>
-          <option value="6">6分</option>
-          <option value="5">5分</option>
-          <option value="4">4分</option>
-          <option value="3">3分</option>
-          <option value="2">2分</option>
-          <option value="1">1分</option>
-        </select>
+      <div id="listEntriesView">
+        <div class="list-subtabs" id="listSubtabs">
+          <button class="active" data-ltype="movie">电影</button>
+          <button data-ltype="series">剧集</button>
+        </div>
+        <div class="list-controls">
+          <input type="text" class="search-box" id="searchInput" placeholder="搜索名称或导演...">
+          <select id="sortBy">
+            <option value="date-desc">最近添加</option>
+            <option value="date-asc">最早添加</option>
+            <option value="score-desc">评分最高</option>
+            <option value="score-asc">评分最低</option>
+            <option value="count-desc">评价数量</option>
+            <option value="title">按片名 A-Z</option>
+          </select>
+          <select id="ownerFilter">
+            <option value="all">所有人</option>
+            <option value="me">仅自己</option>
+          </select>
+          <select id="scoreFilter">
+            <option value="all">全部分数</option>
+            <option value="10">10分</option>
+            <option value="9">9分</option>
+            <option value="8">8分</option>
+            <option value="7">7分</option>
+            <option value="6">6分</option>
+            <option value="5">5分</option>
+            <option value="4">4分</option>
+            <option value="3">3分</option>
+            <option value="2">2分</option>
+            <option value="1">1分</option>
+          </select>
+        </div>
+        <div id="movieList"></div>
+        <div class="empty-state" id="emptyState">
+          <p style="font-size:2rem">🎬</p>
+          <p>还没有评价记录</p>
+        </div>
+        <div class="empty-state hidden" id="loadingState">
+          <div class="spinner"></div>
+          <p style="margin-top:8px">加载中...</p>
+        </div>
       </div>
-      <div id="movieList"></div>
-      <div class="empty-state" id="emptyState">
-        <p style="font-size:2rem">🎬</p>
-        <p>还没有评价记录</p>
-      </div>
-      <div class="empty-state hidden" id="loadingState">
-        <div class="spinner"></div>
-        <p style="margin-top:8px">加载中...</p>
+      <div id="listWatchlistView" class="hidden">
+        <div class="discover-grid" id="watchlistMovieGrid"></div>
+        <div id="watchlistPagination"></div>
       </div>
     </section>
 
@@ -249,6 +259,12 @@
         <button data-dt="toprated">Top100</button>
       </div>
       <div id="discoverContent"></div>
+    </section>
+
+    <!-- ═══ Couple ═══ -->
+    <section class="tab-panel" id="panel-couple">
+      <h2 class="section-title">Couple</h2>
+      <div id="coupleContent"></div>
     </section>
 
     <!-- ═══ 统计 ═══ -->
@@ -317,24 +333,12 @@
   </div>
 </div>
 
-<!-- Watchlist Modal -->
-<div class="modal-overlay" id="watchlistModal">
-  <div class="modal" style="max-width:680px">
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <h3 style="margin:0;color:var(--text2)">想看清单 (<span id="watchlistCount">0</span>)</h3>
-      <button class="btn btn-xs btn-secondary" id="watchlistModalClose">关闭</button>
-    </div>
-    <div class="discover-grid" id="watchlistMovieGrid"></div>
-    <div id="watchlistPagination"></div>
-  </div>
-</div>
-
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="api.js?v=20260514"></script>
-<script src="tmdb-cache.js?v=20260514"></script>
-<script src="recommend-ui.js?v=20260514"></script>
-<script src="app.js?v=20260514"></script>
+<script src="api.js?v=20260518"></script>
+<script src="tmdb-cache.js?v=20260518"></script>
+<script src="recommend-ui.js?v=20260518"></script>
+<script src="app.js?v=20260518"></script>
 </body>
 </html>

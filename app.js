@@ -33,6 +33,9 @@ const $ = {
   get importBtn() { return document.getElementById('importBtn'); },
   get importFile() { return document.getElementById('importFile'); },
   get loadingState() { return document.getElementById('loadingState'); },
+  get listEntriesView() { return document.getElementById('listEntriesView'); },
+  get listModeTabs() { return document.getElementById('listModeTabs'); },
+  get listWatchlistView() { return document.getElementById('listWatchlistView'); },
   get loginBtn() { return document.getElementById('loginBtn'); },
   get logoutBtn() { return document.getElementById('logoutBtn'); },
   get changePwBtn() { return document.getElementById('changePwBtn'); },
@@ -77,12 +80,11 @@ const $ = {
   get totalScorePreview() { return document.getElementById('totalScorePreview'); },
   get userMenu() { return document.getElementById('userMenu'); },
   get userDropdown() { return document.getElementById('userDropdown'); },
-  get watchlistMgmtBtn() { return document.getElementById('watchlistMgmtBtn'); },
-  get watchlistModal() { return document.getElementById('watchlistModal'); },
+  get coupleSettingsBtn() { return document.getElementById('coupleSettingsBtn'); },
+  get coupleContent() { return document.getElementById('coupleContent'); },
   get watchlistMovieGrid() { return document.getElementById('watchlistMovieGrid'); },
   get watchlistCount() { return document.getElementById('watchlistCount'); },
   get watchlistPagination() { return document.getElementById('watchlistPagination'); },
-  get watchlistModalClose() { return document.getElementById('watchlistModalClose'); },
   get year() { return document.getElementById('year'); },
   // Discover
   get discoverContent() { return document.getElementById('discoverContent'); },
@@ -206,6 +208,18 @@ let allProfiles = {};
 let realtimeChannel = null;
 let realtimeDebounce = null;
 let sessionCheckTimer = null;
+
+// Couple state
+let couplesAvailable = true;
+let activeCouple = null;
+let pendingCouples = [];
+let couplePartner = null;
+let coupleQueue = [];
+let coupleQueueAvailable = true;
+let coupleRecommendations = null;
+let coupleRecommendationLoading = false;
+let coupleRecommendationState = 'idle';
+let couplePreferenceWarmKey = '';
 
 const authOverlay = $['authOverlay'];
 const mainApp = $['mainApp'];
@@ -649,6 +663,7 @@ async function loadAllData() {
       db.from('user_preferences').select('*')
     ]);
     allEntries = entries || [];
+    invalidateCoupleRecommendations();
     // Backfill movieCache from Supabase (migration: overviews stored in DB before refactor)
     const batch = {};
     for (const e of allEntries) {
@@ -684,6 +699,9 @@ async function loadAllData() {
     // Load secondary user lists
     loadBlockedMovies();
     await loadWatchlist();
+    await loadCoupleState();
+    await loadCoupleBlockedMovies();
+    await loadCoupleQueue();
     // One-time KV backfill for recommendation engine (runs once per deployment)
     if (!localStorage.getItem('kv_backfilled_v1')) {
       localStorage.setItem('kv_backfilled_v1', '1');
@@ -1057,6 +1075,7 @@ let skipListRender = false;
 function renderActiveTab() {
   const tab = getActiveTab();
   if (tab==='list' && !skipListRender) renderList();
+  if (tab==='couple') renderCouple();
   if (tab==='stats') renderStats();
 }
 
@@ -1086,7 +1105,15 @@ function subscribeToRealtime() {
       )
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'blocked_movies' },
-        () => { loadBlockedMovies(); }
+        () => { loadBlockedMovies(); loadCoupleBlockedMovies(); }
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'couples' },
+        () => { loadCoupleState().then(loadCoupleQueue).then(renderActiveTab).catch(()=>{}); }
+      )
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'couple_watch_queue' },
+        () => { loadCoupleQueue().then(renderActiveTab).catch(()=>{}); }
       );
     if (watchlistAvailable) {
       channel = channel.on('postgres_changes',
@@ -1274,6 +1301,47 @@ $['tmdbSearch'].addEventListener('input', function(){
   tmdbTimer = setTimeout(()=>searchTmdb(q), 350);
 });
 
+function movieFromSearchElement(item) {
+  return normalizeListMovie({
+    id: item.dataset.tmdbId,
+    title: item.dataset.title,
+    year: item.dataset.year,
+    release_date: item.dataset.releaseDate || '',
+    poster_path: item.dataset.poster || ''
+  });
+}
+
+async function fillFromTmdbSearchItem(item) {
+  const tmdbId = item.dataset.tmdbId;
+  $['title'].value = item.dataset.title;
+  $['year'].value = item.dataset.year || '';
+  $['tmdbId'].value = tmdbId;
+  $['posterPath'].value = item.dataset.poster;
+  $['tmdbSearch'].value = '';
+  $['searchResults'].classList.remove('open');
+
+  // Fetch normalized detail once; the same cache feeds save, detail modal, and search
+  try {
+    const type = entryType==='series' ? 'tv' : 'movie';
+    let director = '';
+    if (entryType==='series') {
+      const credRes = await tmdbFetch(`/${type}/${tmdbId}/credits?language=zh-CN`);
+      const credData = await credRes.json();
+      const creator = (credData.crew||[]).find(c=>c.job==='Director'||c.job==='Executive Producer');
+      director = creator?.name || '';
+    } else {
+      const detail = await fetchMovieDetail(tmdbId);
+      director = detail?.director || '';
+      if (detail?.overview || detail?.poster_path || detail?.year) {
+        if (detail.year && !$['year'].value) $['year'].value = detail.year;
+        if (detail.poster_path && !$['posterPath'].value) $['posterPath'].value = detail.poster_path;
+      }
+    }
+    if (director) $['director'].value = director;
+  } catch(e){}
+  toast('已自动填入信息');
+}
+
 async function searchTmdb(query) {
   const container = $['searchResults'];
   // Abort previous in-flight request
@@ -1294,15 +1362,20 @@ async function searchTmdb(query) {
     container.innerHTML = data.results.slice(0,8).map(r=>{
       const title = r.title || r.name;
       const year = (r.release_date||r.first_air_date||'').slice(0,4);
+      const releaseDate = r.release_date || r.first_air_date || '';
       const poster = r.poster_path ? posterUrl(r.poster_path) : '';
       return `
-        <div class="sr-item" data-tmdb-id="${r.id}" data-title="${esc(title)}" data-year="${year}" data-poster="${r.poster_path||''}">
+        <div class="sr-item" data-tmdb-id="${r.id}" data-title="${esc(title)}" data-year="${year}" data-release-date="${releaseDate}" data-poster="${r.poster_path||''}">
           ${poster ? `<img class="sr-poster" src="${poster}" alt="">` : '<div class="sr-poster"></div>'}
-          <div class="sr-info">
+          <div class="sr-info sr-fill-action">
             <div class="sr-title">${esc(title)}</div>
             <div class="sr-meta">${year||'未知'} ${r.overview ? '· '+esc(r.overview.slice(0,60))+'...' : ''}</div>
           </div>
-          <span class="sr-type">${entryType==='series'?'剧集':'电影'}</span>
+          <div class="sr-actions">
+            <button type="button" class="btn btn-xs btn-primary sr-fill-btn">填入评价</button>
+            ${entryType==='movie' ? `<button type="button" class="btn btn-xs btn-secondary sr-watch-btn">加入想看</button>` : ''}
+            ${entryType==='movie' && activeCouple ? `<button type="button" class="btn btn-xs btn-secondary sr-next-btn">加入下次看</button>` : ''}
+          </div>
         </div>
       `;
     }).join('');
@@ -1310,35 +1383,19 @@ async function searchTmdb(query) {
 
     // Click handler
     container.querySelectorAll('.sr-item').forEach(item=>{
-      item.addEventListener('click', async ()=>{
-        const tmdbId = item.dataset.tmdbId;
-        $['title'].value = item.dataset.title;
-        $['year'].value = item.dataset.year || '';
-        $['tmdbId'].value = tmdbId;
-        $['posterPath'].value = item.dataset.poster;
-        $['tmdbSearch'].value = '';
-        container.classList.remove('open');
-
-        // Fetch normalized detail once; the same cache feeds save, detail modal, and search
-        try {
-          const type = entryType==='series' ? 'tv' : 'movie';
-          let director = '';
-          if (entryType==='series') {
-            const credRes = await tmdbFetch(`/${type}/${tmdbId}/credits?language=zh-CN`);
-            const credData = await credRes.json();
-            const creator = (credData.crew||[]).find(c=>c.job==='Director'||c.job==='Executive Producer');
-            director = creator?.name || '';
-          } else {
-            const detail = await fetchMovieDetail(tmdbId);
-            director = detail?.director || '';
-            if (detail?.overview || detail?.poster_path || detail?.year) {
-              if (detail.year && !$['year'].value) $['year'].value = detail.year;
-              if (detail.poster_path && !$['posterPath'].value) $['posterPath'].value = detail.poster_path;
-            }
-          }
-          if (director) $['director'].value = director;
-        } catch(e){}
-        toast('已自动填入信息');
+      item.addEventListener('click', async e=>{
+        const movie = movieFromSearchElement(item);
+        if (e.target.closest('.sr-watch-btn')) {
+          e.stopPropagation();
+          await addToWatchlist(movie);
+          return;
+        }
+        if (e.target.closest('.sr-next-btn')) {
+          e.stopPropagation();
+          await addToCoupleQueue(movie);
+          return;
+        }
+        await fillFromTmdbSearchItem(item);
       });
     });
   } catch(e) {
@@ -1576,10 +1633,25 @@ async function fetchTmdbDetail(tmdbId) {
 }
 
 // ===== RENDER LIST =====
+let listMode = 'entries';
 let listType = 'movie';
 let ownerFilter = 'all';
 let listPageSize = 20;
 let listPageNum = 1;
+
+$['listModeTabs'].addEventListener('click', e => {
+  const btn = e.target.closest('button[data-lmode]');
+  if (!btn) return;
+  listMode = btn.dataset.lmode;
+  document.querySelectorAll('#listModeTabs button').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  if (listMode === 'watchlist') {
+    watchlistPage = 1;
+  } else {
+    listPageNum = 1;
+  }
+  renderList();
+});
 
 document.querySelectorAll('#listSubtabs button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
@@ -1652,6 +1724,16 @@ function getFilteredSortedGroups() {
 }
 
 function renderList() {
+  const entriesView = $['listEntriesView'];
+  const watchlistView = $['listWatchlistView'];
+  if (listMode === 'watchlist') {
+    entriesView?.classList.add('hidden');
+    watchlistView?.classList.remove('hidden');
+    renderWatchlistPanel();
+    return;
+  }
+  entriesView?.classList.remove('hidden');
+  watchlistView?.classList.add('hidden');
   const container = $['movieList'];
   const empty = $['emptyState'];
   const loading = $['loadingState'];
@@ -2236,6 +2318,7 @@ let blockedMovieIds = new Set();
 let blockedMovieReasons = {};
 let blockedMovieDetails = {};
 let blockedPage = 1;
+let partnerBlockedMovieIds = new Set();
 
 function buildBlockedFeedback() {
   return [...blockedMovieIds].map(tmdbId => ({
@@ -2275,7 +2358,7 @@ async function loadWatchlist() {
       };
     }
   });
-  if ($['watchlistModal']?.classList.contains('open')) renderWatchlistPanel();
+  if (getActiveTab() === 'list' && listMode === 'watchlist') renderWatchlistPanel();
   if (getActiveTab() === 'discover') renderDiscover();
 }
 
@@ -2296,6 +2379,24 @@ async function loadBlockedMovies() {
     blockedMovieReasons = {};
     data.forEach(r => { if (r.reason) blockedMovieReasons[r.tmdb_id] = r.reason; });
   }
+}
+
+async function loadCoupleBlockedMovies() {
+  partnerBlockedMovieIds = new Set();
+  const partnerId = getCouplePartnerId();
+  if (!currentUser || !partnerId) return;
+  const { data, error } = await db.from('blocked_movies')
+    .select('tmdb_id')
+    .eq('user_id', partnerId);
+  if (error) {
+    console.warn('loadCoupleBlockedMovies failed:', error.message);
+    return;
+  }
+  partnerBlockedMovieIds = new Set((data || []).map(r => r.tmdb_id));
+}
+
+function buildCoupleBlockedIds() {
+  return [...new Set([...blockedMovieIds, ...partnerBlockedMovieIds])];
 }
 
 async function hydrateBlockedMovieDetails(tmdbIds) {
@@ -2435,7 +2536,17 @@ $['discoverContent'].addEventListener('click', e => {
   e.stopPropagation();
   const tmdbId = parseInt(btn.dataset.tmdbId);
   if (!tmdbId) return;
-  toggleWatchlist(tmdbId);
+  toggleWatchlist(tmdbId, discoverMovieMap[tmdbId]);
+});
+
+// Delegated click for couple queue buttons in discover grid
+$['discoverContent'].addEventListener('click', e => {
+  const btn = e.target.closest('.dc-next-btn');
+  if (!btn) return;
+  e.stopPropagation();
+  const tmdbId = parseInt(btn.dataset.tmdbId);
+  if (!tmdbId) return;
+  addToCoupleQueue(discoverMovieMap[tmdbId] || { id: tmdbId });
 });
 
 // Delegated click for discover cards → movie detail
@@ -2450,26 +2561,44 @@ $['discoverContent'].addEventListener('click', e=>{
 });
 
 // ===== BLOCKED MOVIES MANAGEMENT =====
-async function toggleWatchlist(tmdbId) {
+function normalizeListMovie(movieOrId) {
+  const raw = typeof movieOrId === 'object' && movieOrId ? movieOrId : { id: movieOrId };
+  const tmdbId = Number(raw.tmdb_id || raw.id);
+  if (!Number.isFinite(tmdbId) || tmdbId <= 0) return null;
+  const release = raw.release_date || raw.first_air_date || '';
+  return {
+    id: tmdbId,
+    tmdb_id: tmdbId,
+    title: raw.title || raw.name || ('TMDB #' + tmdbId),
+    year: raw.year || parseInt(String(release).slice(0, 4)) || null,
+    release_date: release,
+    poster_path: raw.poster_path || '',
+    genre_ids: raw.genre_ids || [],
+    vote_average: raw.vote_average || 0,
+    original_language: raw.original_language || ''
+  };
+}
+
+async function toggleWatchlist(tmdbId, movieOverride = null) {
   if (!currentUser || !tmdbId) return;
-  const movie = discoverMovieMap[tmdbId];
-  if (watchlistIds.has(tmdbId)) {
+  const movie = normalizeListMovie(movieOverride || discoverMovieMap[tmdbId] || watchlistMovies[tmdbId] || { id: tmdbId });
+  if (!movie) return;
+  if (watchlistIds.has(movie.tmdb_id)) {
     const { error } = await db.from('watchlist_movies')
       .delete()
       .eq('user_id', currentUser.id)
-      .eq('tmdb_id', tmdbId);
+      .eq('tmdb_id', movie.tmdb_id);
     if (error) { toast('移除想看失败: ' + error.message); return; }
-    watchlistIds.delete(tmdbId);
-    delete watchlistMovies[tmdbId];
+    watchlistIds.delete(movie.tmdb_id);
+    delete watchlistMovies[movie.tmdb_id];
     toast('已移出想看');
   } else {
-    const year = parseInt((movie?.release_date || '').slice(0, 4)) || null;
     const { error } = await db.from('watchlist_movies').insert({
       user_id: currentUser.id,
-      tmdb_id: tmdbId,
-      title: movie?.title || ('TMDB #' + tmdbId),
-      year,
-      poster_path: movie?.poster_path || ''
+      tmdb_id: movie.tmdb_id,
+      title: movie.title,
+      year: movie.year || null,
+      poster_path: movie.poster_path || ''
     });
     if (error) {
       toast(/watchlist_movies|schema cache|does not exist|relation/i.test(error.message || '')
@@ -2477,39 +2606,44 @@ async function toggleWatchlist(tmdbId) {
         : '加入想看失败: ' + error.message);
       return;
     }
-    watchlistIds.add(tmdbId);
-    watchlistMovies[tmdbId] = { tmdb_id: tmdbId, title: movie?.title || ('TMDB #' + tmdbId), year, poster_path: movie?.poster_path || '' };
+    watchlistIds.add(movie.tmdb_id);
+    watchlistMovies[movie.tmdb_id] = {
+      tmdb_id: movie.tmdb_id,
+      title: movie.title,
+      year: movie.year || null,
+      poster_path: movie.poster_path || '',
+      release_date: movie.release_date || ''
+    };
+    discoverMovieMap[movie.tmdb_id] = movie;
     toast('已加入想看');
   }
   renderDiscover();
-  if ($['watchlistModal']?.classList.contains('open')) renderWatchlistPanel();
+  if (getActiveTab() === 'list' && listMode === 'watchlist') renderWatchlistPanel();
 }
 
-// Open watchlist modal from user dropdown
-$['watchlistMgmtBtn'].addEventListener('click', () => {
+async function addToWatchlist(movieOrId) {
+  const movie = normalizeListMovie(movieOrId);
+  if (!movie) return;
+  if (watchlistIds.has(movie.tmdb_id)) {
+    toast('已经在想看清单里');
+    return;
+  }
+  await toggleWatchlist(movie.tmdb_id, movie);
+}
+
+$['coupleSettingsBtn']?.addEventListener('click', () => {
   $['userMenu'].classList.remove('open');
-  watchlistPage = 1;
-  renderWatchlistPanel();
-  $['watchlistModal'].classList.add('open');
+  switchTab('couple');
 });
 
-// Close watchlist modal
-$['watchlistModalClose'].addEventListener('click', () => {
-  $['watchlistModal'].classList.remove('open');
-});
-$['watchlistModal'].addEventListener('click', e => {
-  if (e.target === e.currentTarget) $['watchlistModal'].classList.remove('open');
-});
-
-// Delegated clicks inside watchlist modal: rate + remove + pagination
-$['watchlistModal'].addEventListener('click', e => {
+// Delegated clicks inside list-page watchlist: rate + remove + pagination
+$['listWatchlistView'].addEventListener('click', e => {
   const rateBtn = e.target.closest('.dc-watch-rate-btn');
   if (rateBtn) {
     e.stopPropagation();
     const tmdbId = parseInt(rateBtn.dataset.tmdbId);
     const movie = discoverMovieMap[tmdbId] || watchlistMovies[tmdbId];
     if (movie) {
-      $['watchlistModal'].classList.remove('open');
       openQuickRate({ id: tmdbId, title: movie.title, year: movie.year, poster_path: movie.poster_path });
     }
     return;
@@ -2526,7 +2660,7 @@ $['watchlistModal'].addEventListener('click', e => {
     watchlistPage = parseInt(pgBtn.getAttribute('data-wl-pg'));
     if (!isNaN(watchlistPage)) {
       renderWatchlistPanel();
-      $['watchlistModal'].querySelector('.modal').scrollTop = 0;
+      window.scrollTo({top:0, behavior:'smooth'});
     }
   }
 });
@@ -2576,6 +2710,668 @@ function renderWatchlistPanel() {
     $['watchlistPagination'].innerHTML = buildPaginationHTML(watchlistPage, totalPages, 'data-wl-pg', 'list-pages');
   }
 }
+
+// ===== COUPLE =====
+function isMissingRelationError(error) {
+  return /schema cache|does not exist|relation|couples|couple_watch_queue/i.test(error?.message || '');
+}
+
+function getCouplePartnerId(couple = activeCouple) {
+  if (!couple || !currentUser) return null;
+  return couple.user_a === currentUser.id ? couple.user_b : couple.user_a;
+}
+
+function invalidateCoupleRecommendations() {
+  coupleRecommendations = null;
+  coupleRecommendationLoading = false;
+  coupleRecommendationState = 'idle';
+}
+
+async function loadCoupleState() {
+  if (!currentUser) return;
+  const { data, error } = await db.from('couples')
+    .select('*')
+    .or(`user_a.eq.${currentUser.id},user_b.eq.${currentUser.id}`)
+    .order('updated_at', { ascending: false });
+  if (error) {
+    if (isMissingRelationError(error)) {
+      couplesAvailable = false;
+      activeCouple = null;
+      pendingCouples = [];
+      couplePartner = null;
+    } else {
+      console.warn('loadCoupleState failed:', error.message);
+    }
+    return;
+  }
+  couplesAvailable = true;
+  const rows = data || [];
+  activeCouple = rows.find(c => c.status === 'active') || null;
+  pendingCouples = rows.filter(c => c.status === 'pending');
+  const partnerId = getCouplePartnerId(activeCouple);
+  couplePartner = partnerId ? allProfiles[partnerId] || { user_id: partnerId, display_name: '对方' } : null;
+  if (!activeCouple) {
+    coupleQueue = [];
+  }
+  invalidateCoupleRecommendations();
+}
+
+async function loadCoupleQueue() {
+  if (!currentUser || !activeCouple) {
+    coupleQueue = [];
+    return;
+  }
+  const { data, error } = await db.from('couple_watch_queue')
+    .select('*')
+    .eq('couple_id', activeCouple.id)
+    .order('position', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (error) {
+    if (isMissingRelationError(error)) {
+      coupleQueueAvailable = false;
+      coupleQueue = [];
+    } else {
+      console.warn('loadCoupleQueue failed:', error.message);
+    }
+    return;
+  }
+  coupleQueueAvailable = true;
+  coupleQueue = data || [];
+  coupleQueue.forEach(m => {
+    discoverMovieMap[m.tmdb_id] = {
+      id: m.tmdb_id,
+      title: m.title,
+      year: m.year,
+      release_date: m.year ? String(m.year) : '',
+      poster_path: m.poster_path || ''
+    };
+  });
+}
+
+async function bindCoupleWith(userId) {
+  if (!currentUser || !userId || userId === currentUser.id) return;
+  if (activeCouple) {
+    toast('已经绑定 Couple');
+    return;
+  }
+  const { error } = await db.from('couples').insert({
+    user_a: currentUser.id,
+    user_b: userId,
+    requested_by: currentUser.id,
+    status: 'pending'
+  });
+  if (error) {
+    toast(isMissingRelationError(error) ? 'Couple 表尚未创建，请先执行升级 SQL' : '绑定请求失败: ' + error.message);
+    return;
+  }
+  toast('已发送绑定请求');
+  await loadCoupleState();
+  renderCouple();
+}
+
+async function confirmCouple(coupleId) {
+  const { error } = await db.from('couples')
+    .update({ status: 'active', updated_at: new Date().toISOString() })
+    .eq('id', coupleId);
+  if (error) {
+    toast('确认失败: ' + error.message);
+    return;
+  }
+  toast('Couple 已绑定');
+  await loadCoupleState();
+  await loadCoupleBlockedMovies();
+  await loadCoupleQueue();
+  renderCouple();
+}
+
+async function disconnectCouple(coupleId) {
+  if (!confirm('解除 Couple 后，共享下次看队列也会一起删除，确认继续？')) return;
+  const { error } = await db.from('couples').delete().eq('id', coupleId);
+  if (error) {
+    toast('解除失败: ' + error.message);
+    return;
+  }
+  activeCouple = null;
+  couplePartner = null;
+  coupleQueue = [];
+  partnerBlockedMovieIds = new Set();
+  invalidateCoupleRecommendations();
+  toast('已解除 Couple');
+  renderCouple();
+  renderDiscover();
+}
+
+async function addToCoupleQueue(movieOrId) {
+  if (!currentUser) return;
+  if (!activeCouple) {
+    toast('先绑定 Couple 后才能加入下次看');
+    return;
+  }
+  const movie = normalizeListMovie(movieOrId);
+  if (!movie) return;
+  if (coupleQueue.some(m => Number(m.tmdb_id) === movie.tmdb_id)) {
+    toast('已经在下次看队列里');
+    return;
+  }
+  const maxPosition = coupleQueue.reduce((max, m) => Math.max(max, Number(m.position || 0)), 0);
+  const { data, error } = await db.from('couple_watch_queue').insert({
+    couple_id: activeCouple.id,
+    tmdb_id: movie.tmdb_id,
+    title: movie.title,
+    year: movie.year || null,
+    poster_path: movie.poster_path || '',
+    position: maxPosition + 1,
+    added_by: currentUser.id
+  }).select('*').single();
+  if (error) {
+    toast(isMissingRelationError(error) ? '下次看表尚未创建，请先执行升级 SQL' : '加入下次看失败: ' + error.message);
+    return;
+  }
+  if (data) coupleQueue.push(data);
+  discoverMovieMap[movie.tmdb_id] = movie;
+  toast('已加入下次看');
+  if (getActiveTab() === 'couple') renderCouple();
+}
+
+async function removeCoupleQueueItem(queueId) {
+  const item = coupleQueue.find(q => q.id === queueId);
+  if (!item) return;
+  const { error } = await db.from('couple_watch_queue').delete().eq('id', queueId);
+  if (error) {
+    toast('移除失败: ' + error.message);
+    return;
+  }
+  coupleQueue = coupleQueue.filter(q => q.id !== queueId);
+  await normalizeCoupleQueuePositions(false);
+  toast('已移出下次看');
+  renderCouple();
+}
+
+async function normalizeCoupleQueuePositions(shouldReload = true) {
+  if (!activeCouple || !coupleQueue.length) return;
+  coupleQueue.sort((a, b) => Number(a.position || 0) - Number(b.position || 0));
+  const updates = coupleQueue.map((item, idx) => ({
+    id: item.id,
+    position: idx + 1
+  }));
+  await Promise.all(updates.map(u => db.from('couple_watch_queue').update({ position: u.position }).eq('id', u.id)));
+  coupleQueue.forEach((item, idx) => { item.position = idx + 1; });
+  if (shouldReload) await loadCoupleQueue();
+}
+
+async function moveCoupleQueueItem(queueId, dir) {
+  const idx = coupleQueue.findIndex(q => q.id === queueId);
+  const nextIdx = idx + dir;
+  if (idx < 0 || nextIdx < 0 || nextIdx >= coupleQueue.length) return;
+  const a = coupleQueue[idx];
+  const b = coupleQueue[nextIdx];
+  const aPos = a.position;
+  a.position = b.position;
+  b.position = aPos;
+  coupleQueue.splice(idx, 1, b);
+  coupleQueue.splice(nextIdx, 1, a);
+  await Promise.all([
+    db.from('couple_watch_queue').update({ position: a.position }).eq('id', a.id),
+    db.from('couple_watch_queue').update({ position: b.position }).eq('id', b.id)
+  ]);
+  renderCouple();
+}
+
+function getCommonCouplePairs() {
+  const partnerId = getCouplePartnerId();
+  if (!currentUser || !partnerId) return [];
+  const mine = new Map();
+  const theirs = new Map();
+  allEntries.filter(e => e.type === 'movie' && e.tmdb_id).forEach(e => {
+    if (e.user_id === currentUser.id && !mine.has(e.tmdb_id)) mine.set(e.tmdb_id, e);
+    if (e.user_id === partnerId && !theirs.has(e.tmdb_id)) theirs.set(e.tmdb_id, e);
+  });
+  return [...mine.keys()].filter(id => theirs.has(id)).map(id => ({ tmdb_id: id, mine: mine.get(id), partner: theirs.get(id) }));
+}
+
+function calcCoupleCompatibility() {
+  const pairs = getCommonCouplePairs();
+  if (!pairs.length) return { sample: 0, total: 0, dim: 0, overall: 0, insufficient: true };
+  const totalCompat = pairs.map(p => Math.max(0, 100 - Math.abs(getEntryScore(p.mine) - getEntryScore(p.partner)) * 10));
+  const dimCompat = pairs.map(p => {
+    const vals = Object.keys(WEIGHTS).map(dim => Math.max(0, 100 - Math.abs((p.mine.ratings?.[dim] || 5) - (p.partner.ratings?.[dim] || 5)) * 10));
+    return vals.reduce((s, v) => s + v, 0) / vals.length;
+  });
+  const total = totalCompat.reduce((s, v) => s + v, 0) / totalCompat.length;
+  const dim = dimCompat.reduce((s, v) => s + v, 0) / dimCompat.length;
+  return {
+    sample: pairs.length,
+    total: Math.round(total),
+    dim: Math.round(dim),
+    overall: Math.round(total * 0.7 + dim * 0.3),
+    insufficient: pairs.length < 5
+  };
+}
+
+function renderScoreMeter(label, value, sub = '') {
+  const clamped = Math.max(0, Math.min(100, Number(value) || 0));
+  return `
+    <div class="couple-meter">
+      <div class="couple-meter-head"><span>${esc(label)}</span><strong>${Math.round(clamped)}</strong></div>
+      <div class="couple-meter-track"><div style="width:${clamped}%"></div></div>
+      ${sub ? `<p>${esc(sub)}</p>` : ''}
+    </div>
+  `;
+}
+
+function averageDims(entries) {
+  const result = {};
+  Object.keys(WEIGHTS).forEach(dim => {
+    result[dim] = entries.length
+      ? entries.reduce((s, e) => s + (e.ratings?.[dim] || 5), 0) / entries.length
+      : 0;
+  });
+  return result;
+}
+
+function getEntryGenres(entry) {
+  const detail = entry.tmdb_id ? movieCache.get(entry.tmdb_id) : null;
+  if (detail?.genres?.length) return detail.genres;
+  if (detail?.genre_ids?.length) return detail.genre_ids.map(id => genreMap[id]).filter(Boolean);
+  return [];
+}
+
+function topGenrePreferences(entries) {
+  const weights = {};
+  entries.filter(e => getEntryScore(e) >= 7).forEach(e => {
+    const w = Math.max(1, getEntryScore(e) - 6);
+    getEntryGenres(e).forEach(g => { weights[g] = (weights[g] || 0) + w; });
+  });
+  return Object.entries(weights).sort((a, b) => b[1] - a[1]).slice(0, 5);
+}
+
+function decadePreferences(entries) {
+  const byDecade = {};
+  entries.forEach(e => {
+    const y = Number(e.year || '');
+    if (!y) return;
+    const dec = Math.floor(y / 10) * 10;
+    if (!byDecade[dec]) byDecade[dec] = { total: 0, count: 0 };
+    byDecade[dec].total += getEntryScore(e);
+    byDecade[dec].count += 1;
+  });
+  return Object.entries(byDecade)
+    .map(([dec, v]) => ({ decade: dec, avg: v.total / v.count, count: v.count }))
+    .sort((a, b) => b.avg - a.avg || b.count - a.count)
+    .slice(0, 4);
+}
+
+function calcCouplePreferenceComparison() {
+  const partnerId = getCouplePartnerId();
+  const mine = allEntries.filter(e => e.user_id === currentUser?.id && e.type === 'movie');
+  const partner = allEntries.filter(e => e.user_id === partnerId && e.type === 'movie');
+  const pairs = getCommonCouplePairs();
+  let totalSplit = null;
+  let dimSplit = null;
+  pairs.forEach(p => {
+    const totalDiff = Math.abs(getEntryScore(p.mine) - getEntryScore(p.partner));
+    if (!totalSplit || totalDiff > totalSplit.diff) totalSplit = { diff: totalDiff, entry: p.mine, mine: getEntryScore(p.mine), partner: getEntryScore(p.partner) };
+    Object.keys(WEIGHTS).forEach(dim => {
+      const diff = Math.abs((p.mine.ratings?.[dim] || 5) - (p.partner.ratings?.[dim] || 5));
+      if (!dimSplit || diff > dimSplit.diff) dimSplit = { diff, dim, entry: p.mine, mine: p.mine.ratings?.[dim] || 5, partner: p.partner.ratings?.[dim] || 5 };
+    });
+  });
+  return {
+    mineGenres: topGenrePreferences(mine),
+    partnerGenres: topGenrePreferences(partner),
+    mineDecades: decadePreferences(mine),
+    partnerDecades: decadePreferences(partner),
+    mineDims: averageDims(mine),
+    partnerDims: averageDims(partner),
+    totalSplit,
+    dimSplit
+  };
+}
+
+function warmCouplePreferenceDetails() {
+  const partnerId = getCouplePartnerId();
+  if (!partnerId) return;
+  const ids = allEntries
+    .filter(e => e.type === 'movie' && e.tmdb_id && (e.user_id === currentUser?.id || e.user_id === partnerId) && getEntryScore(e) >= 7)
+    .map(e => e.tmdb_id)
+    .filter((id, idx, arr) => arr.indexOf(id) === idx)
+    .filter(id => !movieCache.get(id)?.genres?.length)
+    .slice(0, 20);
+  const key = ids.join(',');
+  if (!ids.length || key === couplePreferenceWarmKey) return;
+  couplePreferenceWarmKey = key;
+  Promise.allSettled(ids.map(id => fetchMovieDetail(id))).then(() => {
+    if (getActiveTab() === 'couple') renderCouple();
+  });
+}
+
+function renderPreferenceChips(items, emptyText) {
+  if (!items.length) return `<span class="couple-muted">${esc(emptyText)}</span>`;
+  return items.map(([label, value]) => `<span class="couple-chip">${esc(label)} <em>${Number(value).toFixed(1)}</em></span>`).join('');
+}
+
+function renderDecadeChips(items, emptyText) {
+  if (!items.length) return `<span class="couple-muted">${esc(emptyText)}</span>`;
+  return items.map(d => `<span class="couple-chip">${esc(d.decade)}s <em>${d.avg.toFixed(1)}</em></span>`).join('');
+}
+
+function renderCouplePreferenceHTML(pref) {
+  const partnerName = couplePartner?.display_name || '对方';
+  const dimRows = Object.entries(DIM_LABELS).map(([dim, label]) => {
+    const mine = pref.mineDims[dim] || 0;
+    const partner = pref.partnerDims[dim] || 0;
+    return `
+      <div class="couple-compare-row">
+        <span>${esc(label)}</span>
+        <div class="couple-compare-bars">
+          <i style="width:${mine * 10}%"></i>
+          <b style="width:${partner * 10}%"></b>
+        </div>
+        <em>${mine.toFixed(1)} / ${partner.toFixed(1)}</em>
+      </div>
+    `;
+  }).join('');
+  return `
+    <div class="couple-section">
+      <div class="couple-section-title">偏好对比</div>
+      <div class="couple-pref-grid">
+        <div>
+          <h4>我的类型</h4>
+          <div class="couple-chip-row">${renderPreferenceChips(pref.mineGenres, '暂无类型数据')}</div>
+        </div>
+        <div>
+          <h4>${esc(partnerName)} 的类型</h4>
+          <div class="couple-chip-row">${renderPreferenceChips(pref.partnerGenres, '暂无类型数据')}</div>
+        </div>
+        <div>
+          <h4>我的年代</h4>
+          <div class="couple-chip-row">${renderDecadeChips(pref.mineDecades, '暂无年代数据')}</div>
+        </div>
+        <div>
+          <h4>${esc(partnerName)} 的年代</h4>
+          <div class="couple-chip-row">${renderDecadeChips(pref.partnerDecades, '暂无年代数据')}</div>
+        </div>
+      </div>
+      <div class="couple-dim-compare">${dimRows}</div>
+      <div class="couple-split-grid">
+        <div>
+          <span>总分分歧</span>
+          <strong>${pref.totalSplit ? esc(pref.totalSplit.entry.title) : '暂无共同电影'}</strong>
+          <p>${pref.totalSplit ? `差 ${pref.totalSplit.diff.toFixed(1)} 分，${pref.totalSplit.mine.toFixed(1)} / ${pref.totalSplit.partner.toFixed(1)}` : '共同样本越多越准'}</p>
+        </div>
+        <div>
+          <span>维度分歧</span>
+          <strong>${pref.dimSplit ? `${esc(pref.dimSplit.entry.title)} · ${esc(DIM_LABELS[pref.dimSplit.dim])}` : '暂无共同电影'}</strong>
+          <p>${pref.dimSplit ? `差 ${pref.dimSplit.diff.toFixed(0)} 档，${pref.dimSplit.mine} / ${pref.dimSplit.partner}` : '共同样本越多越准'}</p>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function loadCoupleRecommendations(force = false) {
+  if (!activeCouple || !currentUser || coupleRecommendationLoading) return;
+  if (!force && (coupleRecommendationState === 'ready' || coupleRecommendationState === 'insufficient' || coupleRecommendationState === 'error')) return;
+  coupleRecommendationLoading = true;
+  coupleRecommendationState = 'loading';
+  try {
+    const partnerId = getCouplePartnerId();
+    const res = await fetch(TMDB_PROXY + '/recommend', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'couple',
+        entries: buildRecommendationEntries(),
+        userId: currentUser.id,
+        partnerUserId: partnerId,
+        blockedIds: buildCoupleBlockedIds(),
+        blockedMovies: buildBlockedFeedback(),
+        excludeIds: coupleQueue.map(m => m.tmdb_id)
+      })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `双人推荐接口异常 (${res.status})`);
+    if (data.movies === null) {
+      coupleRecommendations = null;
+      coupleRecommendationState = 'insufficient';
+    } else {
+      coupleRecommendations = data.movies || [];
+      coupleRecommendationState = 'ready';
+    }
+  } catch (e) {
+    coupleRecommendations = [];
+    coupleRecommendationState = 'error';
+    toast('双人推荐失败: ' + (e.message || e));
+  } finally {
+    coupleRecommendationLoading = false;
+  }
+}
+
+function renderCoupleRecommendationsHTML() {
+  if (!activeCouple) return '';
+  if (coupleRecommendationState === 'idle' && !coupleRecommendationLoading) {
+    loadCoupleRecommendations().then(() => {
+      if (getActiveTab() === 'couple') renderCouple();
+    });
+  }
+  const ratedTmdbIds = new Set(allEntries.filter(e => e.user_id === currentUser?.id && e.tmdb_id).map(e => 'tmdb_' + e.tmdb_id));
+  const body = coupleRecommendationLoading || coupleRecommendationState === 'loading'
+    ? '<div class="discover-spinner"><div class="spinner"></div></div>'
+    : coupleRecommendationState === 'insufficient'
+      ? '<div class="empty-state"><p>双方各评价 5 部、合计 25 部电影后生成双人推荐</p></div>'
+      : coupleRecommendations.length
+        ? `<div class="discover-grid">${coupleRecommendations.slice(0, 8).map(m => renderDiscoverCard(m, ratedTmdbIds, false)).join('')}</div>`
+        : '<div class="empty-state"><p>暂时没有可用的双人推荐</p></div>';
+  return `
+    <div class="couple-section">
+      <div class="couple-section-head">
+        <div class="couple-section-title">双人推荐</div>
+        <button class="btn btn-xs btn-secondary" data-couple-refresh-rec>换一批</button>
+      </div>
+      ${body}
+    </div>
+  `;
+}
+
+function renderCoupleQueueHTML() {
+  if (!activeCouple) return '';
+  if (!coupleQueueAvailable) {
+    return `<div class="couple-section"><div class="empty-state"><p>下次看表尚未创建，请先执行升级 SQL</p></div></div>`;
+  }
+  const rows = coupleQueue.length
+    ? coupleQueue.map((m, idx) => {
+        const addedBy = allProfiles[m.added_by]?.display_name || '未知';
+        const poster = m.poster_path ? posterUrl(m.poster_path) : '';
+        return `
+          <div class="queue-row" data-queue-id="${m.id}">
+            <div class="queue-rank">${idx + 1}</div>
+            ${poster ? `<img src="${poster}" alt="">` : '<div class="queue-poster"></div>'}
+            <div class="queue-info">
+              <strong>${esc(m.title)}</strong>
+              <span>${m.year || '未知'} · ${esc(addedBy)} 加入</span>
+            </div>
+            <div class="queue-actions">
+              <button class="btn btn-xs btn-secondary" data-queue-up ${idx===0?'disabled':''}>上移</button>
+              <button class="btn btn-xs btn-secondary" data-queue-down ${idx===coupleQueue.length-1?'disabled':''}>下移</button>
+              <button class="btn btn-xs btn-secondary" data-queue-rate data-tmdb-id="${m.tmdb_id}">评分</button>
+              <button class="btn btn-xs btn-danger" data-queue-remove>移除</button>
+            </div>
+          </div>
+        `;
+      }).join('')
+    : '<div class="empty-state"><p>还没有下次看的电影</p><p style="font-size:0.8rem;color:var(--text2);margin-top:8px">可从发现页或添加评价搜索结果加入</p></div>';
+  return `
+    <div class="couple-section">
+      <div class="couple-section-title">下次看</div>
+      <div class="queue-list">${rows}</div>
+    </div>
+  `;
+}
+
+function renderCoupleUserResults(query = '') {
+  const target = document.getElementById('coupleUserResults');
+  if (!target) return;
+  const q = query.trim().toLowerCase();
+  const activePartnerIds = new Set([currentUser?.id, ...pendingCouples.flatMap(c => [c.user_a, c.user_b])]);
+  const users = Object.values(allProfiles)
+    .filter(p => p.user_id && !activePartnerIds.has(p.user_id))
+    .filter(p => !q || (p.display_name || '').toLowerCase().includes(q))
+    .slice(0, 8);
+  target.innerHTML = users.length
+    ? users.map(p => `<button class="couple-user-result" data-bind-user="${p.user_id}"><span>${esc(p.display_name || '未命名')}</span><em>发送绑定请求</em></button>`).join('')
+    : '<div class="couple-muted">没有可绑定用户</div>';
+}
+
+function renderCoupleUnbound() {
+  const received = pendingCouples.filter(c => c.requested_by !== currentUser?.id);
+  const sent = pendingCouples.filter(c => c.requested_by === currentUser?.id);
+  return `
+    <div class="couple-empty">
+      <h3>绑定 Couple 后启用双人观影功能</h3>
+      <p>绑定后可查看评分默契度、偏好对比、双人推荐，并共同维护“下次看”队列。</p>
+      ${received.length ? `
+        <div class="couple-pending">
+          ${received.map(c => {
+            const inviter = allProfiles[c.requested_by]?.display_name || '对方';
+            return `<div class="couple-pending-row"><span>${esc(inviter)} 请求绑定 Couple</span><button class="btn btn-sm btn-primary" data-confirm-couple="${c.id}">确认绑定</button></div>`;
+          }).join('')}
+        </div>
+      ` : ''}
+      ${sent.length ? `
+        <div class="couple-pending">
+          ${sent.map(c => {
+            const partnerId = c.user_a === currentUser.id ? c.user_b : c.user_a;
+            const partnerName = allProfiles[partnerId]?.display_name || '对方';
+            return `<div class="couple-pending-row"><span>已向 ${esc(partnerName)} 发送请求，等待确认</span><button class="btn btn-sm btn-danger" data-disconnect-couple="${c.id}">撤销</button></div>`;
+          }).join('')}
+        </div>
+      ` : ''}
+      <div class="couple-bind-box">
+        <input id="coupleUserSearch" type="text" placeholder="搜索用户名绑定 Couple">
+        <div id="coupleUserResults" class="couple-user-results"></div>
+      </div>
+    </div>
+  `;
+}
+
+function renderCouple() {
+  const container = $['coupleContent'];
+  if (!container) return;
+  if (!couplesAvailable) {
+    container.innerHTML = '<div class="empty-state"><p>Couple 表尚未创建，请先执行升级 SQL</p></div>';
+    return;
+  }
+  if (!activeCouple) {
+    container.innerHTML = renderCoupleUnbound();
+    renderCoupleUserResults('');
+    return;
+  }
+  const partnerName = couplePartner?.display_name || '对方';
+  warmCouplePreferenceDetails();
+  const myCount = allEntries.filter(e => e.user_id === currentUser.id && e.type === 'movie').length;
+  const partnerCount = allEntries.filter(e => e.user_id === getCouplePartnerId() && e.type === 'movie').length;
+  const commonPairs = getCommonCouplePairs();
+  const compat = calcCoupleCompatibility();
+  const pref = calcCouplePreferenceComparison();
+  container.innerHTML = `
+    <div class="couple-hero">
+      <div>
+        <p>已绑定</p>
+        <h3>${esc(currentProfile?.display_name || '我')} & ${esc(partnerName)}</h3>
+      </div>
+      <button class="btn btn-xs btn-danger" data-disconnect-couple="${activeCouple.id}">解除</button>
+    </div>
+    <div class="couple-stat-grid">
+      <div><strong>${myCount}</strong><span>我的电影</span></div>
+      <div><strong>${partnerCount}</strong><span>${esc(partnerName)} 的电影</span></div>
+      <div><strong>${commonPairs.length}</strong><span>共同电影</span></div>
+    </div>
+    <div class="couple-section">
+      <div class="couple-section-title">评分默契度</div>
+      ${compat.insufficient ? '<div class="couple-note">共同样本少于 5 部，以下为临时值。</div>' : ''}
+      <div class="couple-meter-grid">
+        ${renderScoreMeter('总默契', compat.overall, `共同样本 ${compat.sample} 部`)}
+        ${renderScoreMeter('总分默契', compat.total)}
+        ${renderScoreMeter('六维默契', compat.dim)}
+      </div>
+    </div>
+    ${renderCouplePreferenceHTML(pref)}
+    ${renderCoupleRecommendationsHTML()}
+    ${renderCoupleQueueHTML()}
+  `;
+}
+
+$['coupleContent'].addEventListener('input', e => {
+  if (e.target.id === 'coupleUserSearch') renderCoupleUserResults(e.target.value);
+});
+
+$['coupleContent'].addEventListener('click', async e => {
+  const bindBtn = e.target.closest('[data-bind-user]');
+  if (bindBtn) {
+    await bindCoupleWith(bindBtn.dataset.bindUser);
+    return;
+  }
+  const confirmBtn = e.target.closest('[data-confirm-couple]');
+  if (confirmBtn) {
+    await confirmCouple(confirmBtn.dataset.confirmCouple);
+    return;
+  }
+  const disconnectBtn = e.target.closest('[data-disconnect-couple]');
+  if (disconnectBtn) {
+    await disconnectCouple(disconnectBtn.dataset.disconnectCouple);
+    return;
+  }
+  const refreshBtn = e.target.closest('[data-couple-refresh-rec]');
+  if (refreshBtn) {
+    coupleRecommendations = null;
+    await loadCoupleRecommendations(true);
+    renderCouple();
+    return;
+  }
+  const queueRow = e.target.closest('.queue-row');
+  if (queueRow) {
+    const queueId = queueRow.dataset.queueId;
+    if (e.target.closest('[data-queue-up]')) await moveCoupleQueueItem(queueId, -1);
+    else if (e.target.closest('[data-queue-down]')) await moveCoupleQueueItem(queueId, 1);
+    else if (e.target.closest('[data-queue-remove]')) await removeCoupleQueueItem(queueId);
+    else if (e.target.closest('[data-queue-rate]')) {
+      const item = coupleQueue.find(q => q.id === queueId);
+      if (item) openQuickRate({ id: item.tmdb_id, title: item.title, year: item.year, poster_path: item.poster_path });
+    }
+    return;
+  }
+  const rateBtn = e.target.closest('.dc-rate-btn');
+  if (rateBtn) {
+    e.stopPropagation();
+    const tmdbId = parseInt(rateBtn.dataset.tmdbId);
+    const movie = discoverMovieMap[tmdbId] || (coupleRecommendations || []).find(m => m.id === tmdbId);
+    if (movie) openQuickRate(movie);
+    return;
+  }
+  const watchBtn = e.target.closest('.dc-watch-btn');
+  if (watchBtn) {
+    e.stopPropagation();
+    const tmdbId = parseInt(watchBtn.dataset.tmdbId);
+    const movie = discoverMovieMap[tmdbId] || (coupleRecommendations || []).find(m => m.id === tmdbId);
+    await toggleWatchlist(tmdbId, movie);
+    renderCouple();
+    return;
+  }
+  const nextBtn = e.target.closest('.dc-next-btn');
+  if (nextBtn) {
+    e.stopPropagation();
+    const tmdbId = parseInt(nextBtn.dataset.tmdbId);
+    const movie = discoverMovieMap[tmdbId] || (coupleRecommendations || []).find(m => m.id === tmdbId);
+    await addToCoupleQueue(movie || { id: tmdbId });
+    return;
+  }
+  if (e.target.closest('button')) return;
+  const card = e.target.closest('.discover-card');
+  if (card) {
+    const tmdbId = parseInt(card.dataset.tmdbId);
+    if (tmdbId) showMovieDetail(tmdbId);
+  }
+});
 
 // Open blocked movies modal from user dropdown
 $['blockedMgmtBtn'].addEventListener('click', () => {
@@ -2886,6 +3682,7 @@ function renderDiscoverCard(m, ratedTmdbIds, showBlockBtn) {
   const key = tmdbId ? 'tmdb_'+tmdbId : '';
   const isRated = key && ratedTmdbIds.has(key);
   const isWatchlisted = tmdbId && watchlistIds.has(tmdbId);
+  const isNextQueued = tmdbId && activeCouple && coupleQueue.some(q => Number(q.tmdb_id) === Number(tmdbId));
   const poster = m.poster_path ? posterUrl(m.poster_path) : '';
   const year = (m.release_date||'').slice(0,4);
   const genres = (m.genre_ids||[]).slice(0,3).map(id=>genreMap[id]||'').filter(Boolean);
@@ -2909,11 +3706,13 @@ function renderDiscoverCard(m, ratedTmdbIds, showBlockBtn) {
               ? `<div class="dc-action-row">
                    <button class="btn btn-sm btn-secondary dc-rate-btn" data-tmdb-id="${tmdbId}">＋我的评分</button>
                    <button class="btn btn-xs dc-watch-btn ${isWatchlisted?'active':''}" data-tmdb-id="${tmdbId}" title="${isWatchlisted?'移出想看':'加入想看'}">${isWatchlisted?'★':'☆'}</button>
+                   ${activeCouple ? `<button class="btn btn-xs dc-next-btn ${isNextQueued?'active':''}" data-tmdb-id="${tmdbId}" title="${isNextQueued?'已在下次看':'加入下次看'}">▶</button>` : ''}
                    <button class="btn btn-xs dc-block-btn" data-tmdb-id="${tmdbId}" title="不再推荐">🚫</button>
                  </div>`
               : `<div class="dc-action-row">
                    <button class="btn btn-sm btn-secondary dc-rate-btn" data-tmdb-id="${tmdbId}">＋我的评分</button>
                    <button class="btn btn-xs dc-watch-btn ${isWatchlisted?'active':''}" data-tmdb-id="${tmdbId}" title="${isWatchlisted?'移出想看':'加入想看'}">${isWatchlisted?'★':'☆'}</button>
+                   ${activeCouple ? `<button class="btn btn-xs dc-next-btn ${isNextQueued?'active':''}" data-tmdb-id="${tmdbId}" title="${isNextQueued?'已在下次看':'加入下次看'}">▶</button>` : ''}
                  </div>`
           }
         </div>
@@ -3106,6 +3905,18 @@ $['qrSubmit'].addEventListener('click', async ()=>{
         }
       });
   }
+  if (!isEdit && savedTmdbId && activeCouple && coupleQueue.some(q => Number(q.tmdb_id) === Number(savedTmdbId))) {
+    db.from('couple_watch_queue')
+      .delete()
+      .eq('couple_id', activeCouple.id)
+      .eq('tmdb_id', savedTmdbId)
+      .then(({error}) => {
+        if (!error) {
+          coupleQueue = coupleQueue.filter(q => Number(q.tmdb_id) !== Number(savedTmdbId));
+          normalizeCoupleQueuePositions(false);
+        }
+      });
+  }
   // Fire-and-forget: backfill normalized movie detail for new entries (non-blocking)
   if (savedTmdbId) {
     fetchMovieDetail(savedTmdbId).then(detail => {
@@ -3149,6 +3960,7 @@ function switchTab(name) {
   if (tabBtn) { tabBtn.classList.add('active'); tabBtn.setAttribute('aria-selected','true'); }
   document.getElementById(`panel-${name}`)?.classList.add('active');
   if (name==='list') { if (!highlightEntryId) listPageNum = 1; renderList(); scrollToHighlight(); }
+  if (name==='couple') { renderCouple(); }
   if (name==='stats') { renderStats(); }
   if (name==='discover') { renderDiscover(); }
 }

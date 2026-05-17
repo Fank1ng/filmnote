@@ -80,7 +80,6 @@ const $ = {
   get totalScorePreview() { return document.getElementById('totalScorePreview'); },
   get userMenu() { return document.getElementById('userMenu'); },
   get userDropdown() { return document.getElementById('userDropdown'); },
-  get coupleSettingsBtn() { return document.getElementById('coupleSettingsBtn'); },
   get coupleContent() { return document.getElementById('coupleContent'); },
   get watchlistMovieGrid() { return document.getElementById('watchlistMovieGrid'); },
   get watchlistCount() { return document.getElementById('watchlistCount'); },
@@ -702,6 +701,7 @@ async function loadAllData() {
     await loadCoupleState();
     await loadCoupleBlockedMovies();
     await loadCoupleQueue();
+    if (getActiveTab() === 'couple') renderCouple();
     // One-time KV backfill for recommendation engine (runs once per deployment)
     if (!localStorage.getItem('kv_backfilled_v1')) {
       localStorage.setItem('kv_backfilled_v1', '1');
@@ -1109,7 +1109,7 @@ function subscribeToRealtime() {
       )
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'couples' },
-        () => { loadCoupleState().then(loadCoupleQueue).then(renderActiveTab).catch(()=>{}); }
+        () => { loadCoupleState().then(loadCoupleBlockedMovies).then(loadCoupleQueue).then(renderActiveTab).catch(()=>{}); }
       )
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'couple_watch_queue' },
@@ -2631,11 +2631,6 @@ async function addToWatchlist(movieOrId) {
   await toggleWatchlist(movie.tmdb_id, movie);
 }
 
-$['coupleSettingsBtn']?.addEventListener('click', () => {
-  $['userMenu'].classList.remove('open');
-  switchTab('couple');
-});
-
 // Delegated clicks inside list-page watchlist: rate + remove + pagination
 $['listWatchlistView'].addEventListener('click', e => {
   const rateBtn = e.target.closest('.dc-watch-rate-btn');
@@ -2806,7 +2801,7 @@ async function bindCoupleWith(userId) {
   }
   toast('已发送绑定请求');
   await loadCoupleState();
-  renderCouple();
+  renderCoupleSurfaces();
 }
 
 async function confirmCouple(coupleId) {
@@ -2821,23 +2816,24 @@ async function confirmCouple(coupleId) {
   await loadCoupleState();
   await loadCoupleBlockedMovies();
   await loadCoupleQueue();
-  renderCouple();
+  renderCoupleSurfaces();
+  renderDiscover();
 }
 
 async function disconnectCouple(coupleId) {
-  if (!confirm('解除 Couple 后，共享下次看队列也会一起删除，确认继续？')) return;
+  const couple = String(activeCouple?.id) === String(coupleId) ? activeCouple : pendingCouples.find(c => String(c.id) === String(coupleId));
+  const wasActive = couple?.status === 'active';
+  if (wasActive && !confirm('解除 Couple 后，共享下次看队列也会一起删除，确认继续？')) return;
   const { error } = await db.from('couples').delete().eq('id', coupleId);
   if (error) {
-    toast('解除失败: ' + error.message);
+    toast((wasActive ? '解除失败: ' : '撤销失败: ') + error.message);
     return;
   }
-  activeCouple = null;
-  couplePartner = null;
-  coupleQueue = [];
-  partnerBlockedMovieIds = new Set();
-  invalidateCoupleRecommendations();
-  toast('已解除 Couple');
-  renderCouple();
+  await loadCoupleState();
+  await loadCoupleBlockedMovies();
+  await loadCoupleQueue();
+  toast(wasActive ? '已解除 Couple' : '已撤销绑定请求');
+  renderCoupleSurfaces();
   renderDiscover();
 }
 
@@ -3208,6 +3204,28 @@ function renderCoupleQueueHTML() {
   `;
 }
 
+function getPendingCoupleGroups() {
+  return {
+    received: pendingCouples.filter(c => c.requested_by !== currentUser?.id),
+    sent: pendingCouples.filter(c => c.requested_by === currentUser?.id)
+  };
+}
+
+function getProfileDisplayName(userId, fallback = '对方') {
+  return allProfiles[userId]?.display_name || fallback;
+}
+
+function renderCouplePendingActions(received, sent) {
+  const rows = [
+    ...received.map(c => `<div class="couple-pending-row"><span>${esc(getProfileDisplayName(c.requested_by))} 请求绑定 Couple</span><button class="btn btn-sm btn-primary" data-confirm-couple="${c.id}">确认绑定</button></div>`),
+    ...sent.map(c => {
+      const partnerId = c.user_a === currentUser?.id ? c.user_b : c.user_a;
+      return `<div class="couple-pending-row"><span>已向 ${esc(getProfileDisplayName(partnerId))} 发送请求，等待确认</span><button class="btn btn-sm btn-danger" data-disconnect-couple="${c.id}">撤销</button></div>`;
+    })
+  ];
+  return rows.length ? `<div class="couple-pending">${rows.join('')}</div>` : '';
+}
+
 function renderCoupleUserResults(query = '') {
   const target = document.getElementById('coupleUserResults');
   if (!target) return;
@@ -3223,35 +3241,22 @@ function renderCoupleUserResults(query = '') {
 }
 
 function renderCoupleUnbound() {
-  const received = pendingCouples.filter(c => c.requested_by !== currentUser?.id);
-  const sent = pendingCouples.filter(c => c.requested_by === currentUser?.id);
+  const { received, sent } = getPendingCoupleGroups();
   return `
     <div class="couple-empty">
       <h3>绑定 Couple 后启用双人观影功能</h3>
       <p>绑定后可查看评分默契度、偏好对比、双人推荐，并共同维护“下次看”队列。</p>
-      ${received.length ? `
-        <div class="couple-pending">
-          ${received.map(c => {
-            const inviter = allProfiles[c.requested_by]?.display_name || '对方';
-            return `<div class="couple-pending-row"><span>${esc(inviter)} 请求绑定 Couple</span><button class="btn btn-sm btn-primary" data-confirm-couple="${c.id}">确认绑定</button></div>`;
-          }).join('')}
-        </div>
-      ` : ''}
-      ${sent.length ? `
-        <div class="couple-pending">
-          ${sent.map(c => {
-            const partnerId = c.user_a === currentUser.id ? c.user_b : c.user_a;
-            const partnerName = allProfiles[partnerId]?.display_name || '对方';
-            return `<div class="couple-pending-row"><span>已向 ${esc(partnerName)} 发送请求，等待确认</span><button class="btn btn-sm btn-danger" data-disconnect-couple="${c.id}">撤销</button></div>`;
-          }).join('')}
-        </div>
-      ` : ''}
+      ${renderCouplePendingActions(received, sent)}
       <div class="couple-bind-box">
         <input id="coupleUserSearch" type="text" placeholder="搜索用户名绑定 Couple">
         <div id="coupleUserResults" class="couple-user-results"></div>
       </div>
     </div>
   `;
+}
+
+function renderCoupleSurfaces() {
+  renderCouple();
 }
 
 function renderCouple() {
@@ -3279,7 +3284,7 @@ function renderCouple() {
         <p>已绑定</p>
         <h3>${esc(currentProfile?.display_name || '我')} & ${esc(partnerName)}</h3>
       </div>
-      <button class="btn btn-xs btn-danger" data-disconnect-couple="${activeCouple.id}">解除</button>
+      <button class="btn btn-xs btn-danger" data-disconnect-couple="${activeCouple.id}">解除 Couple</button>
     </div>
     <div class="couple-stat-grid">
       <div><strong>${myCount}</strong><span>我的电影</span></div>

@@ -7,8 +7,10 @@
 - **想看与下次看支持剧集**：`watchlist_movies` 与 `couple_watch_queue` 新增 `media_type`，唯一判断升级为 `media_type + tmdb_id`，避免电影和剧集 TMDB ID 冲突
 - **Couple 页三菜单**：已绑定 Couple 页拆分为“双人推荐 / 下次看 / 统计”，统计承载默契度和偏好对比，下次看承载共享队列
 - **双人推荐详情修复**：双人推荐结果会写入详情数据源，点击推荐卡片空白区域可打开电影详情弹窗
+- **清单详情补齐**：想看清单卡片与 Couple 下次看队列行支持点击打开详情，剧集会直接拉取 TMDB 剧集详情
+- **解除 Couple 申请制**：解除关系改为一方发起、另一方同意后生效，新增 `disconnect_requested_by` 增量升级脚本
 - **Couple 用户色**：Couple 统计、偏好对比和队列加入者按双方用户色展示，通用强调色保留品牌金色
-- **Supabase 增量脚本**：新增 `supabase_media_type_upgrade_2026_05.sql`，只处理本次 `media_type` 升级，适合替代反复运行历史总包 SQL
+- **Supabase 增量脚本**：新增 `supabase_media_type_upgrade_2026_05.sql` 与 `supabase_couple_disconnect_request_upgrade_2026_05.sql`，适合替代反复运行历史总包 SQL
 
 ### Couple、想看清单与下次看
 - **主导航新增 Couple**：导航调整为“添加评价 / 影单 / 发现 / Couple / 统计分析”，未绑定时仍显示 Couple 页并给出绑定入口

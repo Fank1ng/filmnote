@@ -2161,6 +2161,69 @@ async function showMovieDetail(tmdbId) {
   }
 }
 
+async function showListItemDetail(movieOrId) {
+  const item = normalizeListMovie(movieOrId);
+  if (!item) return;
+  if (item.media_type === 'movie') {
+    discoverMovieMap[item.tmdb_id] = {
+      ...(discoverMovieMap[item.tmdb_id] || {}),
+      ...item,
+      id: item.tmdb_id,
+      release_date: item.release_date || (item.year ? String(item.year) : '')
+    };
+    showMovieDetail(item.tmdb_id);
+    return;
+  }
+
+  const poster = item.poster_path ? posterUrl(item.poster_path) : '';
+  const content = $['modalContent'];
+  content.innerHTML = `
+    <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px">
+      ${poster ? `<img src="${poster}" style="width:100px;border-radius:8px" alt="">` : ''}
+      <div>
+        <h3 style="margin-bottom:4px">${esc(item.title)} ${item.year ? '(' + item.year + ')' : ''}</h3>
+        <p style="color:var(--text2);font-size:0.8rem">剧集 · TMDB #${item.tmdb_id}</p>
+      </div>
+    </div>
+    <div class="tmdb-section" id="tmdbSeriesDetail">
+      <div class="detail-spinner"></div> 加载剧集详情...
+    </div>
+    <div class="btn-group" style="justify-content:flex-end;margin-top:8px">
+      <button class="btn btn-primary btn-sm" onclick="closeModal();openEntryFormForListMovie({id:${item.tmdb_id},media_type:'series',title:'${esc(item.title).replace(/'/g,"\\'")}',year:${item.year || 'null'},poster_path:'${item.poster_path || ''}'})">＋我的评分</button>
+      <button class="btn btn-secondary btn-sm" onclick="closeModal()">关闭</button>
+    </div>
+  `;
+  $['detailModal'].classList.add('open');
+
+  try {
+    const [detailRes, creditsRes] = await Promise.all([
+      tmdbFetch(`/tv/${item.tmdb_id}?language=zh-CN`),
+      tmdbFetch(`/tv/${item.tmdb_id}/credits?language=zh-CN`).catch(() => null)
+    ]);
+    const detail = await detailRes.json().catch(() => ({}));
+    const credits = creditsRes ? await creditsRes.json().catch(() => ({})) : {};
+    const genres = (detail.genres || []).map(g => g.name).filter(Boolean).slice(0, 5);
+    const creators = (detail.created_by || []).map(c => c.name).filter(Boolean).slice(0, 3);
+    const cast = (credits.cast || []).map(c => c.name).filter(Boolean).slice(0, 8);
+    const section = document.getElementById('tmdbSeriesDetail');
+    if (!section) return;
+    section.innerHTML = `
+      ${detail.overview ? buildOverviewHTML('tmdbSeriesOv-' + item.tmdb_id, detail.overview) : '<p style="font-size:0.8rem;color:var(--text2)">暂无简介</p>'}
+      <div style="display:grid;gap:8px;margin-top:12px;font-size:0.82rem;color:var(--text2)">
+        ${genres.length ? `<div><strong style="color:var(--text)">类型</strong> · ${genres.map(esc).join(' / ')}</div>` : ''}
+        ${creators.length ? `<div><strong style="color:var(--text)">主创</strong> · ${creators.map(esc).join(' / ')}</div>` : ''}
+        ${cast.length ? `<div><strong style="color:var(--text)">演员</strong> · ${cast.map(esc).join(' / ')}</div>` : ''}
+        ${detail.number_of_seasons ? `<div><strong style="color:var(--text)">季数</strong> · ${detail.number_of_seasons}</div>` : ''}
+        ${detail.vote_average ? `<div><strong style="color:var(--text)">TMDB</strong> · ${Number(detail.vote_average).toFixed(1)}</div>` : ''}
+      </div>
+    `;
+    if (detail.overview) checkOverviewOverflow('tmdbSeriesOv-' + item.tmdb_id);
+  } catch (e) {
+    const section = document.getElementById('tmdbSeriesDetail');
+    if (section) section.innerHTML = '<p style="font-size:0.8rem;color:var(--text2)">剧集详情加载失败，请稍后重试</p>';
+  }
+}
+
 function closeModal() { $['detailModal'].classList.remove('open'); }
 $['detailModal'].addEventListener('click', e=>{ if(e.target===e.currentTarget) closeModal(); });
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
@@ -2752,6 +2815,15 @@ $['listWatchlistView'].addEventListener('click', e => {
       renderWatchlistPanel();
       window.scrollTo({top:0, behavior:'smooth'});
     }
+    return;
+  }
+  if (e.target.closest('button')) return;
+  const card = e.target.closest('.discover-card');
+  if (card) {
+    const tmdbId = parseInt(card.dataset.tmdbId);
+    const mediaType = normalizeMediaType(card.dataset.mediaType);
+    const movie = watchlistMovies[listKey(mediaType, tmdbId)] || discoverMovieMap[tmdbId] || { id: tmdbId, media_type: mediaType };
+    showListItemDetail(movie);
   }
 });
 
@@ -2922,16 +2994,46 @@ async function confirmCouple(coupleId) {
 async function disconnectCouple(coupleId) {
   const couple = String(activeCouple?.id) === String(coupleId) ? activeCouple : pendingCouples.find(c => String(c.id) === String(coupleId));
   const wasActive = couple?.status === 'active';
-  if (wasActive && !confirm('解除 Couple 后，共享下次看队列也会一起删除，确认继续？')) return;
+  if (wasActive) {
+    const requester = couple.disconnect_requested_by || null;
+    if (!requester) {
+      if (!confirm('将向对方发送解除 Couple 申请，对方同意后才会解除。确认发送？')) return;
+      const { error } = await db.from('couples')
+        .update({ disconnect_requested_by: currentUser.id, updated_at: new Date().toISOString() })
+        .eq('id', coupleId);
+      if (error) {
+        toast(isMissingRelationError(error) ? 'Couple 表尚未升级，请先执行解除申请升级 SQL' : '发送解除申请失败: ' + error.message);
+        return;
+      }
+      await loadCoupleState();
+      toast('已发送解除申请');
+      renderCoupleSurfaces();
+      return;
+    }
+    if (requester === currentUser.id) {
+      const { error } = await db.from('couples')
+        .update({ disconnect_requested_by: null, updated_at: new Date().toISOString() })
+        .eq('id', coupleId);
+      if (error) {
+        toast('撤销解除申请失败: ' + error.message);
+        return;
+      }
+      await loadCoupleState();
+      toast('已撤销解除申请');
+      renderCoupleSurfaces();
+      return;
+    }
+    if (!confirm('对方请求解除 Couple。同意后，共享下次看队列也会一起删除，确认同意？')) return;
+  }
   const { error } = await db.from('couples').delete().eq('id', coupleId);
   if (error) {
-    toast((wasActive ? '解除失败: ' : '撤销失败: ') + error.message);
+    toast((wasActive ? '同意解除失败: ' : '撤销失败: ') + error.message);
     return;
   }
   await loadCoupleState();
   await loadCoupleBlockedMovies();
   await loadCoupleQueue();
-  toast(wasActive ? '已解除 Couple' : '已撤销绑定请求');
+  toast(wasActive ? '已同意解除 Couple' : '已撤销绑定请求');
   renderCoupleSurfaces();
   renderDiscover();
 }
@@ -3401,6 +3503,14 @@ function renderCouple() {
   const commonPairs = getCommonCouplePairs();
   const compat = calcCoupleCompatibility();
   const pref = calcCouplePreferenceComparison();
+  const disconnectRequester = activeCouple.disconnect_requested_by || null;
+  const disconnectByMe = disconnectRequester === currentUser.id;
+  const disconnectByPartner = disconnectRequester && !disconnectByMe;
+  const disconnectButtonText = disconnectByMe ? '撤销解除申请' : (disconnectByPartner ? '同意解除 Couple' : '申请解除 Couple');
+  const disconnectButtonClass = disconnectByPartner ? 'btn-primary' : (disconnectByMe ? 'btn-secondary' : 'btn-danger');
+  const disconnectNotice = disconnectRequester
+    ? `<div class="couple-section couple-disconnect-notice"><p>${disconnectByMe ? '已发送解除申请，等待对方同意。' : `${esc(partnerName)} 请求解除 Couple，同意后共享下次看队列会一起删除。`}</p></div>`
+    : '';
   const statsHTML = `
     <div class="couple-stat-grid">
       <div><strong style="color:${myColor.main}">${myCount}</strong><span>我的电影</span></div>
@@ -3429,8 +3539,9 @@ function renderCouple() {
         <p>已绑定</p>
         <h3><span style="color:${myColor.main}">${esc(currentProfile?.display_name || '我')}</span> & <span style="color:${partnerColor.main}">${esc(partnerName)}</span></h3>
       </div>
-      <button class="btn btn-xs btn-danger" data-disconnect-couple="${activeCouple.id}">解除 Couple</button>
+      <button class="btn btn-xs ${disconnectButtonClass}" data-disconnect-couple="${activeCouple.id}">${disconnectButtonText}</button>
     </div>
+    ${disconnectNotice}
     ${renderCoupleSubtabs()}
     ${activeContent}
   `;
@@ -3481,6 +3592,9 @@ $['coupleContent'].addEventListener('click', async e => {
         if (normalizeMediaType(item.media_type) === 'movie') openQuickRate({ id: item.tmdb_id, title: item.title, year: item.year, poster_path: item.poster_path });
         else openEntryFormForListMovie(item);
       }
+    } else {
+      const item = coupleQueue.find(q => q.id === queueId);
+      if (item) showListItemDetail(item);
     }
     return;
   }

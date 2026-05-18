@@ -192,9 +192,10 @@ async function fetchTmdb(path, env) {
   };
 }
 
-function normalizeTmdbMovieDetail(details, credits) {
+function normalizeTmdbMovieDetail(details, credits, keywords) {
   if (!details || details.success === false) return null;
   const director = (credits?.crew || []).find(c => c.job === 'Director');
+  const keywordItems = keywords?.keywords || keywords?.results || [];
   return {
     id: details.id || null,
     title: details.title || details.name || '',
@@ -212,15 +213,18 @@ function normalizeTmdbMovieDetail(details, credits) {
     runtime: details.runtime || 0,
     director: director ? director.name : '',
     cast: (credits?.cast || []).slice(0, 8).map(c => c.name).filter(Boolean),
+    keyword_ids: keywordItems.map(k => k.id).filter(Boolean),
+    keyword_names: keywordItems.map(k => k.name).filter(Boolean),
     original_language: details.original_language || '',
     fetched_at: Date.now()
   };
 }
 
 async function fetchMovieDetailBundle(tmdbId, env) {
-  const [detailsZh, creditsZh] = await Promise.all([
+  const [detailsZh, creditsZh, keywords] = await Promise.all([
     fetchTmdb(`/movie/${tmdbId}?language=zh-CN`, env),
-    fetchTmdb(`/movie/${tmdbId}/credits?language=zh-CN`, env)
+    fetchTmdb(`/movie/${tmdbId}/credits?language=zh-CN`, env),
+    fetchTmdb(`/movie/${tmdbId}/keywords`, env)
   ]);
   if (detailsZh?.success === false) {
     return { details: detailsZh, credits: creditsZh, movie: null };
@@ -250,7 +254,7 @@ async function fetchMovieDetailBundle(tmdbId, env) {
   return {
     details,
     credits: creditsZh,
-    movie: normalizeTmdbMovieDetail(details, creditsZh)
+    movie: normalizeTmdbMovieDetail(details, creditsZh, keywords)
   };
 }
 

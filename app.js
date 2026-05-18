@@ -219,7 +219,9 @@ let coupleRecommendations = null;
 let coupleRecommendationLoading = false;
 let coupleRecommendationState = 'idle';
 let couplePreferenceWarmKey = '';
-let coupleTab = 'recommend';
+let coupleTab = 'archive';
+let coupleArchiveChart = 'score';
+let coupleWheelPick = null;
 
 const authOverlay = $['authOverlay'];
 const mainApp = $['mainApp'];
@@ -742,6 +744,16 @@ function normalizeMovieDetail(input, credits) {
   const genres = Array.isArray(input.genres)
     ? input.genres.map(g => typeof g === 'string' ? g : g?.name).filter(Boolean)
     : [];
+  const keywordIds = Array.isArray(input.keyword_ids)
+    ? input.keyword_ids.map(Number).filter(Boolean)
+    : Array.isArray(input.keywords)
+      ? input.keywords.map(k => Number(typeof k === 'number' ? k : k?.id)).filter(Boolean)
+      : [];
+  const keywordNames = Array.isArray(input.keyword_names)
+    ? input.keyword_names.map(String).filter(Boolean)
+    : Array.isArray(input.keywords)
+      ? input.keywords.map(k => typeof k === 'string' ? k : k?.name).filter(Boolean)
+      : [];
 
   return {
     id: input.id || input.tmdb_id || null,
@@ -760,6 +772,8 @@ function normalizeMovieDetail(input, credits) {
     runtime: Number(input.runtime || 0),
     director: input.director || '',
     cast,
+    keyword_ids: keywordIds,
+    keyword_names: keywordNames,
     original_language: input.original_language || '',
     fetched_at: input.fetched_at || 0
   };
@@ -786,6 +800,8 @@ function mergeMovieDetail(existing, incoming) {
     runtime: next.runtime || prev.runtime || 0,
     director: next.director || prev.director || '',
     cast: next.cast?.length ? next.cast : (prev.cast || []),
+    keyword_ids: next.keyword_ids?.length ? next.keyword_ids : (prev.keyword_ids || []),
+    keyword_names: next.keyword_names?.length ? next.keyword_names : (prev.keyword_names || []),
     original_language: next.original_language || prev.original_language || '',
     fetched_at: next.fetched_at || prev.fetched_at || 0
   };
@@ -900,6 +916,7 @@ async function backfillOverviewToDB(entry, overview) {
 function extractMovieDetail(details, credits) {
   const director = (credits?.crew || []).find(c => c.job === 'Director');
   const cast = (credits?.cast || []).slice(0, 6);
+  const keywords = details?.keywords?.keywords || details?.keywords?.results || details?.keywords || [];
   if (!details || details.success === false) return null;
   return normalizeMovieDetail({
     id: details?.id || null,
@@ -917,6 +934,8 @@ function extractMovieDetail(details, credits) {
     runtime: details?.runtime || 0,
     director: director ? director.name : '',
     cast: cast.map(c => c.name),
+    keyword_ids: keywords.map(k => k.id).filter(Boolean),
+    keyword_names: keywords.map(k => k.name).filter(Boolean),
     original_language: details?.original_language || '',
     fetched_at: Date.now()
   });
@@ -3309,6 +3328,403 @@ function renderCouplePreferenceHTML(pref) {
   `;
 }
 
+const COUPLE_TYPE_DIMENSIONS = [
+  { key: 'action', label: '动作', ids: [28] },
+  { key: 'adventureFantasy', label: '冒险/奇幻', ids: [12, 14] },
+  { key: 'sciFi', label: '科幻', ids: [878] },
+  { key: 'thrillerHorror', label: '惊悚/恐怖', ids: [53, 27, 9648] },
+  { key: 'comedy', label: '喜剧', ids: [35] },
+  { key: 'romance', label: '爱情', ids: [10749] },
+  { key: 'drama', label: '剧情', ids: [18] },
+  { key: 'historyWar', label: '历史/战争', ids: [36, 10752] },
+  { key: 'animation', label: '动画', ids: [16] },
+  { key: 'familyKids', label: '家庭/儿童', ids: [10751] },
+  { key: 'musicDance', label: '音乐/歌舞', ids: [10402] },
+  { key: 'documentaryBiopic', label: '纪录/传记', ids: [99], keywordPattern: /biograph|biopic|based on true|real person|historical figure|传记|真实人物/i }
+];
+
+function getCoupleMovieEntries(userId) {
+  return allEntries.filter(e => e.user_id === userId && e.type === 'movie');
+}
+
+function getEntryDetail(entry) {
+  if (!entry?.tmdb_id) return null;
+  return movieCache.get(entry.tmdb_id) || discoverMovieMap[entry.tmdb_id] || null;
+}
+
+function getEntryPosterPath(entry) {
+  return entry?.poster_path || getEntryDetail(entry)?.poster_path || '';
+}
+
+function getEntryGenreIds(entry) {
+  const detail = getEntryDetail(entry);
+  const ids = detail?.genre_ids || entry?.genre_ids || [];
+  return ids.map(Number).filter(Boolean);
+}
+
+function getEntryKeywordNames(entry) {
+  const detail = getEntryDetail(entry);
+  return (detail?.keyword_names || []).map(String);
+}
+
+function getCoupleTypeKeys(entry) {
+  const ids = new Set(getEntryGenreIds(entry));
+  const keywords = getEntryKeywordNames(entry).join(' ');
+  const keys = new Set();
+  COUPLE_TYPE_DIMENSIONS.forEach(dim => {
+    if (dim.ids.some(id => ids.has(id)) || (dim.keywordPattern && dim.keywordPattern.test(keywords))) {
+      keys.add(dim.key);
+    }
+  });
+  return [...keys];
+}
+
+function calcCoupleTypeDistribution(entries) {
+  const result = Object.fromEntries(COUPLE_TYPE_DIMENSIONS.map(dim => [dim.key, 0]));
+  entries.forEach(entry => {
+    const keys = getCoupleTypeKeys(entry);
+    if (!keys.length) return;
+    const weight = 1 / keys.length;
+    keys.forEach(key => { result[key] += weight; });
+  });
+  return result;
+}
+
+function calcCoupleArchiveTime(pairs) {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const datedPairs = pairs.map(p => {
+    const mineDate = new Date(p.mine.created_at || p.mine.updated_at || 0);
+    const partnerDate = new Date(p.partner.created_at || p.partner.updated_at || 0);
+    return {
+      ...p,
+      latestDate: mineDate > partnerDate ? mineDate : partnerDate,
+      avg: (getEntryScore(p.mine) + getEntryScore(p.partner)) / 2
+    };
+  }).filter(p => !Number.isNaN(p.latestDate.getTime()));
+  const monthCount = datedPairs.filter(p => p.latestDate >= monthStart).length;
+  const recentHigh = datedPairs
+    .filter(p => p.avg >= 7)
+    .sort((a, b) => b.latestDate - a.latestDate)[0] || null;
+  const daysAgo = recentHigh ? Math.max(0, Math.floor((now - recentHigh.latestDate) / 86400000)) : null;
+  const weekStart = d => {
+    const x = new Date(d);
+    x.setHours(0, 0, 0, 0);
+    x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+    return x.getTime();
+  };
+  const weeks = new Set(datedPairs.map(p => weekStart(p.latestDate)));
+  let streak = 0;
+  let cursor = weekStart(now);
+  while (weeks.has(cursor)) {
+    streak += 1;
+    cursor -= 7 * 86400000;
+  }
+  return { monthCount, recentHigh, daysAgo, streak };
+}
+
+function calcCoupleArchiveData() {
+  const partnerId = getCouplePartnerId();
+  const mine = getCoupleMovieEntries(currentUser?.id);
+  const partner = getCoupleMovieEntries(partnerId);
+  const pairs = getCommonCouplePairs();
+  const compat = calcCoupleCompatibility();
+  const pref = calcCouplePreferenceComparison();
+  const shared = pairs.map(p => {
+    const mineScore = getEntryScore(p.mine);
+    const partnerScore = getEntryScore(p.partner);
+    return {
+      ...p,
+      mineScore,
+      partnerScore,
+      avg: (mineScore + partnerScore) / 2,
+      diff: Math.abs(mineScore - partnerScore)
+    };
+  });
+  const harmony = shared
+    .filter(p => p.avg >= 7)
+    .sort((a, b) => b.avg - a.avg || a.diff - b.diff)[0] || shared.sort((a, b) => a.diff - b.diff || b.avg - a.avg)[0] || null;
+  const split = shared.sort((a, b) => b.diff - a.diff)[0] || null;
+  const myTypeDist = calcCoupleTypeDistribution(mine);
+  const partnerTypeDist = calcCoupleTypeDistribution(partner);
+  const time = calcCoupleArchiveTime(pairs);
+  const posterEntries = [
+    harmony?.mine,
+    split?.mine,
+    ...shared.sort((a, b) => b.avg - a.avg).map(p => p.mine),
+    ...coupleQueue
+  ].filter(Boolean);
+  return { mine, partner, pairs, compat, pref, harmony, split, myTypeDist, partnerTypeDist, time, posterEntries };
+}
+
+function warmCoupleArchiveDetails() {
+  const partnerId = getCouplePartnerId();
+  if (!partnerId) return;
+  const ids = allEntries
+    .filter(e => e.type === 'movie' && e.tmdb_id && (e.user_id === currentUser?.id || e.user_id === partnerId))
+    .map(e => e.tmdb_id)
+    .filter((id, idx, arr) => arr.indexOf(id) === idx)
+    .filter(id => {
+      const detail = movieCache.get(id);
+      return !detail?.genre_ids?.length || !detail?.keyword_names?.length;
+    })
+    .slice(0, 36);
+  const key = ids.join(',');
+  if (!ids.length || key === couplePreferenceWarmKey) return;
+  couplePreferenceWarmKey = key;
+  Promise.allSettled(ids.map(id => fetchMovieDetail(id, { force: !!movieCache.get(id) }))).then(() => {
+    if (getActiveTab() === 'couple') renderCouple();
+  });
+}
+
+function renderPosterStack(entries) {
+  const posters = entries.map(getEntryPosterPath).filter(Boolean).slice(0, 3);
+  if (!posters.length) return '<div class="couple-poster-stack couple-poster-stack-empty"></div>';
+  return `<div class="couple-poster-stack">${posters.map(p => `<img src="${posterUrl(p)}" alt="">`).join('')}</div>`;
+}
+
+function renderArchiveMetricCard(title, value, sub, color, entries = []) {
+  return `
+    <div class="couple-archive-card">
+      ${renderPosterStack(entries)}
+      <div class="couple-archive-card-body">
+        <span>${esc(title)}</span>
+        <strong style="color:${color}">${esc(value)}</strong>
+        <p>${esc(sub)}</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderArchiveStoryCard(title, heading, accent, body, entries = []) {
+  return `
+    <div class="couple-story-card">
+      ${renderPosterStack(entries)}
+      <span>${esc(title)}</span>
+      <strong>${esc(heading)}</strong>
+      <em>${esc(accent)}</em>
+      <p>${esc(body)}</p>
+    </div>
+  `;
+}
+
+function radarPoint(cx, cy, radius, index, total) {
+  const angle = -Math.PI / 2 + (index * Math.PI * 2 / total);
+  return [cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius];
+}
+
+function radarPolygon(values, cx, cy, radius, maxValue) {
+  return values.map((v, i) => {
+    const [x, y] = radarPoint(cx, cy, radius * Math.min(Number(v) / maxValue, 1), i, values.length);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+}
+
+function renderCoupleRadar(axes, maxValue, myColor, partnerColor, isType = false) {
+  const cx = 210;
+  const cy = 210;
+  const radius = isType ? 128 : 118;
+  const levels = [0.2, 0.4, 0.6, 0.8, 1];
+  const grid = levels.map(level => {
+    const points = axes.map((_, i) => radarPoint(cx, cy, radius * level, i, axes.length).map(n => n.toFixed(1)).join(',')).join(' ');
+    return `<polygon points="${points}" fill="none" stroke="var(--border)" stroke-width="1"/>`;
+  }).join('');
+  const spokes = axes.map((_, i) => {
+    const [x, y] = radarPoint(cx, cy, radius, i, axes.length);
+    return `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/>`;
+  }).join('');
+  const labels = axes.map((axis, i) => {
+    const [x, y] = radarPoint(cx, cy, radius + (isType ? 42 : 52), i, axes.length);
+    const anchor = x < cx - 16 ? 'end' : x > cx + 16 ? 'start' : 'middle';
+    return `
+      <text x="${x.toFixed(1)}" y="${(y - 4).toFixed(1)}" text-anchor="${anchor}" class="couple-radar-label ${isType ? 'type' : ''}">${esc(axis.label)}</text>
+      <text x="${x.toFixed(1)}" y="${(y + 13).toFixed(1)}" text-anchor="${anchor}" class="couple-radar-score">${axis.mine.toFixed(1)} / ${axis.partner.toFixed(1)}</text>
+    `;
+  }).join('');
+  const minePoints = radarPolygon(axes.map(a => a.mine), cx, cy, radius, maxValue);
+  const partnerPoints = radarPolygon(axes.map(a => a.partner), cx, cy, radius, maxValue);
+  return `
+    <svg class="couple-radar" viewBox="0 0 420 420" role="img" aria-label="${isType ? '类型分布雷达图' : '评分默契雷达图'}">
+      ${grid}${spokes}
+      <polygon points="${minePoints}" fill="${myColor.main}" fill-opacity="0.22" stroke="${myColor.main}" stroke-width="3" stroke-linejoin="round"></polygon>
+      <polygon points="${partnerPoints}" fill="${partnerColor.main}" fill-opacity="0.22" stroke="${partnerColor.main}" stroke-width="3" stroke-linejoin="round"></polygon>
+      <circle cx="${cx}" cy="${cy}" r="3" fill="var(--text2)"></circle>
+      ${labels}
+    </svg>
+  `;
+}
+
+function renderCoupleArchiveChart(data, myColor, partnerColor) {
+  const isType = coupleArchiveChart === 'type';
+  const axes = isType
+    ? COUPLE_TYPE_DIMENSIONS.map(dim => ({
+        label: dim.label,
+        mine: data.myTypeDist[dim.key] || 0,
+        partner: data.partnerTypeDist[dim.key] || 0
+      }))
+    : Object.entries(DIM_LABELS).map(([dim, label]) => ({
+        label,
+        mine: data.pref.mineDims[dim] || 0,
+        partner: data.pref.partnerDims[dim] || 0
+      }));
+  const maxValue = isType ? Math.max(1, ...axes.map(a => a.mine), ...axes.map(a => a.partner)) : 10;
+  return `
+    <div class="couple-archive-main">
+      <div class="couple-section-head">
+        <div>
+          <div class="couple-section-title">主图切换区</div>
+          <p class="couple-note">同一位置切换评分默契与 12 维类型分布</p>
+        </div>
+        <div class="couple-chart-toggle">
+          <button class="${!isType ? 'active' : ''}" data-couple-chart="score">评分默契</button>
+          <button class="${isType ? 'active' : ''}" data-couple-chart="type">类型分布</button>
+        </div>
+      </div>
+      ${renderCoupleRadar(axes, maxValue, myColor, partnerColor, isType)}
+      <div class="couple-radar-legend">
+        <span><i style="background:${myColor.main}"></i>我</span>
+        <span><i style="background:${partnerColor.main}"></i>${esc(couplePartner?.display_name || '对方')}</span>
+        <em>${isType ? '多类型电影按命中大类平分权重' : '重叠面积越大，评分默契越高'}</em>
+      </div>
+    </div>
+  `;
+}
+
+function renderArchiveAchievement(title, value, color) {
+  return `<div class="couple-achievement"><strong style="color:${color}">${esc(title)}</strong><span>${esc(value)}</span></div>`;
+}
+
+function getTopTypeLabel(dist) {
+  const top = COUPLE_TYPE_DIMENSIONS
+    .map(dim => ({ label: dim.label, value: dist[dim.key] || 0 }))
+    .sort((a, b) => b.value - a.value)[0];
+  return top && top.value > 0 ? top.label : '剧情';
+}
+
+function scoreCoupleQueueItem(item, data) {
+  const keys = getCoupleTypeKeys(item);
+  const typeScore = keys.length
+    ? keys.reduce((sum, key) => sum + (data.myTypeDist[key] || 0) + (data.partnerTypeDist[key] || 0), 0) / keys.length
+    : 0;
+  const safety = keys.some(key => ['drama', 'romance', 'comedy', 'adventureFantasy', 'sciFi'].includes(key)) ? 1.4 : 1;
+  return Math.max(1, 1 + typeScore * 0.25) * safety;
+}
+
+function pickCoupleWheelItem(data) {
+  const candidates = coupleQueue.filter(item => normalizeMediaType(item.media_type) === 'movie' || normalizeMediaType(item.media_type) === 'series');
+  if (!candidates.length) return null;
+  const weighted = candidates.map(item => ({ item, weight: scoreCoupleQueueItem(item, data) }));
+  const total = weighted.reduce((sum, w) => sum + w.weight, 0);
+  let needle = Math.random() * total;
+  for (const w of weighted) {
+    needle -= w.weight;
+    if (needle <= 0) return w.item;
+  }
+  return weighted[0].item;
+}
+
+function renderWheelSegments() {
+  const labels = ['剧情', '爱情', '科幻', '动画', '喜剧', '动作'];
+  return labels.map((label, i) => `<span style="--i:${i}">${esc(label)}</span>`).join('');
+}
+
+function renderCoupleWheel(data) {
+  const pick = coupleWheelPick && coupleQueue.find(q => q.id === coupleWheelPick.id) ? coupleWheelPick : null;
+  const topType = getTopTypeLabel(data.myTypeDist);
+  const hit = coupleQueue.length ? Math.min(coupleQueue.length, Math.max(0, coupleQueue.filter(item => getCoupleTypeKeys(item).includes(COUPLE_TYPE_DIMENSIONS.find(dim => dim.label === topType)?.key)).length)) : 0;
+  return `
+    <div class="couple-archive-side-card">
+      <div class="couple-section-title">下次看：转盘抽一部</div>
+      <p class="couple-note">从队列按默契权重随机</p>
+      <div class="couple-wheel-row">
+        <button class="couple-wheel" data-couple-spin aria-label="抽一部">
+          ${renderWheelSegments()}
+          <b>抽</b>
+        </button>
+        <div class="couple-wheel-stats">
+          <span>今晚命中率</span><strong>${hit}/${coupleQueue.length || 0}</strong>
+          <span>安全选择</span><strong>${esc(topType)}</strong>
+        </div>
+      </div>
+      ${pick ? `
+        <div class="couple-wheel-result" data-queue-id="${pick.id}">
+          ${pick.poster_path ? `<img src="${posterUrl(pick.poster_path)}" alt="">` : '<div></div>'}
+          <strong>${esc(pick.title)}</strong>
+          <span>${pick.year || '未知'} · ${mediaTypeLabel(normalizeMediaType(pick.media_type))}</span>
+          <button class="btn btn-xs btn-secondary" data-wheel-rate>评分</button>
+          <button class="btn btn-xs btn-danger" data-wheel-remove>移除</button>
+        </div>
+      ` : `<p class="couple-muted">${coupleQueue.length ? '点击转盘抽一部' : '下次看队列为空'}</p>`}
+    </div>
+  `;
+}
+
+function renderDiffRadar(data) {
+  const rows = Object.entries(DIM_LABELS).map(([dim, label]) => {
+    const diff = Math.abs((data.pref.mineDims[dim] || 0) - (data.pref.partnerDims[dim] || 0));
+    const color = diff >= 1 ? 'var(--ceci)' : diff >= 0.5 ? 'var(--gold)' : '#63c79d';
+    return `
+      <div class="couple-diff-row">
+        <span>${esc(label)}</span>
+        <i><b style="width:${Math.min(diff / 2, 1) * 100}%;background:${color}"></b></i>
+        <em>${diff.toFixed(1)}</em>
+      </div>
+    `;
+  }).join('');
+  return `<div class="couple-archive-side-card"><div class="couple-section-title">分歧雷达</div><p class="couple-note">辅助评分默契图</p>${rows}</div>`;
+}
+
+function renderTimeCard(data) {
+  const latest = data.time.daysAgo === null ? '暂无同步高分' : `最近一次同步高分：${data.time.daysAgo} 天前`;
+  return `
+    <div class="couple-archive-side-card">
+      <div class="couple-section-title">时间动态</div>
+      <strong class="couple-time-highlight">${esc(latest)}</strong>
+      <p>本月共同评分 ${data.time.monthCount} 部</p>
+      <p>连续 ${data.time.streak || 0} 周都有共同观影记录</p>
+    </div>
+  `;
+}
+
+function renderCoupleArchiveHTML() {
+  const partnerName = couplePartner?.display_name || '对方';
+  const myColor = getUserColor(currentUser?.id);
+  const partnerColor = getUserColor(getCouplePartnerId());
+  const data = calcCoupleArchiveData();
+  const harmonyTitle = data.harmony?.mine?.title || '暂无共同电影';
+  const splitTitle = data.split?.mine?.title || '暂无共同电影';
+  const harmonySub = data.harmony ? `你 ${data.harmony.mineScore.toFixed(1)} / ${partnerName} ${data.harmony.partnerScore.toFixed(1)}` : '共同评分后生成';
+  const wheelSub = `${coupleQueue.length} 部在队列 · 点击转盘抽一部`;
+  return `
+    <div class="couple-archive">
+      <div class="couple-archive-top">
+        ${renderArchiveMetricCard('关系仪表盘', String(data.compat.overall), `默契指数 · 共同样本 ${data.compat.sample} 部`, 'var(--gold)', data.posterEntries)}
+        ${renderArchiveMetricCard('共同封神', harmonyTitle, harmonySub, partnerColor.main, [data.harmony?.mine])}
+        ${renderArchiveMetricCard('下次看决策', `${coupleQueue.length} 部`, wheelSub, 'var(--friend)', coupleQueue)}
+        ${renderArchiveMetricCard('时间节奏', `${data.time.monthCount} 部`, `本月共同评分 · 连续 ${data.time.streak || 0} 周`, '#63c79d', data.posterEntries)}
+      </div>
+      <div class="couple-archive-layout">
+        <div class="couple-archive-left">
+          ${renderArchiveStoryCard('最大共鸣', harmonyTitle, data.harmony ? `共同高分 · 差 ${data.harmony.diff.toFixed(1)}` : '共同样本越多越准', '统计像故事，不只是数字', [data.harmony?.mine])}
+          ${renderArchiveStoryCard('最大分歧', splitTitle, data.split ? `总分差 ${data.split.diff.toFixed(1)}` : '共同样本越多越准', '保留一点饭后讨论的趣味', [data.split?.mine])}
+          <div class="couple-story-card no-poster">
+            <span>Couple 成就</span>
+            ${renderArchiveAchievement('同步审美', `${data.pairs.filter(p => Math.abs(getEntryScore(p.mine) - getEntryScore(p.partner)) < 1).length} 部分差 < 1`, 'var(--gold)')}
+            ${renderArchiveAchievement('分歧名场面', `${data.pairs.filter(p => Math.abs(getEntryScore(p.mine) - getEntryScore(p.partner)) >= 3).length} 部差距 >= 3`, 'var(--ceci)')}
+            ${renderArchiveAchievement('意见领袖', `${coupleQueue.length} 部待验证`, 'var(--friend)')}
+          </div>
+        </div>
+        ${renderCoupleArchiveChart(data, myColor, partnerColor)}
+        <div class="couple-archive-right">
+          ${renderCoupleWheel(data)}
+          ${renderDiffRadar(data)}
+          ${renderTimeCard(data)}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 async function loadCoupleRecommendations(force = false) {
   if (!activeCouple || !currentUser || coupleRecommendationLoading) return;
   if (!force && (coupleRecommendationState === 'ready' || coupleRecommendationState === 'insufficient' || coupleRecommendationState === 'error')) return;
@@ -3471,9 +3887,9 @@ function renderCoupleSurfaces() {
 
 function renderCoupleSubtabs() {
   const tabs = [
+    ['archive', '档案'],
     ['recommend', '双人推荐'],
-    ['queue', '下次看'],
-    ['stats', '统计']
+    ['queue', '下次看']
   ];
   return `
     <div class="discover-subtabs couple-subtabs" id="coupleSubtabs">
@@ -3497,12 +3913,8 @@ function renderCouple() {
   const partnerName = couplePartner?.display_name || '对方';
   const myColor = getUserColor(currentUser?.id);
   const partnerColor = getUserColor(getCouplePartnerId());
-  warmCouplePreferenceDetails();
-  const myCount = allEntries.filter(e => e.user_id === currentUser.id && e.type === 'movie').length;
-  const partnerCount = allEntries.filter(e => e.user_id === getCouplePartnerId() && e.type === 'movie').length;
-  const commonPairs = getCommonCouplePairs();
-  const compat = calcCoupleCompatibility();
-  const pref = calcCouplePreferenceComparison();
+  if (!['archive', 'recommend', 'queue'].includes(coupleTab)) coupleTab = 'archive';
+  warmCoupleArchiveDetails();
   const disconnectRequester = activeCouple.disconnect_requested_by || null;
   const disconnectByMe = disconnectRequester === currentUser.id;
   const disconnectByPartner = disconnectRequester && !disconnectByMe;
@@ -3511,27 +3923,10 @@ function renderCouple() {
   const disconnectNotice = disconnectRequester
     ? `<div class="couple-section couple-disconnect-notice"><p>${disconnectByMe ? '已发送解除申请，等待对方同意。' : `${esc(partnerName)} 请求解除 Couple，同意后共享下次看队列会一起删除。`}</p></div>`
     : '';
-  const statsHTML = `
-    <div class="couple-stat-grid">
-      <div><strong style="color:${myColor.main}">${myCount}</strong><span>我的电影</span></div>
-      <div><strong style="color:${partnerColor.main}">${partnerCount}</strong><span>${esc(partnerName)} 的电影</span></div>
-      <div><strong>${commonPairs.length}</strong><span>共同电影</span></div>
-    </div>
-    <div class="couple-section">
-      <div class="couple-section-title">评分默契度</div>
-      ${compat.insufficient ? '<div class="couple-note">共同样本少于 5 部，以下为临时值。</div>' : ''}
-      <div class="couple-meter-grid">
-        ${renderScoreMeter('总默契', compat.overall, `共同样本 ${compat.sample} 部`)}
-        ${renderScoreMeter('总分默契', compat.total)}
-        ${renderScoreMeter('六维默契', compat.dim)}
-      </div>
-    </div>
-    ${renderCouplePreferenceHTML(pref)}
-  `;
   const activeContent = coupleTab === 'queue'
     ? renderCoupleQueueHTML()
-    : coupleTab === 'stats'
-      ? statsHTML
+    : coupleTab === 'archive'
+      ? renderCoupleArchiveHTML()
       : renderCoupleRecommendationsHTML();
   container.innerHTML = `
     <div class="couple-hero">
@@ -3578,6 +3973,35 @@ $['coupleContent'].addEventListener('click', async e => {
     coupleRecommendations = null;
     await loadCoupleRecommendations(true);
     renderCouple();
+    return;
+  }
+  const chartBtn = e.target.closest('[data-couple-chart]');
+  if (chartBtn) {
+    coupleArchiveChart = chartBtn.dataset.coupleChart === 'type' ? 'type' : 'score';
+    renderCouple();
+    return;
+  }
+  const spinBtn = e.target.closest('[data-couple-spin]');
+  if (spinBtn) {
+    coupleWheelPick = pickCoupleWheelItem(calcCoupleArchiveData());
+    if (!coupleWheelPick) toast('下次看队列为空');
+    renderCouple();
+    return;
+  }
+  const wheelResult = e.target.closest('.couple-wheel-result');
+  if (wheelResult) {
+    const queueId = wheelResult.dataset.queueId;
+    const item = coupleQueue.find(q => q.id === queueId);
+    if (!item) return;
+    if (e.target.closest('[data-wheel-rate]')) {
+      if (normalizeMediaType(item.media_type) === 'movie') openQuickRate({ id: item.tmdb_id, title: item.title, year: item.year, poster_path: item.poster_path });
+      else openEntryFormForListMovie(item);
+    } else if (e.target.closest('[data-wheel-remove]')) {
+      await removeCoupleQueueItem(queueId);
+      coupleWheelPick = null;
+    } else {
+      showListItemDetail(item);
+    }
     return;
   }
   const queueRow = e.target.closest('.queue-row');

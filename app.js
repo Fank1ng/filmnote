@@ -3329,18 +3329,18 @@ function renderCouplePreferenceHTML(pref) {
 }
 
 const COUPLE_TYPE_DIMENSIONS = [
-  { key: 'action', label: '动作', ids: [28] },
-  { key: 'adventureFantasy', label: '冒险/奇幻', ids: [12, 14] },
-  { key: 'sciFi', label: '科幻', ids: [878] },
-  { key: 'thrillerHorror', label: '惊悚/恐怖', ids: [53, 27, 9648] },
-  { key: 'comedy', label: '喜剧', ids: [35] },
-  { key: 'romance', label: '爱情', ids: [10749] },
-  { key: 'drama', label: '剧情', ids: [18] },
-  { key: 'historyWar', label: '历史/战争', ids: [36, 10752] },
-  { key: 'animation', label: '动画', ids: [16] },
-  { key: 'familyKids', label: '家庭/儿童', ids: [10751] },
-  { key: 'musicDance', label: '音乐/歌舞', ids: [10402] },
-  { key: 'documentaryBiopic', label: '纪录/传记', ids: [99], keywordPattern: /biograph|biopic|based on true|real person|historical figure|传记|真实人物/i }
+  { key: 'action', label: '动作', ids: [28], names: ['动作'] },
+  { key: 'adventureFantasy', label: '冒险/奇幻', ids: [12, 14], names: ['冒险', '奇幻'] },
+  { key: 'sciFi', label: '科幻', ids: [878], names: ['科幻'] },
+  { key: 'thrillerHorror', label: '惊悚/恐怖', ids: [53, 27, 9648], names: ['惊悚', '恐怖', '悬疑'] },
+  { key: 'comedy', label: '喜剧', ids: [35], names: ['喜剧'] },
+  { key: 'romance', label: '爱情', ids: [10749], names: ['爱情'] },
+  { key: 'drama', label: '剧情', ids: [18], names: ['剧情'] },
+  { key: 'historyWar', label: '历史/战争', ids: [36, 10752], names: ['历史', '战争'] },
+  { key: 'animation', label: '动画', ids: [16], names: ['动画'] },
+  { key: 'familyKids', label: '家庭/儿童', ids: [10751], names: ['家庭', '儿童'] },
+  { key: 'musicDance', label: '音乐/歌舞', ids: [10402], names: ['音乐', '歌舞'] },
+  { key: 'documentaryBiopic', label: '纪录/传记', ids: [99], names: ['纪录'], keywordPattern: /biograph|biopic|based on true|real person|historical figure|传记|真实人物/i }
 ];
 
 function getCoupleMovieEntries(userId) {
@@ -3362,6 +3362,12 @@ function getEntryGenreIds(entry) {
   return ids.map(Number).filter(Boolean);
 }
 
+function getEntryGenreNames(entry) {
+  const detail = getEntryDetail(entry);
+  const names = detail?.genres || getEntryGenres(entry) || [];
+  return names.map(g => String(g).trim()).filter(Boolean);
+}
+
 function getEntryKeywordNames(entry) {
   const detail = getEntryDetail(entry);
   return (detail?.keyword_names || []).map(String);
@@ -3369,10 +3375,15 @@ function getEntryKeywordNames(entry) {
 
 function getCoupleTypeKeys(entry) {
   const ids = new Set(getEntryGenreIds(entry));
+  const names = new Set(getEntryGenreNames(entry));
   const keywords = getEntryKeywordNames(entry).join(' ');
   const keys = new Set();
   COUPLE_TYPE_DIMENSIONS.forEach(dim => {
-    if (dim.ids.some(id => ids.has(id)) || (dim.keywordPattern && dim.keywordPattern.test(keywords))) {
+    if (
+      dim.ids.some(id => ids.has(id)) ||
+      (dim.names || []).some(name => names.has(name)) ||
+      (dim.keywordPattern && dim.keywordPattern.test(keywords))
+    ) {
       keys.add(dim.key);
     }
   });
@@ -3523,7 +3534,7 @@ function radarPolygon(values, cx, cy, radius, maxValue) {
 function renderCoupleRadar(axes, maxValue, myColor, partnerColor, isType = false) {
   const cx = 210;
   const cy = 210;
-  const radius = isType ? 128 : 118;
+  const radius = isType ? 148 : 136;
   const levels = [0.2, 0.4, 0.6, 0.8, 1];
   const grid = levels.map(level => {
     const points = axes.map((_, i) => radarPoint(cx, cy, radius * level, i, axes.length).map(n => n.toFixed(1)).join(',')).join(' ');
@@ -3534,7 +3545,7 @@ function renderCoupleRadar(axes, maxValue, myColor, partnerColor, isType = false
     return `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/>`;
   }).join('');
   const labels = axes.map((axis, i) => {
-    const [x, y] = radarPoint(cx, cy, radius + (isType ? 42 : 52), i, axes.length);
+    const [x, y] = radarPoint(cx, cy, radius + (isType ? 36 : 48), i, axes.length);
     const anchor = x < cx - 16 ? 'end' : x > cx + 16 ? 'start' : 'middle';
     return `
       <text x="${x.toFixed(1)}" y="${(y - 4).toFixed(1)}" text-anchor="${anchor}" class="couple-radar-label ${isType ? 'type' : ''}">${esc(axis.label)}</text>

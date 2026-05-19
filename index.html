@@ -135,7 +135,7 @@
   <main>
     <!-- ═══ 搜索 ═══ -->
     <section class="tab-panel active" id="panel-rate">
-      <h2 class="section-title" id="formTitle">搜索电影 / 剧集</h2>
+      <h2 class="section-title" id="formTitle">搜索并确认</h2>
 
       <div class="type-toggle" id="typeToggle">
         <button class="active" data-type="movie">🎬 电影</button>
@@ -144,12 +144,31 @@
 
       <div class="search-wrap">
         <input type="text" id="tmdbSearch" placeholder="🔍 搜索电影或剧集，选择后添加评价或加入清单...">
-        <div class="search-actions" id="searchActions" aria-label="搜索结果操作">
-          <button type="button" class="btn btn-secondary" id="searchWatchBtn" disabled>加入想看</button>
-          <button type="button" class="btn btn-secondary" id="searchNextBtn" disabled>加入下次看</button>
-          <button type="button" class="btn btn-primary" id="searchAddReviewBtn" disabled>添加评价</button>
-        </div>
         <div class="search-results" id="searchResults"></div>
+      </div>
+
+      <div class="selected-search-preview" id="selectedSearchPreview">
+        <div class="selected-search-empty" id="selectedSearchEmpty">搜索并选择一部电影或剧集后确认信息</div>
+        <div class="selected-search-card hidden" id="selectedSearchCard">
+          <div class="selected-poster" id="selectedSearchPoster"></div>
+          <div class="selected-info">
+            <div class="selected-head">
+              <div>
+                <h3 id="selectedSearchTitle">未选择</h3>
+                <div class="selected-meta" id="selectedSearchMeta"></div>
+              </div>
+              <span class="selected-type" id="selectedSearchType">电影</span>
+            </div>
+            <div class="selected-facts" id="selectedSearchFacts"></div>
+            <p class="selected-overview" id="selectedSearchOverview">正在加载简介...</p>
+            <button type="button" class="selected-overview-toggle hidden" id="selectedSearchOverviewToggle">展开简介</button>
+            <div class="search-actions" id="searchActions" aria-label="搜索结果操作">
+              <button type="button" class="btn btn-secondary" id="searchWatchBtn" disabled>加入想看</button>
+              <button type="button" class="btn btn-secondary" id="searchNextBtn" disabled>加入下次看</button>
+              <button type="button" class="btn btn-primary" id="searchAddReviewBtn" disabled>添加评价</button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <form id="movieForm" autocomplete="off" class="hidden">

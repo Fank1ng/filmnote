@@ -70,6 +70,15 @@ const $ = {
   get searchWatchBtn() { return document.getElementById('searchWatchBtn'); },
   get searchNextBtn() { return document.getElementById('searchNextBtn'); },
   get searchResults() { return document.getElementById('searchResults'); },
+  get selectedSearchCard() { return document.getElementById('selectedSearchCard'); },
+  get selectedSearchEmpty() { return document.getElementById('selectedSearchEmpty'); },
+  get selectedSearchFacts() { return document.getElementById('selectedSearchFacts'); },
+  get selectedSearchMeta() { return document.getElementById('selectedSearchMeta'); },
+  get selectedSearchOverview() { return document.getElementById('selectedSearchOverview'); },
+  get selectedSearchOverviewToggle() { return document.getElementById('selectedSearchOverviewToggle'); },
+  get selectedSearchPoster() { return document.getElementById('selectedSearchPoster'); },
+  get selectedSearchTitle() { return document.getElementById('selectedSearchTitle'); },
+  get selectedSearchType() { return document.getElementById('selectedSearchType'); },
   get seasonList() { return document.getElementById('seasonList'); },
   get seasonSection() { return document.getElementById('seasonSection'); },
   get regSignupBtn() { return document.getElementById('regSignupBtn'); },
@@ -1344,7 +1353,7 @@ function setEntryType(nextType) {
   const isSeries = entryType === 'series';
   document.querySelectorAll('#typeToggle button').forEach(b => b.classList.toggle('active', b.dataset.type === entryType));
   $['seasonSection'].classList.toggle('hidden', !isSeries);
-  $['formTitle'].textContent = '搜索电影 / 剧集';
+  $['formTitle'].textContent = '搜索并确认';
   $['tmdbSearch'].placeholder = isSeries ? '🔍 搜索剧集，选择后添加评价或加入清单...' : '🔍 搜索电影，选择后添加评价或加入清单...';
   clearSelectedSearchMovie();
   $['searchResults'].classList.remove('open');
@@ -1360,6 +1369,7 @@ document.querySelectorAll('#typeToggle button').forEach(btn=>{
 let tmdbTimer = null;
 let tmdbAbort = null;
 let selectedSearchMovie = null;
+let selectedSearchDetailSeq = 0;
 
 function updateSearchActions() {
   const disabled = !selectedSearchMovie;
@@ -1370,17 +1380,104 @@ function updateSearchActions() {
 
 function clearSelectedSearchMovie() {
   selectedSearchMovie = null;
+  selectedSearchDetailSeq++;
   document.querySelectorAll('.sr-item.selected').forEach(item => item.classList.remove('selected'));
+  $['selectedSearchEmpty'].classList.remove('hidden');
+  $['selectedSearchCard'].classList.add('hidden');
+  $['selectedSearchOverview'].classList.remove('expanded');
+  $['selectedSearchOverviewToggle'].classList.add('hidden');
   updateSearchActions();
+}
+
+function renderSelectedSearchPreview(loading = false) {
+  if (!selectedSearchMovie) {
+    clearSelectedSearchMovie();
+    return;
+  }
+  const movie = selectedSearchMovie;
+  const mediaType = normalizeMediaType(movie.media_type);
+  const poster = movie.poster_path ? posterUrl(movie.poster_path) : '';
+  const facts = [];
+  if (movie.director) facts.push(`${mediaType === 'series' ? '主创' : '导演'}：${movie.director}`);
+  if (movie.vote_average) facts.push(`TMDb ${Number(movie.vote_average).toFixed(1)}`);
+  if (mediaType === 'movie' && movie.runtime) facts.push(`${movie.runtime} 分钟`);
+  if (mediaType === 'series' && movie.number_of_seasons) facts.push(`${movie.number_of_seasons} 季`);
+  if (movie.original_language) facts.push(movie.original_language.toUpperCase());
+  const overview = movie.overview || (loading ? '正在加载简介...' : '暂无简介');
+
+  $['selectedSearchEmpty'].classList.add('hidden');
+  $['selectedSearchCard'].classList.remove('hidden');
+  $['selectedSearchTitle'].textContent = movie.title || '未命名';
+  $['selectedSearchType'].textContent = mediaTypeLabel(mediaType);
+  $['selectedSearchMeta'].textContent = [movie.year || '年份未知', movie.release_date || ''].filter(Boolean).join(' · ');
+  $['selectedSearchFacts'].innerHTML = facts.length
+    ? facts.map(f => `<span>${esc(f)}</span>`).join('')
+    : `<span>${loading ? '正在补充详情...' : '暂无更多信息'}</span>`;
+  $['selectedSearchOverview'].textContent = overview;
+  $['selectedSearchOverview'].classList.toggle('loading', loading);
+  $['selectedSearchOverviewToggle'].classList.toggle('hidden', overview.length <= 90);
+  $['selectedSearchOverviewToggle'].textContent = $['selectedSearchOverview'].classList.contains('expanded') ? '收起简介' : '展开简介';
+  $['selectedSearchPoster'].innerHTML = poster
+    ? `<img src="${poster}" alt="${esc(movie.title || '')}">`
+    : `<span>${mediaType === 'series' ? '📺' : '🎬'}</span>`;
+  updateSearchActions();
+}
+
+async function hydrateSelectedSearchMovie(seq) {
+  const movie = selectedSearchMovie;
+  if (!movie?.tmdb_id) return;
+  try {
+    const mediaType = normalizeMediaType(movie.media_type);
+    let detail = null;
+    if (mediaType === 'series') {
+      const [detailRes, credRes] = await Promise.all([
+        tmdbFetch(`/tv/${movie.tmdb_id}?language=zh-CN`),
+        tmdbFetch(`/tv/${movie.tmdb_id}/credits?language=zh-CN`).catch(() => null)
+      ]);
+      const detailData = await detailRes.json().catch(() => ({}));
+      const credData = credRes ? await credRes.json().catch(() => ({})) : {};
+      const creator = (detailData.created_by || [])[0] || (credData.crew||[]).find(c=>c.job==='Director'||c.job==='Executive Producer');
+      detail = {
+        overview: detailData.overview || '',
+        director: creator?.name || '',
+        poster_path: detailData.poster_path || movie.poster_path,
+        year: movie.year || parseInt(String(detailData.first_air_date || '').slice(0, 4)) || null,
+        release_date: detailData.first_air_date || movie.release_date || '',
+        vote_average: detailData.vote_average || 0,
+        number_of_seasons: detailData.number_of_seasons || 0,
+        original_language: detailData.original_language || movie.original_language || ''
+      };
+    } else {
+      detail = await fetchMovieDetail(movie.tmdb_id);
+    }
+    if (seq !== selectedSearchDetailSeq || !selectedSearchMovie) return;
+    if (detail) {
+      selectedSearchMovie = {
+        ...selectedSearchMovie,
+        ...detail,
+        id: selectedSearchMovie.id,
+        tmdb_id: selectedSearchMovie.tmdb_id,
+        media_type: mediaType,
+        title: selectedSearchMovie.title || detail.title || ''
+      };
+    }
+  } catch(e) {
+    if (seq !== selectedSearchDetailSeq || !selectedSearchMovie) return;
+  }
+  if (seq === selectedSearchDetailSeq) renderSelectedSearchPreview(false);
 }
 
 function selectSearchResult(item) {
   const movie = movieFromSearchElement(item);
   if (!movie) return;
   selectedSearchMovie = movie;
+  selectedSearchDetailSeq++;
   document.querySelectorAll('.sr-item.selected').forEach(row => row.classList.remove('selected'));
   item.classList.add('selected');
-  updateSearchActions();
+  $['searchResults'].classList.remove('open');
+  $['selectedSearchOverview'].classList.remove('expanded');
+  renderSelectedSearchPreview(true);
+  hydrateSelectedSearchMovie(selectedSearchDetailSeq);
 }
 
 $['tmdbSearch'].addEventListener('input', function(){
@@ -1398,7 +1495,10 @@ function movieFromSearchElement(item) {
     title: item.dataset.title,
     year: item.dataset.year,
     release_date: item.dataset.releaseDate || '',
-    poster_path: item.dataset.poster || ''
+    poster_path: item.dataset.poster || '',
+    overview: item.dataset.overview || '',
+    vote_average: item.dataset.voteAverage || 0,
+    original_language: item.dataset.originalLanguage || ''
   });
 }
 
@@ -1454,6 +1554,11 @@ $['searchNextBtn'].addEventListener('click', async ()=>{
   if (!selectedSearchMovie) return;
   await addToCoupleQueue(selectedSearchMovie);
 });
+
+$['selectedSearchOverviewToggle'].addEventListener('click', ()=>{
+  $['selectedSearchOverview'].classList.toggle('expanded');
+  $['selectedSearchOverviewToggle'].textContent = $['selectedSearchOverview'].classList.contains('expanded') ? '收起简介' : '展开简介';
+});
 updateSearchActions();
 
 async function searchTmdb(query) {
@@ -1482,7 +1587,7 @@ async function searchTmdb(query) {
       const poster = r.poster_path ? posterUrl(r.poster_path) : '';
       const mediaType = type === 'tv' ? 'series' : 'movie';
       return `
-        <div class="sr-item" data-tmdb-id="${r.id}" data-media-type="${mediaType}" data-title="${esc(title)}" data-year="${year}" data-release-date="${releaseDate}" data-poster="${r.poster_path||''}">
+        <div class="sr-item" data-tmdb-id="${r.id}" data-media-type="${mediaType}" data-title="${esc(title)}" data-year="${year}" data-release-date="${releaseDate}" data-poster="${r.poster_path||''}" data-overview="${esc(r.overview || '')}" data-vote-average="${Number(r.vote_average || 0)}" data-original-language="${esc(r.original_language || '')}">
           ${poster ? `<img class="sr-poster" src="${poster}" alt="">` : '<div class="sr-poster"></div>'}
           <div class="sr-info sr-fill-action">
             <div class="sr-title">${esc(title)}</div>
@@ -2773,8 +2878,12 @@ function normalizeListMovie(movieOrId) {
     year: raw.year || parseInt(String(release).slice(0, 4)) || null,
     release_date: release,
     poster_path: raw.poster_path || '',
+    overview: raw.overview || '',
+    director: raw.director || '',
     genre_ids: raw.genre_ids || [],
     vote_average: raw.vote_average || 0,
+    runtime: raw.runtime || 0,
+    number_of_seasons: raw.number_of_seasons || 0,
     original_language: raw.original_language || ''
   };
 }

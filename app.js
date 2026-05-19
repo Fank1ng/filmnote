@@ -65,6 +65,10 @@ const $ = {
   get posterPath() { return document.getElementById('posterPath'); },
   get scoreFilter() { return document.getElementById('scoreFilter'); },
   get searchInput() { return document.getElementById('searchInput'); },
+  get searchActions() { return document.getElementById('searchActions'); },
+  get searchAddReviewBtn() { return document.getElementById('searchAddReviewBtn'); },
+  get searchWatchBtn() { return document.getElementById('searchWatchBtn'); },
+  get searchNextBtn() { return document.getElementById('searchNextBtn'); },
   get searchResults() { return document.getElementById('searchResults'); },
   get seasonList() { return document.getElementById('seasonList'); },
   get seasonSection() { return document.getElementById('seasonSection'); },
@@ -93,6 +97,9 @@ const $ = {
   get qrTotalScore() { return document.getElementById('qrTotalScore'); },
   get qrCancel() { return document.getElementById('qrCancel'); },
   get qrSubmit() { return document.getElementById('qrSubmit'); },
+  get qrSeasonSection() { return document.getElementById('qrSeasonSection'); },
+  get qrSeasonList() { return document.getElementById('qrSeasonList'); },
+  get qrAddSeasonBtn() { return document.getElementById('qrAddSeasonBtn'); },
   get quickRateModal() { return document.getElementById('quickRateModal'); },
   get blockedMgmtBtn() { return document.getElementById('blockedMgmtBtn'); },
   get blockedModal() { return document.getElementById('blockedModal'); },
@@ -897,7 +904,7 @@ async function fetchOverview(tmdbId) {
 }
 
 function editActionForEntry(entry) {
-  return entry.type === 'series' ? `editEntry('${entry.id}')` : `openQuickEdit('${entry.id}')`;
+  return `openQuickEdit('${entry.id}')`;
 }
 
 function buildDimTagsHTML(ratings, userColor) {
@@ -1222,23 +1229,26 @@ function updateSeasonPreview(prefix) {
 }
 
 // ===== SEASON RATINGS UI =====
-function addSeasonRow(seasonData) {
+function addSeasonRow(seasonData, scope = 'main') {
+  const listEl = scope === 'qr' ? $['qrSeasonList'] : $['seasonList'];
+  if (!listEl) return;
   const sidx = seasonData?._idx || Date.now();
   const snum = seasonData?.season_number || '';
   const stitle = seasonData?.season_title || '';
   const ratings = seasonData?.ratings || {};
   const comment = seasonData?.comment || '';
-  const prefix = `s${sidx}`;
+  const prefix = `${scope === 'qr' ? 'qs' : 's'}${sidx}`;
 
   const card = document.createElement('div');
   card.className = 'season-card';
   card.dataset.seasonIdx = sidx;
+  card.dataset.seasonScope = scope;
   card.innerHTML = `
     <div class="season-header" data-prefix="${prefix}">
       <span class="season-title">📺 第 <input type="number" value="${snum}" min="1" max="50" placeholder="?" style="width:50px;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:0.85rem" onclick="event.stopPropagation()" title="季号不可重复"> 季 · <input type="text" value="${esc(stitle)}" placeholder="季标题（可选）" style="width:140px;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:0.85rem" onclick="event.stopPropagation()"></span>
       <div style="display:flex;align-items:center;gap:8px">
         <span class="season-score" id="seasonTotal-${prefix}">${calcTotal(ratings).toFixed(1)}</span>
-        <button type="button" class="btn btn-xs btn-danger" onclick="removeSeason('${sidx}')" title="删除此季">✕</button>
+        <button type="button" class="btn btn-xs btn-danger" onclick="removeSeason('${sidx}', '${scope}')" title="删除此季">✕</button>
       </div>
     </div>
     <div class="season-body">
@@ -1249,7 +1259,7 @@ function addSeasonRow(seasonData) {
       </div>
     </div>
   `;
-  $['seasonList'].appendChild(card);
+  listEl.appendChild(card);
 
   // Toggle expand
   card.querySelector('.season-header').addEventListener('click', function(e) {
@@ -1262,16 +1272,17 @@ function addSeasonRow(seasonData) {
   bindDimSliders(prefix);
 }
 
-function removeSeason(idx) {
-  const card = document.querySelector(`.season-card[data-season-idx="${idx}"]`);
+function removeSeason(idx, scope = 'main') {
+  const card = document.querySelector(`.season-card[data-season-idx="${idx}"][data-season-scope="${scope}"]`);
   if (card) card.remove();
 }
 
-function collectSeasonData() {
+function collectSeasonData(listEl = $['seasonList']) {
   const seasons = [];
-  document.querySelectorAll('.season-card').forEach(card=>{
+  if (!listEl) return seasons;
+  listEl.querySelectorAll('.season-card').forEach(card=>{
     const idx = card.dataset.seasonIdx;
-    const prefix = `s${idx}`;
+    const prefix = `${card.dataset.seasonScope === 'qr' ? 'qs' : 's'}${idx}`;
     const numInput = card.querySelector('.season-header input[type="number"]');
     const titleInput = card.querySelector('.season-header input[type="text"]');
     const ratings = {};
@@ -1293,9 +1304,15 @@ function collectSeasonData() {
 }
 
 $['addSeasonBtn'].addEventListener('click', ()=>{
-  const existing = collectSeasonData().map(s=>s.season_number);
+  const existing = collectSeasonData($['seasonList']).map(s=>s.season_number);
   const next = existing.length>0 ? Math.max(...existing)+1 : 1;
-  addSeasonRow({ season_number: next });
+  addSeasonRow({ season_number: next }, 'main');
+});
+
+$['qrAddSeasonBtn'].addEventListener('click', ()=>{
+  const existing = collectSeasonData($['qrSeasonList']).map(s=>s.season_number);
+  const next = existing.length>0 ? Math.max(...existing)+1 : 1;
+  addSeasonRow({ season_number: next }, 'qr');
 });
 
 // ===== TYPE TOGGLE =====
@@ -1327,8 +1344,10 @@ function setEntryType(nextType) {
   const isSeries = entryType === 'series';
   document.querySelectorAll('#typeToggle button').forEach(b => b.classList.toggle('active', b.dataset.type === entryType));
   $['seasonSection'].classList.toggle('hidden', !isSeries);
-  $['formTitle'].textContent = isSeries ? '记录一部剧集' : '记录一部电影';
-  $['tmdbSearch'].placeholder = isSeries ? '🔍 从 TMDb 搜索剧集信息，自动填入...' : '🔍 从 TMDb 搜索电影信息，自动填入...';
+  $['formTitle'].textContent = '搜索电影 / 剧集';
+  $['tmdbSearch'].placeholder = isSeries ? '🔍 搜索剧集，选择后添加评价或加入清单...' : '🔍 搜索电影，选择后添加评价或加入清单...';
+  clearSelectedSearchMovie();
+  $['searchResults'].classList.remove('open');
 }
 
 document.querySelectorAll('#typeToggle button').forEach(btn=>{
@@ -1340,9 +1359,34 @@ document.querySelectorAll('#typeToggle button').forEach(btn=>{
 // ===== TMDB SEARCH =====
 let tmdbTimer = null;
 let tmdbAbort = null;
+let selectedSearchMovie = null;
+
+function updateSearchActions() {
+  const disabled = !selectedSearchMovie;
+  [$['searchAddReviewBtn'], $['searchWatchBtn'], $['searchNextBtn']].forEach(btn => {
+    if (btn) btn.disabled = disabled;
+  });
+}
+
+function clearSelectedSearchMovie() {
+  selectedSearchMovie = null;
+  document.querySelectorAll('.sr-item.selected').forEach(item => item.classList.remove('selected'));
+  updateSearchActions();
+}
+
+function selectSearchResult(item) {
+  const movie = movieFromSearchElement(item);
+  if (!movie) return;
+  selectedSearchMovie = movie;
+  document.querySelectorAll('.sr-item.selected').forEach(row => row.classList.remove('selected'));
+  item.classList.add('selected');
+  updateSearchActions();
+}
+
 $['tmdbSearch'].addEventListener('input', function(){
   clearTimeout(tmdbTimer);
   const q = this.value.trim();
+  clearSelectedSearchMovie();
   if (!q) { $['searchResults'].classList.remove('open'); return; }
   tmdbTimer = setTimeout(()=>searchTmdb(q), 350);
 });
@@ -1395,19 +1439,26 @@ async function fillFromTmdbSearchItem(item) {
   toast('已自动填入信息');
 }
 
-async function fillAndAddFromTmdbSearchItem(item, action) {
-  const movie = movieFromSearchElement(item);
-  if (!movie) return;
-  await fillFromTmdbSearchItem(item);
-  if (action === 'watchlist') {
-    await addToWatchlist(movie);
-  } else if (action === 'queue') {
-    await addToCoupleQueue(movie);
-  }
-}
+$['searchAddReviewBtn'].addEventListener('click', ()=>{
+  if (!selectedSearchMovie) return;
+  $['searchResults'].classList.remove('open');
+  openQuickRate(selectedSearchMovie);
+});
+
+$['searchWatchBtn'].addEventListener('click', async ()=>{
+  if (!selectedSearchMovie) return;
+  await addToWatchlist(selectedSearchMovie);
+});
+
+$['searchNextBtn'].addEventListener('click', async ()=>{
+  if (!selectedSearchMovie) return;
+  await addToCoupleQueue(selectedSearchMovie);
+});
+updateSearchActions();
 
 async function searchTmdb(query) {
   const container = $['searchResults'];
+  clearSelectedSearchMovie();
   // Abort previous in-flight request
   if (tmdbAbort) tmdbAbort.abort();
   tmdbAbort = new AbortController();
@@ -1419,6 +1470,7 @@ async function searchTmdb(query) {
       throw new Error(data.error || data.status_message || `TMDB 搜索接口异常 (${res.status})`);
     }
     if (!data.results?.length) {
+      clearSelectedSearchMovie();
       container.innerHTML = '<div style="padding:12px;color:var(--text2);font-size:0.85rem">无结果</div>';
       container.classList.add('open');
       return;
@@ -1436,11 +1488,6 @@ async function searchTmdb(query) {
             <div class="sr-title">${esc(title)}</div>
             <div class="sr-meta">${year||'未知'} ${r.overview ? '· '+esc(r.overview.slice(0,60))+'...' : ''}</div>
           </div>
-          <div class="sr-actions">
-            <button type="button" class="btn btn-xs btn-primary sr-fill-btn">填入评价</button>
-            <button type="button" class="btn btn-xs btn-secondary sr-watch-btn">加入想看</button>
-            <button type="button" class="btn btn-xs btn-secondary sr-next-btn">加入下次看</button>
-          </div>
         </div>
       `;
     }).join('');
@@ -1448,22 +1495,13 @@ async function searchTmdb(query) {
 
     // Click handler
     container.querySelectorAll('.sr-item').forEach(item=>{
-      item.addEventListener('click', async e=>{
-        if (e.target.closest('.sr-watch-btn')) {
-          e.stopPropagation();
-          await fillAndAddFromTmdbSearchItem(item, 'watchlist');
-          return;
-        }
-        if (e.target.closest('.sr-next-btn')) {
-          e.stopPropagation();
-          await fillAndAddFromTmdbSearchItem(item, 'queue');
-          return;
-        }
-        await fillFromTmdbSearchItem(item);
+      item.addEventListener('click', ()=>{
+        selectSearchResult(item);
       });
     });
   } catch(e) {
     if (e.name==='AbortError') return; // Cancelled by newer request
+    clearSelectedSearchMovie();
     container.innerHTML = `<div style="padding:12px;color:var(--text2);font-size:0.85rem">TMDB 连接失败：${esc(e.message || '搜索失败')}</div>`;
     container.classList.add('open');
   }
@@ -1678,6 +1716,7 @@ function addMyRating(entryId) {
   // Open quick rate modal (same as discover cards)
   openQuickRate({
     id: entry.tmdb_id,
+    media_type: entry.type,
     title: entry.title,
     release_date: entry.year ? String(entry.year)+'-01-01' : '',
     poster_path: entry.poster_path
@@ -1687,17 +1726,7 @@ function addMyRating(entryId) {
 function openEntryFormForListMovie(movieOrId) {
   const movie = normalizeListMovie(movieOrId);
   if (!movie) return;
-  resetForm();
-  setEntryType(movie.media_type);
-  $['title'].value = movie.title;
-  $['year'].value = movie.year || '';
-  $['tmdbId'].value = movie.tmdb_id;
-  $['posterPath'].value = movie.poster_path || '';
-  $['tmdbSearch'].value = '';
-  $['searchResults'].classList.remove('open');
-  switchTab('rate');
-  window.scrollTo({ top: 0, behavior: 'smooth' });
-  toast('已填入信息，可继续评分');
+  openQuickRate(movie);
 }
 
 // ===== USER COLOR =====
@@ -2681,8 +2710,9 @@ $['discoverContent'].addEventListener('click', e=>{
   if (!btn) return;
   e.stopPropagation();
   const tmdbId = parseInt(btn.dataset.tmdbId);
+  const mediaType = normalizeMediaType(btn.dataset.mediaType);
   const movie = discoverMovieMap[tmdbId];
-  if (movie) openQuickRate(movie);
+  if (movie) openQuickRate({ ...movie, media_type: mediaType });
 });
 
 // Delegated click for "不再推荐" buttons in discover grid
@@ -3832,7 +3862,7 @@ function renderCoupleQueueHTML() {
           </div>
         `;
       }).join('')
-    : '<div class="empty-state"><p>还没有下次看的电影/剧集</p><p style="font-size:0.8rem;color:var(--text2);margin-top:8px">可从发现页或添加评价搜索结果加入</p></div>';
+    : '<div class="empty-state"><p>还没有下次看的电影/剧集</p><p style="font-size:0.8rem;color:var(--text2);margin-top:8px">可从发现页或搜索结果加入</p></div>';
   return `
     <div class="couple-section">
       <div class="couple-section-title">下次看</div>
@@ -4037,8 +4067,9 @@ $['coupleContent'].addEventListener('click', async e => {
   if (rateBtn) {
     e.stopPropagation();
     const tmdbId = parseInt(rateBtn.dataset.tmdbId);
+    const mediaType = normalizeMediaType(rateBtn.dataset.mediaType);
     const movie = discoverMovieMap[tmdbId] || (coupleRecommendations || []).find(m => m.id === tmdbId);
-    if (movie) openQuickRate(movie);
+    if (movie) openQuickRate({ ...movie, media_type: mediaType });
     return;
   }
   const watchBtn = e.target.closest('.dc-watch-btn');
@@ -4490,15 +4521,35 @@ async function loadTopRated() {
 }
 
 // ===== QUICK RATE =====
+function resetQuickRateSeasons(mediaType, seasons = []) {
+  if ($['qrSeasonList']) $['qrSeasonList'].innerHTML = '';
+  const isSeries = normalizeMediaType(mediaType) === 'series';
+  $['qrSeasonSection'].classList.toggle('hidden', !isSeries);
+  if (isSeries) {
+    seasons.forEach(s => addSeasonRow(s, 'qr'));
+  }
+}
+
 function openQuickRate(movie) {
-  const year = movie.year || (movie.release_date||'').slice(0,4) || null;
-  quickRateMovie = { tmdb_id: movie.id||movie.tmdb_id, title: movie.title, year, poster_path: movie.poster_path };
+  const normalized = normalizeListMovie(movie) || (movie?.title ? {
+    id: null,
+    tmdb_id: null,
+    media_type: normalizeMediaType(movie.media_type || movie.type || 'movie'),
+    title: movie.title,
+    year: movie.year || parseInt(String(movie.release_date || movie.first_air_date || '').slice(0, 4)) || null,
+    release_date: movie.release_date || movie.first_air_date || '',
+    poster_path: movie.poster_path || '',
+    director: movie.director || ''
+  } : null);
+  if (!normalized) return;
+  quickRateMovie = normalized;
   quickEditEntryId = null;
-  $['qrTitle'].textContent = '评价 ' + movie.title;
+  $['qrTitle'].textContent = '评价 ' + normalized.title;
   $['qrDims'].innerHTML = buildDimSliders('qr', {});
   $['qrTotalScore'].textContent = '5.0';
   $['qrComment'].value = '';
-  $['qrSubmit'].textContent = '提交评价';
+  $['qrSubmit'].textContent = '保存评价';
+  resetQuickRateSeasons(normalized.media_type);
   bindDimSliders('qr');
   updateQrTotal();
   $['quickRateModal'].classList.add('open');
@@ -4508,12 +4559,33 @@ function openQuickEdit(id) {
   const entry = allEntries.find(e=>e.id===id);
   if (!entry) return;
   quickEditEntryId = id;
-  quickRateMovie = { tmdb_id: entry.tmdb_id, title: entry.title, year: entry.year, poster_path: entry.poster_path };
+  quickRateMovie = {
+    id: entry.tmdb_id || null,
+    tmdb_id: entry.tmdb_id || null,
+    media_type: normalizeMediaType(entry.type),
+    title: entry.title,
+    year: entry.year || null,
+    poster_path: entry.poster_path || '',
+    director: entry.director || ''
+  };
   $['qrTitle'].textContent = '编辑 ' + entry.title;
   $['qrDims'].innerHTML = buildDimSliders('qr', entry.ratings||{});
   $['qrTotalScore'].textContent = getEntryScore(entry).toFixed(1);
   $['qrComment'].value = entry.comment||'';
   $['qrSubmit'].textContent = '更新评价';
+  const seasons = entry.type === 'series'
+    ? allSeasonRatings
+      .filter(s => s.entry_id === id && s.user_id === currentUser.id)
+      .map(s => ({
+        _idx: s.id,
+        _id: s.id,
+        season_number: s.season_number,
+        season_title: s.season_title,
+        ratings: s.ratings,
+        comment: s.comment
+      }))
+    : [];
+  resetQuickRateSeasons(entry.type, seasons);
   bindDimSliders('qr');
   updateQrTotal();
   $['quickRateModal'].classList.add('open');
@@ -4535,10 +4607,15 @@ document.addEventListener('input', e=>{
 $['qrCancel'].addEventListener('click', ()=>{
   $['quickRateModal'].classList.remove('open');
   quickRateMovie = null;
+  quickEditEntryId = null;
 });
 
 $['quickRateModal'].addEventListener('click', e=>{
-  if (e.target===e.currentTarget) { $['quickRateModal'].classList.remove('open'); quickRateMovie = null; }
+  if (e.target===e.currentTarget) {
+    $['quickRateModal'].classList.remove('open');
+    quickRateMovie = null;
+    quickEditEntryId = null;
+  }
 });
 
 $['qrSubmit'].addEventListener('click', async ()=>{
@@ -4551,25 +4628,40 @@ $['qrSubmit'].addEventListener('click', async ()=>{
   const total = calcTotal(ratings);
   const isEdit = !!quickEditEntryId;
   const savedTmdbId = quickRateMovie.tmdb_id || null;
+  const mediaType = normalizeMediaType(quickRateMovie.media_type || quickRateMovie.type || 'movie');
+  const seasons = mediaType === 'series' ? collectSeasonData($['qrSeasonList']).filter(s=>s.season_number>0) : [];
+  if (mediaType === 'series') {
+    const snums = seasons.map(s=>s.season_number);
+    const dup = snums.find((n,i)=>snums.indexOf(n)!==i);
+    if (dup) { toast(`季号 S${dup} 重复，请修改后再保存`); return; }
+  }
 
   const btn = $['qrSubmit'];
   const origText = btn.textContent;
   btn.textContent = '保存中...'; btn.disabled = true;
 
   let error;
+  let entryId = quickEditEntryId;
   if (isEdit) {
     const {error: updateErr} = await db.from('entries').update({
-      ratings, total_score: total, comment,
+      ratings,
+      total_score: total,
+      comment,
       updated_at: new Date().toISOString()
     }).eq('id', quickEditEntryId);
     error = updateErr;
+    if (!error && mediaType === 'series') {
+      const {error: delErr} = await db.from('season_ratings').delete().eq('entry_id', quickEditEntryId).eq('user_id', currentUser.id);
+      error = delErr;
+    }
   } else {
     const entryData = {
       user_id: currentUser.id,
-      type: 'movie',
+      type: mediaType,
       tmdb_id: savedTmdbId,
       title: quickRateMovie.title,
       year: quickRateMovie.year || null,
+      director: quickRateMovie.director || '',
       poster_path: quickRateMovie.poster_path || '',
       ratings,
       total_score: total,
@@ -4577,10 +4669,31 @@ $['qrSubmit'].addEventListener('click', async ()=>{
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
-    const cachedDetail = savedTmdbId ? movieCache.get(savedTmdbId) : null;
+    const cachedDetail = mediaType === 'movie' && savedTmdbId ? movieCache.get(savedTmdbId) : null;
     if (cachedDetail) applyMovieDetailToEntry(entryData, cachedDetail);
-    const {error: insertErr} = await db.from('entries').insert(entryData);
+    const {data: inserted, error: insertErr} = await db.from('entries').insert(entryData).select('id').single();
     error = insertErr;
+    if (inserted?.id) entryId = inserted.id;
+  }
+
+  if (!error && mediaType === 'series' && entryId) {
+    for (const s of seasons) {
+      const {error: seasonErr} = await db.from('season_ratings').insert({
+        entry_id: entryId,
+        user_id: currentUser.id,
+        season_number: s.season_number,
+        season_title: s.season_title,
+        ratings: s.ratings,
+        total_score: s.total_score,
+        comment: s.comment,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      });
+      if (seasonErr) {
+        error = seasonErr;
+        break;
+      }
+    }
   }
 
   if (error) {
@@ -4590,12 +4703,12 @@ $['qrSubmit'].addEventListener('click', async ()=>{
   }
 
   toast(isEdit ? '评价已更新！' : '评价已保存！');
-  const savedListKey = savedTmdbId ? listKey('movie', savedTmdbId) : '';
+  const savedListKey = savedTmdbId ? listKey(mediaType, savedTmdbId) : '';
   if (!isEdit && savedTmdbId && watchlistIds.has(savedListKey)) {
     db.from('watchlist_movies')
       .delete()
       .eq('user_id', currentUser.id)
-      .eq('media_type', 'movie')
+      .eq('media_type', mediaType)
       .eq('tmdb_id', savedTmdbId)
       .then(({error}) => {
         if (!error) {
@@ -4608,7 +4721,7 @@ $['qrSubmit'].addEventListener('click', async ()=>{
     db.from('couple_watch_queue')
       .delete()
       .eq('couple_id', activeCouple.id)
-      .eq('media_type', 'movie')
+      .eq('media_type', mediaType)
       .eq('tmdb_id', savedTmdbId)
       .then(({error}) => {
         if (!error) {
@@ -4618,7 +4731,7 @@ $['qrSubmit'].addEventListener('click', async ()=>{
       });
   }
   // Fire-and-forget: backfill normalized movie detail for new entries (non-blocking)
-  if (savedTmdbId) {
+  if (mediaType === 'movie' && savedTmdbId) {
     fetchMovieDetail(savedTmdbId).then(detail => {
       if (!detail) return;
       const e = allEntries.find(x => x.tmdb_id === savedTmdbId && x.user_id === currentUser.id);
@@ -4641,10 +4754,14 @@ $['qrSubmit'].addEventListener('click', async ()=>{
   quickEditEntryId = null;
   btn.textContent = origText; btn.disabled = false;
   const wasOnDiscover = getActiveTab()==='discover';
+  const wasOnSearch = getActiveTab()==='rate';
   skipListRender = true;
   await loadAllData();
   skipListRender = false;
-  if (wasOnDiscover) {
+  if (wasOnSearch && !isEdit && entryId) {
+    locateAndGoToList(entryId);
+    switchTab('list');
+  } else if (wasOnDiscover) {
     discoverCache = { recommend: null, week: null, toprated: null };
     renderActiveTab();
   } else {

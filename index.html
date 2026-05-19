@@ -125,7 +125,7 @@
   </header>
 
   <nav role="tablist" aria-label="主导航">
-    <button class="active" data-tab="rate" role="tab" aria-selected="true" aria-label="添加评价">添加评价</button>
+    <button class="active" data-tab="rate" role="tab" aria-selected="true" aria-label="搜索">搜索</button>
     <button data-tab="list" role="tab" aria-selected="false" aria-label="影单">影单</button>
     <button data-tab="discover" role="tab" aria-selected="false" aria-label="发现好片">发现</button>
     <button data-tab="couple" role="tab" aria-selected="false" aria-label="Couple">Couple</button>
@@ -133,9 +133,9 @@
   </nav>
 
   <main>
-    <!-- ═══ 添加评价 ═══ -->
+    <!-- ═══ 搜索 ═══ -->
     <section class="tab-panel active" id="panel-rate">
-      <h2 class="section-title" id="formTitle">记录一部电影</h2>
+      <h2 class="section-title" id="formTitle">搜索电影 / 剧集</h2>
 
       <div class="type-toggle" id="typeToggle">
         <button class="active" data-type="movie">🎬 电影</button>
@@ -143,11 +143,16 @@
       </div>
 
       <div class="search-wrap">
-        <input type="text" id="tmdbSearch" placeholder="🔍 从 TMDb 搜索电影/剧集信息，自动填入...">
+        <input type="text" id="tmdbSearch" placeholder="🔍 搜索电影或剧集，选择后添加评价或加入清单...">
+        <div class="search-actions" id="searchActions" aria-label="搜索结果操作">
+          <button type="button" class="btn btn-secondary" id="searchWatchBtn" disabled>加入想看</button>
+          <button type="button" class="btn btn-secondary" id="searchNextBtn" disabled>加入下次看</button>
+          <button type="button" class="btn btn-primary" id="searchAddReviewBtn" disabled>添加评价</button>
+        </div>
         <div class="search-results" id="searchResults"></div>
       </div>
 
-      <form id="movieForm" autocomplete="off">
+      <form id="movieForm" autocomplete="off" class="hidden">
         <input type="hidden" id="editId">
         <input type="hidden" id="tmdbId">
         <input type="hidden" id="posterPath">
@@ -302,7 +307,7 @@
 
 <!-- Quick Rate Modal -->
 <div class="modal-overlay" id="quickRateModal">
-  <div class="modal" style="max-width:480px">
+  <div class="modal quick-rate-modal">
     <h3 id="qrTitle">评价</h3>
     <div class="dim-list" id="qrDims"></div>
     <div class="total-preview">
@@ -313,9 +318,16 @@
       <label>短评（可选）</label>
       <textarea id="qrComment" rows="2" placeholder="一句话记录感受..."></textarea>
     </div>
+    <div class="season-section hidden" id="qrSeasonSection">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <span style="font-weight:600;font-size:0.95rem">📺 分季评分</span>
+        <button type="button" class="btn btn-sm btn-secondary" id="qrAddSeasonBtn">+ 添加新季</button>
+      </div>
+      <div id="qrSeasonList"></div>
+    </div>
     <div class="btn-group" style="justify-content:flex-end">
       <button class="btn btn-secondary btn-sm" id="qrCancel">取消</button>
-      <button class="btn btn-primary btn-sm" id="qrSubmit">提交评价</button>
+      <button class="btn btn-primary btn-sm" id="qrSubmit">保存评价</button>
     </div>
   </div>
 </div>

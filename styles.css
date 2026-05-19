@@ -88,32 +88,39 @@
   /* ── TMDb Search ── */
   .search-wrap { position: relative; margin-bottom: 16px; }
   .search-wrap input {
-    width: 100%; padding: 10px 14px; background: var(--surface);
+    width: 100%; padding: 13px 16px; background: var(--surface);
     border: 1px solid var(--border); color: var(--text);
-    border-radius: var(--radius); font-size: 0.95rem;
+    border-radius: var(--radius); font-size: 1rem;
   }
   .search-wrap input:focus { border-color: var(--gold); outline: none; }
+  .search-actions {
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    margin: 12px 0 10px;
+  }
+  .search-actions .btn:disabled {
+    opacity: 0.45; cursor: not-allowed; pointer-events: none;
+  }
   .search-results {
-    position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+    position: static;
     background: var(--surface); border: 1px solid var(--border);
     border-radius: var(--radius); max-height: 360px; overflow-y: auto;
-    display: none; margin-top: 4px;
+    display: none;
   }
   .search-results.open { display: block; }
   .sr-item {
-    display: flex; align-items: center; gap: 12px; padding: 10px 14px;
+    display: flex; align-items: center; gap: 14px; padding: 12px 14px;
     cursor: pointer; transition: var(--t); border-bottom: 1px solid var(--border);
+    border-left: 3px solid transparent;
   }
   .sr-item:hover { background: rgba(255,255,255,0.04); }
+  .sr-item.selected { background: rgba(212,168,83,0.12); border-left-color: var(--gold); }
   .sr-item:last-child { border-bottom: none; }
-  .sr-poster { width: 40px; height: 60px; border-radius: 4px; object-fit: cover; background: var(--border); }
-  .sr-info { flex: 1; }
+  .sr-poster { width: 48px; height: 72px; border-radius: 6px; object-fit: cover; background: var(--border); flex-shrink: 0; }
+  .sr-info { flex: 1; min-width: 0; }
   .sr-title { font-size: 0.9rem; font-weight: 500; }
-  .sr-meta { font-size: 0.75rem; color: var(--text2); }
+  .sr-meta { font-size: 0.75rem; color: var(--text2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .sr-type { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; background: var(--gold-dim); color: var(--gold); }
   .sr-fill-action { min-width: 0; }
-  .sr-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
-  .sr-actions .btn { white-space: nowrap; }
 
   /* ── Form ── */
   .form-group { margin-bottom: 14px; }
@@ -166,6 +173,7 @@
   .btn-sm { padding: 5px 12px; font-size: 0.8rem; }
   .btn-xs { padding: 3px 8px; font-size: 0.7rem; border-radius: 6px; }
   .btn-group { display: flex; gap: 10px; margin-top: 20px; }
+  .quick-rate-modal { max-width: 640px; max-height: min(86vh, 760px); overflow-y: auto; }
 
   /* ── Season Rating Cards ── */
   .season-section { margin-bottom: 20px; }
@@ -626,8 +634,9 @@
     .mc-scores-compare { gap: 4px; min-width: 0; flex-shrink: 1; }
     .mc-title { font-size: 0.88rem; }
     .tmdb-expand { display: block; margin-left: 0; margin-top: 4px; font-size: 0.78rem; padding: 6px 0; }
-    .sr-item { align-items: flex-start; }
-    .sr-actions { width: 100%; justify-content: flex-start; }
+    .search-actions .btn { flex: 1 1 120px; }
+    .sr-item { align-items: flex-start; flex-wrap: wrap; }
+    .sr-info { flex-basis: calc(100% - 62px); }
     .couple-stat-grid, .couple-meter-grid, .couple-pref-grid, .couple-split-grid, .couple-archive-top, .couple-archive-layout { grid-template-columns: 1fr; }
     .couple-archive-left, .couple-archive-right, .couple-archive-main { grid-column: auto; grid-row: auto; }
     .couple-archive-main { min-height: 0; padding: 16px; overflow: hidden; }

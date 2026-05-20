@@ -142,3 +142,166 @@ CREATE POLICY "Users can update own profile"
   ON user_preferences FOR UPDATE
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
+
+-- 8. List mutual-exclusion and rating cleanup rules
+-- Same behavior as supabase_list_rules_upgrade_2026_05.sql, kept here for full fresh installs.
+CREATE OR REPLACE FUNCTION public.normalize_list_media_type(p_type TEXT)
+RETURNS TEXT
+LANGUAGE sql
+IMMUTABLE
+AS $$
+  SELECT CASE WHEN p_type IN ('series', 'tv') THEN 'series' ELSE 'movie' END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.enforce_watchlist_rules()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+BEGIN
+  NEW.media_type := public.normalize_list_media_type(NEW.media_type);
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.entries e
+    WHERE e.user_id = NEW.user_id
+      AND public.normalize_list_media_type(e.type) = NEW.media_type
+      AND e.tmdb_id = NEW.tmdb_id
+  ) THEN
+    RAISE EXCEPTION USING MESSAGE = 'list_rule_already_rated_watchlist';
+  END IF;
+
+  IF to_regclass('public.couples') IS NOT NULL
+     AND to_regclass('public.couple_watch_queue') IS NOT NULL THEN
+    IF EXISTS (
+      SELECT 1
+      FROM public.couples c
+      JOIN public.couple_watch_queue q ON q.couple_id = c.id
+      WHERE c.status = 'active'
+        AND (c.user_a = NEW.user_id OR c.user_b = NEW.user_id)
+        AND q.media_type = NEW.media_type
+        AND q.tmdb_id = NEW.tmdb_id
+    ) THEN
+      RAISE EXCEPTION USING MESSAGE = 'list_rule_watchlist_queue_conflict';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS watchlist_movies_enforce_list_rules ON public.watchlist_movies;
+CREATE TRIGGER watchlist_movies_enforce_list_rules
+BEFORE INSERT OR UPDATE ON public.watchlist_movies
+FOR EACH ROW EXECUTE FUNCTION public.enforce_watchlist_rules();
+
+CREATE OR REPLACE FUNCTION public.enforce_couple_queue_rules()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_user_a UUID;
+  v_user_b UUID;
+BEGIN
+  NEW.media_type := public.normalize_list_media_type(NEW.media_type);
+
+  SELECT c.user_a, c.user_b
+  INTO v_user_a, v_user_b
+  FROM public.couples c
+  WHERE c.id = NEW.couple_id
+    AND c.status = 'active';
+
+  IF v_user_a IS NULL OR v_user_b IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.entries e
+    WHERE e.user_id IN (v_user_a, v_user_b)
+      AND public.normalize_list_media_type(e.type) = NEW.media_type
+      AND e.tmdb_id = NEW.tmdb_id
+  ) THEN
+    RAISE EXCEPTION USING MESSAGE = 'list_rule_already_rated_queue';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM public.watchlist_movies w
+    WHERE w.user_id IN (v_user_a, v_user_b)
+      AND w.media_type = NEW.media_type
+      AND w.tmdb_id = NEW.tmdb_id
+  ) THEN
+    RAISE EXCEPTION USING MESSAGE = 'list_rule_watchlist_queue_conflict';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+DO $$
+BEGIN
+  IF to_regclass('public.couple_watch_queue') IS NOT NULL THEN
+    EXECUTE 'DROP TRIGGER IF EXISTS couple_watch_queue_enforce_list_rules ON public.couple_watch_queue';
+    EXECUTE 'CREATE TRIGGER couple_watch_queue_enforce_list_rules BEFORE INSERT OR UPDATE ON public.couple_watch_queue FOR EACH ROW EXECUTE FUNCTION public.enforce_couple_queue_rules()';
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.cleanup_lists_after_entry_rating()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+  v_media_type TEXT;
+BEGIN
+  IF NEW.tmdb_id IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  v_media_type := public.normalize_list_media_type(NEW.type);
+
+  DELETE FROM public.watchlist_movies w
+  WHERE w.user_id = NEW.user_id
+    AND w.media_type = v_media_type
+    AND w.tmdb_id = NEW.tmdb_id;
+
+  IF to_regclass('public.couples') IS NULL
+     OR to_regclass('public.couple_watch_queue') IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  DELETE FROM public.couple_watch_queue q
+  USING public.couples c
+  WHERE q.couple_id = c.id
+    AND c.status = 'active'
+    AND (c.user_a = NEW.user_id OR c.user_b = NEW.user_id)
+    AND q.media_type = v_media_type
+    AND q.tmdb_id = NEW.tmdb_id
+    AND EXISTS (
+      SELECT 1
+      FROM public.entries ea
+      WHERE ea.user_id = c.user_a
+        AND public.normalize_list_media_type(ea.type) = v_media_type
+        AND ea.tmdb_id = NEW.tmdb_id
+    )
+    AND EXISTS (
+      SELECT 1
+      FROM public.entries eb
+      WHERE eb.user_id = c.user_b
+        AND public.normalize_list_media_type(eb.type) = v_media_type
+        AND eb.tmdb_id = NEW.tmdb_id
+    );
+
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS entries_cleanup_lists_after_rating ON public.entries;
+CREATE TRIGGER entries_cleanup_lists_after_rating
+AFTER INSERT OR UPDATE ON public.entries
+FOR EACH ROW EXECUTE FUNCTION public.cleanup_lists_after_entry_rating();

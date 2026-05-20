@@ -642,6 +642,7 @@
   .couple-wheel-result img, .couple-wheel-result > div { width: 34px; height: 50px; border-radius: 5px; object-fit: cover; background: var(--border); }
   .couple-wheel-result strong { color: var(--text); font-size: 0.86rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .couple-wheel-result span { color: var(--text2); font-size: 0.72rem; display: none; }
+  .couple-wheel-result .queue-rating-state { display: inline-flex; color: var(--text2); font-size: 0.72rem; }
   .couple-diff-row { display: grid; grid-template-columns: 84px 1fr 28px; gap: 8px; align-items: center; margin-top: 10px; font-size: 0.76rem; }
   .couple-diff-row span, .couple-diff-row em { color: var(--text2); font-style: normal; }
   .couple-diff-row i { height: 7px; border-radius: 4px; background: var(--border); overflow: hidden; }
@@ -655,6 +656,7 @@
   .queue-info strong { display: block; font-size: 0.9rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .queue-info span { color: var(--text2); font-size: 0.76rem; }
   .queue-actions { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+  .queue-rating-state { align-self: center; color: var(--text2); font-size: 0.74rem; line-height: 1.2; padding: 4px 2px; }
 
   /* ── Responsive ── */
   @media (max-width: 640px) {

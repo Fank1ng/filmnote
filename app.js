@@ -720,6 +720,8 @@ async function loadAllData() {
     await loadCoupleState();
     await loadCoupleBlockedMovies();
     await loadCoupleQueue();
+    const listsChanged = await reconcileListsAfterRatings();
+    if (listsChanged) renderActiveTab();
     if (getActiveTab() === 'couple') renderCouple();
     // One-time KV backfill for recommendation engine (runs once per deployment)
     if (!localStorage.getItem('kv_backfilled_v1')) {
@@ -1170,8 +1172,6 @@ function subscribeToRealtime() {
 }
 
 function handleRealtimeChange(payload, source) {
-  const uid = payload.new?.user_id || payload.old?.user_id;
-  if (uid === currentUser?.id && source !== 'prefs') return;
   // Only react to user_preferences when session_token actually changed
   if (source === 'prefs' && payload.new?.session_token === payload.old?.session_token) return;
 
@@ -1695,33 +1695,7 @@ $['movieForm'].addEventListener('submit', async e=>{
 
     toast(editingEntryId ? '评价已更新' : '评价已保存');
     const savedMediaType = entryTypeToMediaType(entryType);
-    const savedListKey = tmdbIdVal ? listKey(savedMediaType, tmdbIdVal) : '';
-    if (!editingEntryId && tmdbIdVal && watchlistIds.has(savedListKey)) {
-      db.from('watchlist_movies')
-        .delete()
-        .eq('user_id', currentUser.id)
-        .eq('media_type', savedMediaType)
-        .eq('tmdb_id', tmdbIdVal)
-        .then(({error}) => {
-          if (!error) {
-            watchlistIds.delete(savedListKey);
-            delete watchlistMovies[savedListKey];
-          }
-        });
-    }
-    if (!editingEntryId && tmdbIdVal && activeCouple && coupleQueue.some(q => listKey(q) === savedListKey)) {
-      db.from('couple_watch_queue')
-        .delete()
-        .eq('couple_id', activeCouple.id)
-        .eq('media_type', savedMediaType)
-        .eq('tmdb_id', tmdbIdVal)
-        .then(({error}) => {
-          if (!error) {
-            coupleQueue = coupleQueue.filter(q => listKey(q) !== savedListKey);
-            normalizeCoupleQueuePositions(false);
-          }
-        });
-    }
+    if (tmdbIdVal) await reconcileListsAfterRatings(savedMediaType, tmdbIdVal, currentUser.id);
     // Fire-and-forget: warm KV cache + backfill normalized movie detail to saved entry
     if (entryType === 'movie' && entryData.tmdb_id) {
       fetchMovieDetail(entryData.tmdb_id).then(detail => {
@@ -2888,6 +2862,121 @@ function normalizeListMovie(movieOrId) {
   };
 }
 
+function findEntryForMedia(userId, mediaType, tmdbId, extraEntries = []) {
+  if (!userId || !tmdbId) return null;
+  const normalizedType = normalizeMediaType(mediaType);
+  const id = Number(tmdbId);
+  return [...extraEntries, ...allEntries].find(e =>
+    e.user_id === userId &&
+    normalizeMediaType(e.type) === normalizedType &&
+    Number(e.tmdb_id) === id
+  ) || null;
+}
+
+function getCoupleRatingState(mediaType, tmdbId, options = {}) {
+  const extraEntries = options.savedUserId && tmdbId
+    ? [{ user_id: options.savedUserId, type: mediaType, tmdb_id: Number(tmdbId) }]
+    : [];
+  const partnerId = getCouplePartnerId();
+  const mine = currentUser ? findEntryForMedia(currentUser.id, mediaType, tmdbId, extraEntries) : null;
+  const partner = partnerId ? findEntryForMedia(partnerId, mediaType, tmdbId, extraEntries) : null;
+  return {
+    partnerId,
+    mine,
+    partner,
+    mineRated: !!mine,
+    partnerRated: !!partner,
+    anyRated: !!mine || !!partner,
+    bothRated: !!mine && !!partner
+  };
+}
+
+function getListRuleErrorMessage(error, fallback) {
+  const message = error?.message || '';
+  if (/list_rule_already_rated_watchlist/i.test(message)) return '你已评价，不能加入想看';
+  if (/list_rule_already_rated_queue/i.test(message)) return '已有一方评价，不能加入下次看';
+  if (/list_rule_watchlist_queue_conflict/i.test(message)) return '已在另一个清单里，不能重复加入';
+  return fallback + (message ? ': ' + message : '');
+}
+
+function canAddToWatchlist(movie) {
+  const key = listKey(movie);
+  if (findEntryForMedia(currentUser?.id, movie.media_type, movie.tmdb_id)) {
+    return { ok: false, message: '你已评价，不能加入想看' };
+  }
+  if (activeCouple && coupleQueue.some(m => listKey(m) === key)) {
+    return { ok: false, message: '已在下次看，不能重复加入想看' };
+  }
+  return { ok: true };
+}
+
+function canAddToCoupleQueue(movie) {
+  const key = listKey(movie);
+  if (!activeCouple) return { ok: false, message: '先绑定 Couple 后才能加入下次看' };
+  if (coupleQueue.some(m => listKey(m) === key)) {
+    return { ok: false, message: '已经在下次看队列里' };
+  }
+  const ratingState = getCoupleRatingState(movie.media_type, movie.tmdb_id);
+  if (ratingState.mineRated && ratingState.partnerRated) {
+    return { ok: false, message: '双方已评价，不能加入下次看' };
+  }
+  if (ratingState.mineRated) {
+    return { ok: false, message: '你已评价，不能加入下次看' };
+  }
+  if (ratingState.partnerRated) {
+    return { ok: false, message: '对方已评价，不能加入下次看' };
+  }
+  if (watchlistIds.has(key)) {
+    return { ok: false, message: '已在想看，不能重复加入下次看' };
+  }
+  return { ok: true };
+}
+
+async function reconcileListsAfterRatings(mediaType = null, tmdbId = null, ratedUserId = currentUser?.id) {
+  if (!currentUser) return false;
+  let changed = false;
+  const targetKey = tmdbId ? listKey(mediaType, tmdbId) : null;
+  const watchKeys = targetKey ? [targetKey] : [...watchlistIds];
+  for (const key of watchKeys) {
+    const movie = watchlistMovies[key];
+    if (!movie) continue;
+    const extraEntries = targetKey && ratedUserId === currentUser.id
+      ? [{ user_id: currentUser.id, type: movie.media_type, tmdb_id: movie.tmdb_id }]
+      : [];
+    if (!findEntryForMedia(currentUser.id, movie.media_type, movie.tmdb_id, extraEntries)) continue;
+    const { error } = await db.from('watchlist_movies')
+      .delete()
+      .eq('user_id', currentUser.id)
+      .eq('media_type', movie.media_type)
+      .eq('tmdb_id', movie.tmdb_id);
+    if (!error) {
+      watchlistIds.delete(key);
+      delete watchlistMovies[key];
+      changed = true;
+    }
+  }
+
+  if (!activeCouple || !coupleQueue.length) return changed;
+  const queueItems = targetKey ? coupleQueue.filter(q => listKey(q) === targetKey) : coupleQueue.slice();
+  let removedQueueItem = false;
+  for (const item of queueItems) {
+    const state = getCoupleRatingState(item.media_type, item.tmdb_id, targetKey ? { savedUserId: ratedUserId } : {});
+    if (!state.bothRated) continue;
+    const { error } = await db.from('couple_watch_queue')
+      .delete()
+      .eq('couple_id', activeCouple.id)
+      .eq('media_type', item.media_type)
+      .eq('tmdb_id', item.tmdb_id);
+    if (!error) {
+      coupleQueue = coupleQueue.filter(q => listKey(q) !== listKey(item));
+      removedQueueItem = true;
+      changed = true;
+    }
+  }
+  if (removedQueueItem) await normalizeCoupleQueuePositions(false);
+  return changed;
+}
+
 async function toggleWatchlist(tmdbId, movieOverride = null) {
   if (!currentUser || !tmdbId) return;
   const movie = normalizeListMovie(movieOverride || discoverMovieMap[tmdbId] || { id: tmdbId });
@@ -2904,6 +2993,11 @@ async function toggleWatchlist(tmdbId, movieOverride = null) {
     delete watchlistMovies[key];
     toast('已移出想看');
   } else {
+    const allowed = canAddToWatchlist(movie);
+    if (!allowed.ok) {
+      toast(allowed.message);
+      return;
+    }
     const { error } = await db.from('watchlist_movies').insert({
       user_id: currentUser.id,
       media_type: movie.media_type,
@@ -2915,7 +3009,7 @@ async function toggleWatchlist(tmdbId, movieOverride = null) {
     if (error) {
       toast(/watchlist_movies|schema cache|does not exist|relation|media_type|column/i.test(error.message || '')
         ? '想看清单表尚未升级，请先执行升级 SQL'
-        : '加入想看失败: ' + error.message);
+        : getListRuleErrorMessage(error, '加入想看失败'));
       return;
     }
     watchlistIds.add(key);
@@ -3198,14 +3292,11 @@ async function disconnectCouple(coupleId) {
 
 async function addToCoupleQueue(movieOrId) {
   if (!currentUser) return;
-  if (!activeCouple) {
-    toast('先绑定 Couple 后才能加入下次看');
-    return;
-  }
   const movie = normalizeListMovie(movieOrId);
   if (!movie) return;
-  if (coupleQueue.some(m => listKey(m) === listKey(movie))) {
-    toast('已经在下次看队列里');
+  const allowed = canAddToCoupleQueue(movie);
+  if (!allowed.ok) {
+    toast(allowed.message);
     return;
   }
   const maxPosition = coupleQueue.reduce((max, m) => Math.max(max, Number(m.position || 0)), 0);
@@ -3220,7 +3311,7 @@ async function addToCoupleQueue(movieOrId) {
     added_by: currentUser.id
   }).select('*').single();
   if (error) {
-    toast(isMissingRelationError(error) ? '下次看表尚未创建，请先执行升级 SQL' : '加入下次看失败: ' + error.message);
+    toast(isMissingRelationError(error) ? '下次看表尚未创建，请先执行升级 SQL' : getListRuleErrorMessage(error, '加入下次看失败'));
     return;
   }
   if (data) coupleQueue.push({ ...data, media_type: normalizeMediaType(data.media_type) });
@@ -3778,6 +3869,20 @@ function renderWheelSegments() {
   return labels.map((label, i) => `<span style="--i:${i}">${esc(label)}</span>`).join('');
 }
 
+function renderCoupleQueueRateAction(item, buttonAttrs) {
+  const state = getCoupleRatingState(item.media_type, item.tmdb_id);
+  if (state.mineRated && state.partnerRated) {
+    return '<span class="queue-rating-state">双方已评分</span>';
+  }
+  if (state.mineRated) {
+    return '<span class="queue-rating-state">已评分 · 待对方评分</span>';
+  }
+  if (state.partnerRated) {
+    return `<span class="queue-rating-state">对方已评分 · 等你评分</span><button class="btn btn-xs btn-secondary" ${buttonAttrs}>评分</button>`;
+  }
+  return `<button class="btn btn-xs btn-secondary" ${buttonAttrs}>评分</button>`;
+}
+
 function renderCoupleWheel(data) {
   const pick = coupleWheelPick && coupleQueue.find(q => q.id === coupleWheelPick.id) ? coupleWheelPick : null;
   const topType = getTopTypeLabel(data.myTypeDist);
@@ -3801,7 +3906,7 @@ function renderCoupleWheel(data) {
           ${pick.poster_path ? `<img src="${posterUrl(pick.poster_path)}" alt="">` : '<div></div>'}
           <strong>${esc(pick.title)}</strong>
           <span>${pick.year || '未知'} · ${mediaTypeLabel(normalizeMediaType(pick.media_type))}</span>
-          <button class="btn btn-xs btn-secondary" data-wheel-rate>评分</button>
+          ${renderCoupleQueueRateAction(pick, 'data-wheel-rate')}
           <button class="btn btn-xs btn-danger" data-wheel-remove>移除</button>
         </div>
       ` : `<p class="couple-muted">${coupleQueue.length ? '点击转盘抽一部' : '下次看队列为空'}</p>`}
@@ -3965,7 +4070,7 @@ function renderCoupleQueueHTML() {
             <div class="queue-actions">
               <button class="btn btn-xs btn-secondary" data-queue-up ${idx===0?'disabled':''}>上移</button>
               <button class="btn btn-xs btn-secondary" data-queue-down ${idx===coupleQueue.length-1?'disabled':''}>下移</button>
-              <button class="btn btn-xs btn-secondary" data-queue-rate data-tmdb-id="${m.tmdb_id}" data-media-type="${mediaType}">评分</button>
+              ${renderCoupleQueueRateAction(m, `data-queue-rate data-tmdb-id="${m.tmdb_id}" data-media-type="${mediaType}"`)}
               <button class="btn btn-xs btn-danger" data-queue-remove>移除</button>
             </div>
           </div>
@@ -4812,33 +4917,7 @@ $['qrSubmit'].addEventListener('click', async ()=>{
   }
 
   toast(isEdit ? '评价已更新！' : '评价已保存！');
-  const savedListKey = savedTmdbId ? listKey(mediaType, savedTmdbId) : '';
-  if (!isEdit && savedTmdbId && watchlistIds.has(savedListKey)) {
-    db.from('watchlist_movies')
-      .delete()
-      .eq('user_id', currentUser.id)
-      .eq('media_type', mediaType)
-      .eq('tmdb_id', savedTmdbId)
-      .then(({error}) => {
-        if (!error) {
-          watchlistIds.delete(savedListKey);
-          delete watchlistMovies[savedListKey];
-        }
-      });
-  }
-  if (!isEdit && savedTmdbId && activeCouple && coupleQueue.some(q => listKey(q) === savedListKey)) {
-    db.from('couple_watch_queue')
-      .delete()
-      .eq('couple_id', activeCouple.id)
-      .eq('media_type', mediaType)
-      .eq('tmdb_id', savedTmdbId)
-      .then(({error}) => {
-        if (!error) {
-          coupleQueue = coupleQueue.filter(q => listKey(q) !== savedListKey);
-          normalizeCoupleQueuePositions(false);
-        }
-      });
-  }
+  if (savedTmdbId) await reconcileListsAfterRatings(mediaType, savedTmdbId, currentUser.id);
   // Fire-and-forget: backfill normalized movie detail for new entries (non-blocking)
   if (mediaType === 'movie' && savedTmdbId) {
     fetchMovieDetail(savedTmdbId).then(detail => {

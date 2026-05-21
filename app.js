@@ -658,7 +658,18 @@ const movieCache = (() => {
 // Media search cache: permanent localStorage for multilingual title/crew fields.
 const mediaSearchCache = (() => {
   const KEY = 'filmnote_media_search_cache_v1';
+  const VERSION = 2;
   let memory = null;
+
+  const FIELD_KEYS = [
+    'title_zh',
+    'title_en',
+    'original_title',
+    'director_zh',
+    'director_en',
+    'cast_zh',
+    'cast_en'
+  ];
 
   function loadAll() {
     if (memory) return memory;
@@ -675,14 +686,48 @@ const mediaSearchCache = (() => {
     try { localStorage.setItem(KEY, JSON.stringify(memory)); } catch {}
   }
 
+  function normalizeRecord(record) {
+    if (!record || typeof record !== 'object') return null;
+    const normalized = {};
+    for (const key of FIELD_KEYS) normalized[key] = String(record[key] || '');
+    normalized.fetched_at = Number(record.fetched_at || 0);
+    normalized.version = Number(record.version || 0);
+    return normalized;
+  }
+
+  function hasEnglishSignal(record) {
+    const normalized = normalizeSearchText([
+      record?.title_en,
+      record?.original_title,
+      record?.director_en,
+      record?.cast_en
+    ]);
+    return /[a-z]/.test(normalized);
+  }
+
+  function isComplete(record) {
+    const normalized = normalizeRecord(record);
+    return !!(normalized && normalized.version === VERSION && normalized.fetched_at && hasEnglishSignal(normalized));
+  }
+
+  function mergeRecord(previous, incoming) {
+    const prev = normalizeRecord(previous) || {};
+    const next = normalizeRecord(incoming) || {};
+    const merged = {};
+    for (const key of FIELD_KEYS) merged[key] = next[key] || prev[key] || '';
+    merged.version = VERSION;
+    merged.fetched_at = Date.now();
+    return merged;
+  }
+
   return {
     get(mediaTypeOrEntry, tmdbId = null) {
       const key = mediaSearchKey(mediaTypeOrEntry, tmdbId);
-      return key ? (loadAll()[key] || null) : null;
+      return key ? normalizeRecord(loadAll()[key]) : null;
     },
-    has(mediaTypeOrEntry, tmdbId = null) {
+    isComplete(mediaTypeOrEntry, tmdbId = null) {
       const key = mediaSearchKey(mediaTypeOrEntry, tmdbId);
-      return !!(key && loadAll()[key]);
+      return !!(key && isComplete(loadAll()[key]));
     },
     setBatch(results) {
       if (!results || !Object.keys(results).length) return;
@@ -690,7 +735,7 @@ const mediaSearchCache = (() => {
       for (const [key, value] of Object.entries(results)) {
         if (!value) continue;
         if (!Object.values(value).some(v => String(v || '').trim())) continue;
-        all[key] = value;
+        all[key] = mergeRecord(all[key], value);
       }
       saveAll(all);
     }
@@ -713,6 +758,7 @@ async function loadAllData() {
     buildSearchIndex();
     updateHeaderCount();
     renderActiveTab();
+    warmSearchIndexCache();
   }
 
   // 2. Fetch fresh data from Supabase
@@ -1134,42 +1180,81 @@ function mediaSearchKey(mediaTypeOrEntry, tmdbId = null) {
   return `${normalizeMediaType(mediaType)}:${numericId}`;
 }
 
+const SEARCH_INDEX_BATCH_SIZE = 8;
+const SEARCH_INDEX_TIMEOUT_MS = 25000;
+let searchIndexWarmInFlight = false;
+let searchIndexWarmAgain = false;
+
 async function warmSearchIndexCache() {
   if (!TMDB_PROXY) return;
+  if (searchIndexWarmInFlight) {
+    searchIndexWarmAgain = true;
+    return;
+  }
+  searchIndexWarmInFlight = true;
+
   const items = [];
   const seen = new Set();
   for (const entry of allEntries) {
     if (!entry.tmdb_id) continue;
     const key = mediaSearchKey(entry);
-    if (!key || seen.has(key) || mediaSearchCache.has(entry)) continue;
+    if (!key || seen.has(key) || mediaSearchCache.isComplete(entry)) continue;
     seen.add(key);
     items.push({
       media_type: normalizeMediaType(entry.type),
       tmdb_id: Number(entry.tmdb_id)
     });
   }
-  if (!items.length) return;
+  if (!items.length) {
+    searchIndexWarmInFlight = false;
+    if (searchIndexWarmAgain) {
+      searchIndexWarmAgain = false;
+      warmSearchIndexCache();
+    }
+    return;
+  }
 
-  for (let i = 0; i < items.length; i += 50) {
-    const batch = items.slice(i, i + 50);
+  let successCount = 0;
+  let failedBatches = 0;
+
+  for (let i = 0; i < items.length; i += SEARCH_INDEX_BATCH_SIZE) {
+    const batch = items.slice(i, i + SEARCH_INDEX_BATCH_SIZE);
+    let timer = null;
     try {
       const ac = new AbortController();
-      const timer = setTimeout(() => ac.abort(), 15000);
+      timer = setTimeout(() => ac.abort(), SEARCH_INDEX_TIMEOUT_MS);
       const res = await fetch(TMDB_PROXY + '/search-index', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: batch }),
         signal: ac.signal
       });
-      clearTimeout(timer);
-      if (!res.ok) continue;
+      if (!res.ok) {
+        failedBatches++;
+        continue;
+      }
       const data = await res.json().catch(() => ({}));
       mediaSearchCache.setBatch(data.results || {});
+      successCount += Object.keys(data.results || {}).length;
       buildSearchIndex();
       if (getActiveTab() === 'list' && listMode === 'entries') renderList();
     } catch(e) {
+      failedBatches++;
       console.warn('warmSearchIndexCache batch failed:', e);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
+  }
+
+  console.info('warmSearchIndexCache done:', {
+    queued: items.length,
+    enriched: successCount,
+    failedBatches
+  });
+  searchIndexWarmInFlight = false;
+  if (searchIndexWarmAgain) {
+    searchIndexWarmAgain = false;
+    warmSearchIndexCache();
   }
 }
 

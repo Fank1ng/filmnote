@@ -19,6 +19,7 @@ const DEFAULT_ALLOWED_ORIGINS = [
 const MAX_PREFETCH_IDS = 50;
 const MAX_TITLE_IDS = 100;
 const MAX_CREDIT_IDS = 50;
+const MAX_SEARCH_INDEX_ITEMS = 50;
 const MAX_RECOMMEND_ENTRIES = 1000;
 const MAX_JSON_BYTES = 256 * 1024;
 const REC_CACHE_VERSION = 'v4';
@@ -96,6 +97,25 @@ function normalizeIds(ids, limit) {
   if (!Array.isArray(ids) || !ids.length) return null;
   return [...new Set(ids.map(id => Number(id)).filter(id => Number.isFinite(id) && id > 0))]
     .slice(0, limit);
+}
+
+function normalizeSearchIndexItems(items, limit) {
+  if (!Array.isArray(items) || !items.length) return null;
+  const seen = new Set();
+  const normalized = [];
+  for (const item of items) {
+    const tmdbId = Number(item?.tmdb_id || item?.id);
+    if (!Number.isFinite(tmdbId) || tmdbId <= 0) continue;
+    const mediaType = item?.media_type === 'series' || item?.media_type === 'tv' || item?.type === 'series' || item?.type === 'tv'
+      ? 'series'
+      : 'movie';
+    const key = `${mediaType}:${tmdbId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push({ media_type: mediaType, tmdb_id: tmdbId, key });
+    if (normalized.length >= limit) break;
+  }
+  return normalized.length ? normalized : null;
 }
 
 function sanitizeEntries(entries) {
@@ -440,6 +460,63 @@ async function fetchMovieDetailBundle(tmdbId, env) {
     details,
     credits: creditsZh,
     movie: normalizeTmdbMovieDetail(details, creditsZh, keywords)
+  };
+}
+
+function titleFromDetail(detail) {
+  if (!detail || detail.success === false) return '';
+  return detail.title || detail.name || '';
+}
+
+function originalTitleFromDetail(detail) {
+  if (!detail || detail.success === false) return '';
+  return detail.original_title || detail.original_name || '';
+}
+
+function namesFromPeople(people, limit = 8) {
+  return (people || []).map(p => p?.name).filter(Boolean).slice(0, limit);
+}
+
+function crewNamesByJobs(credits, jobs, limit = 3) {
+  const wanted = new Set(jobs);
+  const seen = new Set();
+  const names = [];
+  for (const person of credits?.crew || []) {
+    if (!wanted.has(person.job) || !person.name || seen.has(person.name)) continue;
+    seen.add(person.name);
+    names.push(person.name);
+    if (names.length >= limit) break;
+  }
+  return names;
+}
+
+async function fetchSearchIndexItem(item, env) {
+  const mediaType = item.media_type;
+  const tmdbType = mediaType === 'series' ? 'tv' : 'movie';
+  const id = item.tmdb_id;
+  const [detailZh, detailEn, creditsZh, creditsEn] = await Promise.all([
+    fetchTmdb(`/${tmdbType}/${id}?language=zh-CN`, env),
+    fetchTmdb(`/${tmdbType}/${id}?language=en-US`, env),
+    fetchTmdb(`/${tmdbType}/${id}/credits?language=zh-CN`, env),
+    fetchTmdb(`/${tmdbType}/${id}/credits?language=en-US`, env)
+  ]);
+
+  const directorJobs = mediaType === 'series'
+    ? ['Creator', 'Director', 'Executive Producer', 'Showrunner']
+    : ['Director'];
+  const createdByZh = mediaType === 'series' ? namesFromPeople(detailZh?.created_by, 3) : [];
+  const createdByEn = mediaType === 'series' ? namesFromPeople(detailEn?.created_by, 3) : [];
+  const directorZh = createdByZh.length ? createdByZh : crewNamesByJobs(creditsZh, directorJobs, 3);
+  const directorEn = createdByEn.length ? createdByEn : crewNamesByJobs(creditsEn, directorJobs, 3);
+
+  return {
+    title_zh: titleFromDetail(detailZh),
+    title_en: titleFromDetail(detailEn),
+    original_title: originalTitleFromDetail(detailZh) || originalTitleFromDetail(detailEn),
+    director_zh: directorZh.join('|'),
+    director_en: directorEn.join('|'),
+    cast_zh: namesFromPeople(creditsZh?.cast, 8).join('|'),
+    cast_en: namesFromPeople(creditsEn?.cast, 8).join('|')
   };
 }
 
@@ -1548,6 +1625,31 @@ export default {
           }));
         }
         return jsonResponse({ results }, request, env);
+      } catch (e) {
+        const status = e.message === 'Request body too large' ? 413 : 500;
+        return errorResponse(e.message, request, env, status);
+      }
+    }
+
+    // ── Batch multilingual search index endpoint (movie + series) ──
+    if (url.pathname === '/search-index' && request.method === 'POST') {
+      try {
+        const body = await readJsonBody(request);
+        const items = normalizeSearchIndexItems(body.items, MAX_SEARCH_INDEX_ITEMS);
+        if (!items) {
+          return errorResponse('Missing or invalid items', request, env, 400);
+        }
+        const results = {};
+        let errors = 0;
+        for (let i = 0; i < items.length; i += 5) {
+          const batch = items.slice(i, i + 5);
+          const settled = await Promise.allSettled(batch.map(async item => {
+            const fields = await fetchSearchIndexItem(item, env);
+            if (fields && Object.values(fields).some(v => String(v || '').trim())) results[item.key] = fields;
+          }));
+          errors += settled.filter(r => r.status === 'rejected').length;
+        }
+        return jsonResponse({ results, total: items.length, errors }, request, env);
       } catch (e) {
         const status = e.message === 'Request body too large' ? 413 : 500;
         return errorResponse(e.message, request, env, status);

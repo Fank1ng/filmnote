@@ -655,6 +655,48 @@ const movieCache = (() => {
   };
 })();
 
+// Media search cache: permanent localStorage for multilingual title/crew fields.
+const mediaSearchCache = (() => {
+  const KEY = 'filmnote_media_search_cache_v1';
+  let memory = null;
+
+  function loadAll() {
+    if (memory) return memory;
+    try {
+      memory = JSON.parse(localStorage.getItem(KEY) || '{}') || {};
+    } catch {
+      memory = {};
+    }
+    return memory;
+  }
+
+  function saveAll(all) {
+    memory = all || {};
+    try { localStorage.setItem(KEY, JSON.stringify(memory)); } catch {}
+  }
+
+  return {
+    get(mediaTypeOrEntry, tmdbId = null) {
+      const key = mediaSearchKey(mediaTypeOrEntry, tmdbId);
+      return key ? (loadAll()[key] || null) : null;
+    },
+    has(mediaTypeOrEntry, tmdbId = null) {
+      const key = mediaSearchKey(mediaTypeOrEntry, tmdbId);
+      return !!(key && loadAll()[key]);
+    },
+    setBatch(results) {
+      if (!results || !Object.keys(results).length) return;
+      const all = { ...loadAll() };
+      for (const [key, value] of Object.entries(results)) {
+        if (!value) continue;
+        if (!Object.values(value).some(v => String(v || '').trim())) continue;
+        all[key] = value;
+      }
+      saveAll(all);
+    }
+  };
+})();
+
 async function loadAllData() {
   if (!currentUser) return;
   const uid = currentUser.id;
@@ -712,8 +754,7 @@ async function loadAllData() {
     renderActiveTab();
     discoverRatedCount = allEntries.filter(e=>e.user_id===currentUser?.id && e.type==='movie').length;
     updateRecTabLabel();
-    warmOriginalTitleCache();
-    warmCreditsEnCache();
+    warmSearchIndexCache();
     // Load secondary user lists
     loadBlockedMovies();
     await loadWatchlist();
@@ -1079,6 +1120,57 @@ async function warmCreditsEnCache() {
   }
   buildSearchIndex();
   if (getActiveTab()==='list') renderList();
+}
+
+function mediaSearchKey(mediaTypeOrEntry, tmdbId = null) {
+  let mediaType = mediaTypeOrEntry;
+  let id = tmdbId;
+  if (typeof mediaTypeOrEntry === 'object' && mediaTypeOrEntry) {
+    mediaType = mediaTypeOrEntry.media_type || mediaTypeOrEntry.type || 'movie';
+    id = mediaTypeOrEntry.tmdb_id || mediaTypeOrEntry.id;
+  }
+  const numericId = Number(id);
+  if (!Number.isFinite(numericId) || numericId <= 0) return '';
+  return `${normalizeMediaType(mediaType)}:${numericId}`;
+}
+
+async function warmSearchIndexCache() {
+  if (!TMDB_PROXY) return;
+  const items = [];
+  const seen = new Set();
+  for (const entry of allEntries) {
+    if (!entry.tmdb_id) continue;
+    const key = mediaSearchKey(entry);
+    if (!key || seen.has(key) || mediaSearchCache.has(entry)) continue;
+    seen.add(key);
+    items.push({
+      media_type: normalizeMediaType(entry.type),
+      tmdb_id: Number(entry.tmdb_id)
+    });
+  }
+  if (!items.length) return;
+
+  for (let i = 0; i < items.length; i += 50) {
+    const batch = items.slice(i, i + 50);
+    try {
+      const ac = new AbortController();
+      const timer = setTimeout(() => ac.abort(), 15000);
+      const res = await fetch(TMDB_PROXY + '/search-index', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: batch }),
+        signal: ac.signal
+      });
+      clearTimeout(timer);
+      if (!res.ok) continue;
+      const data = await res.json().catch(() => ({}));
+      mediaSearchCache.setBatch(data.results || {});
+      buildSearchIndex();
+      if (getActiveTab() === 'list' && listMode === 'entries') renderList();
+    } catch(e) {
+      console.warn('warmSearchIndexCache batch failed:', e);
+    }
+  }
 }
 
 // One-time KV cache backfill — collects all unique movie tmdb_ids and pre-warms via Worker
@@ -1822,16 +1914,74 @@ const originalTitleCache = {}; // { [tmdbId]: original_title } — populated on 
 const creditsEnCache = {};
 const searchIndex = {}; // { [entryId]: "lowercase search string" } — built sync, enriched async
 
-function buildSearchIndex() {
-  for (const e of allEntries) {
-    let s = (e.title + '|' + (e.director||''));
-    if (e.tmdb_id && originalTitleCache[e.tmdb_id]) s += '|' + originalTitleCache[e.tmdb_id];
-    if (e.tmdb_id && creditsEnCache[e.tmdb_id]) {
-      const ec = creditsEnCache[e.tmdb_id];
-      s += '|' + (ec.d||'') + '|' + (ec.c||'') + '|' + (ec.d_zh||'') + '|' + (ec.c_zh||'');
-    }
-    searchIndex[e.id] = s.toLowerCase();
+function normalizeSearchText(value) {
+  const raw = Array.isArray(value) ? value.join(' ') : String(value || '');
+  const normalized = raw.normalize ? raw.normalize('NFKC') : raw;
+  return normalized
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function getSearchTokens(query) {
+  const normalized = normalizeSearchText(query);
+  return normalized ? normalized.split(' ').filter(Boolean) : [];
+}
+
+function addSearchField(fields, value) {
+  if (Array.isArray(value)) {
+    value.forEach(v => addSearchField(fields, v));
+    return;
   }
+  if (value !== undefined && value !== null && String(value).trim()) fields.push(value);
+}
+
+function collectEntrySearchFields(entry) {
+  const fields = [];
+  addSearchField(fields, entry.title);
+  addSearchField(fields, entry.director);
+
+  if (entry.tmdb_id) {
+    const cachedDetail = movieCache.get(entry.tmdb_id);
+    if (cachedDetail) {
+      addSearchField(fields, cachedDetail.title);
+      addSearchField(fields, cachedDetail.original_title);
+      addSearchField(fields, cachedDetail.director);
+      addSearchField(fields, cachedDetail.cast);
+    }
+
+    const cachedSearch = mediaSearchCache.get(entry);
+    if (cachedSearch) {
+      addSearchField(fields, cachedSearch.title_zh);
+      addSearchField(fields, cachedSearch.title_en);
+      addSearchField(fields, cachedSearch.original_title);
+      addSearchField(fields, cachedSearch.director_zh);
+      addSearchField(fields, cachedSearch.director_en);
+      addSearchField(fields, cachedSearch.cast_zh);
+      addSearchField(fields, cachedSearch.cast_en);
+    }
+  }
+
+  return fields;
+}
+
+function buildSearchIndex() {
+  const liveIds = new Set();
+  for (const e of allEntries) {
+    liveIds.add(String(e.id));
+    searchIndex[e.id] = normalizeSearchText(collectEntrySearchFields(e));
+  }
+  for (const id of Object.keys(searchIndex)) {
+    if (!liveIds.has(String(id))) delete searchIndex[id];
+  }
+}
+
+function matchesSearchIndex(entry, tokens) {
+  if (!tokens || !tokens.length) return true;
+  const idx = searchIndex[entry.id] || normalizeSearchText(collectEntrySearchFields(entry));
+  if (!idx) return false;
+  return tokens.every(token => idx.includes(token));
 }
 
 async function fetchTmdbDetail(tmdbId) {
@@ -1880,17 +2030,14 @@ $['scoreFilter'].addEventListener('change', ()=>{ listPageNum = 1; renderList();
 
 // Shared: build filtered, grouped, scored, and sorted groups from current list controls
 function getFilteredSortedGroups() {
-  const query = ($['searchInput'].value||'').toLowerCase();
+  const searchTokens = getSearchTokens($['searchInput'].value || '');
   const sort = $['sortBy'].value;
   const scoreFilterVal = $['scoreFilter'].value;
 
   let filtered = allEntries.filter(e=>{
     if (e.type!==listType) return false;
     if (ownerFilter==='me' && e.user_id!==currentUser.id) return false;
-    if (query) {
-      const idx = searchIndex[e.id];
-      if (!idx || !idx.includes(query)) return false;
-    }
+    if (!matchesSearchIndex(e, searchTokens)) return false;
     return true;
   });
 
@@ -5010,8 +5157,8 @@ function locateAndGoToList(entryId) {
   }
 
   // Only clear search if entry doesn't match
-  const search = ($['searchInput'].value||'').trim().toLowerCase();
-  if (search && !(entry.title||'').toLowerCase().includes(search) && !(entry.director||'').toLowerCase().includes(search)) {
+  const searchTokens = getSearchTokens($['searchInput'].value || '');
+  if (searchTokens.length && !matchesSearchIndex(entry, searchTokens)) {
     $['searchInput'].value = '';
   }
 

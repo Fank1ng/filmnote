@@ -1197,10 +1197,12 @@ function mergeSeasonRecords(localSeasons = [], tmdbSeasons = []) {
     .map(([season_number, value]) => ({ season_number, ...value }));
 }
 
-function buildSeasonRecordTabsHTML(localSeasons = [], tmdbSeasons = [], baseId = 'seasonRecords') {
+function buildSeasonRecordTabsHTML(localSeasons = [], tmdbSeasons = [], baseId = 'seasonRecords', options = {}) {
   const records = mergeSeasonRecords(localSeasons, tmdbSeasons);
   if (!records.length) return '';
   const active = records[0].season_number;
+  const entryId = options.entryId || '';
+  const canEdit = options.canEdit === true && entryId;
   return `
     <div class="detail-season-section" data-season-records="${baseId}">
       <h4 style="font-size:0.85rem;color:var(--text2);margin-bottom:8px">每季详情</h4>
@@ -1214,11 +1216,16 @@ function buildSeasonRecordTabsHTML(localSeasons = [], tmdbSeasons = [], baseId =
         const local = record.local;
         const tmdb = record.tmdb;
         const title = local?.season_title || tmdb?.season_title || tmdb?.name || '';
+        const action = canEdit
+          ? (local?.total_score
+            ? `<button type="button" class="btn btn-xs btn-secondary" onclick="editSeasonFromDetail('${entryId}', ${record.season_number})">编辑</button>`
+            : `<button type="button" class="btn btn-xs btn-secondary" onclick="rateSeasonFromDetail('${entryId}', ${record.season_number})">评价</button>`)
+          : '';
         return `
           <div class="detail-season-panel${record.season_number === active ? ' active' : ''}" data-season-panel="${record.season_number}">
             <div class="detail-season-head">
               <strong>S${record.season_number}${title ? ' · ' + esc(title) : ''}</strong>
-              <span>${local?.total_score ? Number(local.total_score).toFixed(1) + ' / 10' : '未评价'}</span>
+              <span style="display:flex;align-items:center;gap:8px">${local?.total_score ? Number(local.total_score).toFixed(1) + ' / 10' : '未评价'}${action}</span>
             </div>
             ${local?.ratings ? `<div class="mc-dim-dots" style="margin:8px 0">${buildDimTagsHTML(local.ratings, { main: 'var(--gold)' })}</div>` : ''}
             ${local?.comment ? `<p class="detail-season-comment">"${esc(local.comment)}"</p>` : ''}
@@ -1241,7 +1248,12 @@ function buildSeasonRecordTabsHTML(localSeasons = [], tmdbSeasons = [], baseId =
 function renderSeasonRecordDetails(containerId, localSeasons = [], tmdbSeasons = [], baseId = containerId) {
   const el = document.getElementById(containerId);
   if (!el) return;
-  el.innerHTML = buildSeasonRecordTabsHTML(localSeasons, tmdbSeasons, baseId);
+  const entryId = containerId.startsWith('seasonRecords-') ? containerId.replace('seasonRecords-', '') : '';
+  const entry = entryId ? allEntries.find(e => e.id === entryId) : null;
+  el.innerHTML = buildSeasonRecordTabsHTML(localSeasons, tmdbSeasons, baseId, {
+    entryId,
+    canEdit: !!(entry && entry.user_id === currentUser?.id)
+  });
 }
 
 function activateSeasonRecord(baseId, seasonNumber) {
@@ -1723,6 +1735,10 @@ function renderSeasonTabs(scope = 'main') {
     btn.addEventListener('click', () => activateSeason(btn.dataset.seasonIdx, scope));
   });
   activateSeason(activeIdx, scope);
+}
+
+function findSeasonCardByNumber(scope, seasonNumber) {
+  return getSeasonCards(scope).find(card => Number(card.dataset.seasonNumber || 0) === Number(seasonNumber));
 }
 
 function syncSeasonAverage(scope = 'main') {
@@ -2414,6 +2430,16 @@ function addMyRating(entryId) {
   });
 }
 
+function editSeasonFromDetail(entryId, seasonNumber) {
+  closeModal();
+  openQuickEdit(entryId, { targetSeasonNumber: seasonNumber });
+}
+
+function rateSeasonFromDetail(entryId, seasonNumber) {
+  closeModal();
+  openQuickEdit(entryId, { targetSeasonNumber: seasonNumber, enableTargetSeason: true });
+}
+
 function openEntryFormForListMovie(movieOrId) {
   const movie = normalizeListMovie(movieOrId);
   if (!movie) return;
@@ -2834,7 +2860,7 @@ async function showDetail(id) {
       ${buildDimTagsHTML(entry.ratings||{}, getUserColor(entry.user_id))}
     </div>
     ${entry.comment ? `<p style="font-style:italic;color:var(--text2);margin-bottom:12px">"${esc(entry.comment)}"</p>` : ''}
-    <div id="seasonRecords-${entry.id}">${buildSeasonRecordTabsHTML(seasons, cached?.seasons || [], 'seasonRecords-' + entry.id)}</div>
+    <div id="seasonRecords-${entry.id}">${buildSeasonRecordTabsHTML(seasons, cached?.seasons || [], 'seasonRecords-' + entry.id, { entryId: entry.id, canEdit: isMine })}</div>
     ${friendEntries.length ? `
       <div class="friend-section">
         <h4>朋友评分</h4>
@@ -2861,7 +2887,6 @@ async function showDetail(id) {
       return `<div class="tmdb-section" id="tmdbDetail-${entry.id}"><div class="detail-spinner"></div> 加载${detailLabel}详情...</div>`;
     })()}
     <div class="btn-group" style="justify-content:flex-end">
-      ${isMine ? `<button class="btn btn-secondary btn-sm" onclick="${editActionForEntry(entry)};closeModal()">编辑</button>` : ''}
       <button class="btn btn-secondary btn-sm" onclick="closeModal()">关闭</button>
     </div>
   `;
@@ -5709,7 +5734,7 @@ function openQuickRate(movie) {
   $['quickRateModal'].classList.add('open');
 }
 
-function openQuickEdit(id) {
+function openQuickEdit(id, opts = {}) {
   const entry = allEntries.find(e=>e.id===id);
   if (!entry) return;
   quickEditEntryId = id;
@@ -5745,6 +5770,14 @@ function openQuickEdit(id) {
       }))
     : [];
   resetQuickRateSeasons(entry.type, seasons, true);
+  if (entry.type === 'series' && opts.targetSeasonNumber) {
+    let targetCard = findSeasonCardByNumber('qr', opts.targetSeasonNumber);
+    if (opts.enableTargetSeason && targetCard?.dataset.seasonEnabled === 'false') {
+      enableSeasonRating(targetCard.dataset.seasonIdx, 'qr');
+      targetCard = findSeasonCardByNumber('qr', opts.targetSeasonNumber);
+    }
+    if (targetCard) activateSeason(targetCard.dataset.seasonIdx, 'qr');
+  }
   bindDimSliders('qr');
   if (!seasons.length) updateQrTotal();
   $['quickRateModal'].classList.add('open');

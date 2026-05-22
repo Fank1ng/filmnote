@@ -1686,10 +1686,11 @@ function renderSeasonTabs(scope = 'main') {
   const activeIdx = activeStillExists ? listEl.dataset.activeSeasonIdx : cards[0].dataset.seasonIdx;
   tabs.innerHTML = cards.map(card => {
     const numInput = card.querySelector('input[type="number"]');
-    const seasonNumber = parseInt(numInput?.value) || '?';
-    const score = card.querySelector('.season-score')?.textContent || '5.0';
+    const seasonNumber = parseInt(numInput?.value || card.dataset.seasonNumber) || '?';
+    const enabled = card.dataset.seasonEnabled !== 'false';
+    const score = enabled ? (card.querySelector('.season-score')?.textContent || '5.0') : '未评价';
     const idx = card.dataset.seasonIdx;
-    return `<button type="button" class="season-tab${String(idx) === String(activeIdx) ? ' active' : ''}" data-season-idx="${idx}"><span>S${seasonNumber}</span><strong>${score}</strong></button>`;
+    return `<button type="button" class="season-tab${String(idx) === String(activeIdx) ? ' active' : ''}${enabled ? '' : ' unrated'}" data-season-idx="${idx}"><span>S${seasonNumber}</span><strong>${score}</strong></button>`;
   }).join('');
   tabs.querySelectorAll('.season-tab').forEach(btn => {
     btn.addEventListener('click', () => activateSeason(btn.dataset.seasonIdx, scope));
@@ -1708,9 +1709,56 @@ function syncSeasonLimit(scope = 'main') {
   if (!btn) return;
   const limit = getCurrentSeasonLimit(scope);
   const seasons = collectSeasonData(getSeasonListEl(scope)).filter(s => s.season_number > 0);
-  const reached = limit > 0 && seasons.length >= limit;
+  const reached = limit > 0 && getSeasonCards(scope).length >= limit;
   btn.disabled = reached;
   btn.textContent = reached ? `已达到 ${limit} 季` : '+ 添加新季';
+}
+
+function bindSeasonCardInputs(card, scope) {
+  const prefix = card.dataset.seasonPrefix;
+  bindDimSliders(prefix);
+  card.querySelectorAll('input[type="number"], input[type="text"], textarea').forEach(input => {
+    input.addEventListener('input', () => {
+      renderSeasonTabs(scope);
+      syncSeasonAverage(scope);
+    });
+  });
+}
+
+function buildSeasonEditableBody(prefix, ratings, comment) {
+  return `
+    <div class="season-body open">
+      <div class="dim-list">${buildDimSliders(prefix, ratings)}</div>
+      <div class="form-group">
+        <label>短评（可选）</label>
+        <textarea placeholder="对这季的评价..." rows="1">${esc(comment || '')}</textarea>
+      </div>
+    </div>
+  `;
+}
+
+function enableSeasonRating(idx, scope = 'main') {
+  const card = document.querySelector(`.season-card[data-season-idx="${idx}"][data-season-scope="${scope}"]`);
+  if (!card || card.dataset.seasonEnabled !== 'false') return;
+  const prefix = card.dataset.seasonPrefix;
+  const seasonNumber = parseInt(card.dataset.seasonNumber) || 1;
+  card.dataset.seasonEnabled = 'true';
+  card.dataset.seasonPlaceholder = 'false';
+  card.classList.remove('season-unrated');
+  card.innerHTML = `
+    <div class="season-panel-head">
+      <span class="season-title">第 <input type="number" value="${seasonNumber}" min="1" max="${getCurrentSeasonLimit(scope) || 50}" placeholder="?" title="季号不可重复"> 季 · <input type="text" value="" placeholder="季标题（可选）"></span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="season-score" id="seasonTotal-${prefix}">5.0</span>
+        <button type="button" class="btn btn-xs btn-danger" onclick="removeSeason('${idx}', '${scope}')" title="删除此季">✕</button>
+      </div>
+    </div>
+    ${buildSeasonEditableBody(prefix, {}, '')}
+  `;
+  bindSeasonCardInputs(card, scope);
+  renderSeasonTabs(scope);
+  activateSeason(idx, scope);
+  syncSeasonAverage(scope);
 }
 
 function addSeasonRow(seasonData, scope = 'main') {
@@ -1723,7 +1771,8 @@ function addSeasonRow(seasonData, scope = 'main') {
     syncSeasonLimit(scope);
     return;
   }
-  const sidx = seasonData?._idx || Date.now();
+  const isPlaceholder = seasonData?._placeholder === true;
+  const sidx = seasonData?._idx || (isPlaceholder ? `placeholder-${scope}-${seasonData?.season_number || Date.now()}` : Date.now());
   const snum = seasonData?.season_number || '';
   const stitle = seasonData?.season_title || '';
   const ratings = seasonData?.ratings || {};
@@ -1735,7 +1784,22 @@ function addSeasonRow(seasonData, scope = 'main') {
   card.dataset.seasonIdx = sidx;
   card.dataset.seasonScope = scope;
   card.dataset.seasonPrefix = prefix;
-  card.innerHTML = `
+  card.dataset.seasonNumber = String(snum || '');
+  card.dataset.seasonEnabled = isPlaceholder ? 'false' : 'true';
+  card.dataset.seasonPlaceholder = isPlaceholder ? 'true' : 'false';
+  card.classList.toggle('season-unrated', isPlaceholder);
+  card.innerHTML = isPlaceholder ? `
+    <div class="season-panel-head">
+      <span class="season-title">第 <input type="number" value="${snum}" min="1" max="${limit || 50}" disabled> 季</span>
+      <span class="season-score season-unrated-label">未评价</span>
+    </div>
+    <div class="season-body open">
+      <div class="season-empty">
+        <p>S${snum} 未评价</p>
+        <button type="button" class="btn btn-sm btn-secondary" onclick="enableSeasonRating('${sidx}', '${scope}')">评价本季</button>
+      </div>
+    </div>
+  ` : `
     <div class="season-panel-head">
       <span class="season-title">第 <input type="number" value="${snum}" min="1" max="${limit || 50}" placeholder="?" title="季号不可重复"> 季 · <input type="text" value="${esc(stitle)}" placeholder="季标题（可选）"></span>
       <div style="display:flex;align-items:center;gap:8px">
@@ -1743,23 +1807,11 @@ function addSeasonRow(seasonData, scope = 'main') {
         <button type="button" class="btn btn-xs btn-danger" onclick="removeSeason('${sidx}', '${scope}')" title="删除此季">✕</button>
       </div>
     </div>
-    <div class="season-body open">
-      <div class="dim-list">${buildDimSliders(prefix, ratings)}</div>
-      <div class="form-group">
-        <label>短评（可选）</label>
-        <textarea placeholder="对这季的评价..." rows="1">${esc(comment)}</textarea>
-      </div>
-    </div>
+    ${buildSeasonEditableBody(prefix, ratings, comment)}
   `;
   listEl.appendChild(card);
 
-  bindDimSliders(prefix);
-  card.querySelectorAll('input[type="number"], input[type="text"], textarea').forEach(input => {
-    input.addEventListener('input', () => {
-      renderSeasonTabs(scope);
-      syncSeasonAverage(scope);
-    });
-  });
+  bindSeasonCardInputs(card, scope);
   renderSeasonTabs(scope);
   activateSeason(sidx, scope);
   syncSeasonAverage(scope);
@@ -1776,6 +1828,7 @@ function collectSeasonData(listEl = $['seasonList']) {
   const seasons = [];
   if (!listEl) return seasons;
   listEl.querySelectorAll('.season-card').forEach(card=>{
+    if (card.dataset.seasonEnabled === 'false') return;
     const idx = card.dataset.seasonIdx;
     const prefix = `${card.dataset.seasonScope === 'qr' ? 'qs' : 's'}${idx}`;
     const numInput = card.querySelector('.season-panel-head input[type="number"]');
@@ -2045,7 +2098,12 @@ async function fillFromTmdbSearchItem(item) {
 $['searchAddReviewBtn'].addEventListener('click', ()=>{
   if (!selectedSearchMovie) return;
   $['searchResults'].classList.remove('open');
-  openQuickRate(selectedSearchMovie);
+  const existing = findEntryForMedia(currentUser?.id, selectedSearchMovie.media_type, selectedSearchMovie.tmdb_id);
+  if (existing) {
+    movieCache.set(selectedSearchMovie, selectedSearchMovie);
+    openQuickEdit(existing.id);
+  }
+  else openQuickRate(selectedSearchMovie);
 });
 
 $['searchWatchBtn'].addEventListener('click', async ()=>{
@@ -5285,12 +5343,38 @@ async function loadTopRated() {
 }
 
 // ===== QUICK RATE =====
-function resetQuickRateSeasons(mediaType, seasons = []) {
+function buildSeasonRowsWithPlaceholders(seasons = [], limit = 0, scope = 'qr') {
+  const rows = [...(seasons || [])].sort((a, b) => Number(a.season_number || 0) - Number(b.season_number || 0));
+  const maxSeason = Number(limit || 0);
+  if (!maxSeason) return rows;
+  const byNumber = new Map(rows.map(s => [Number(s.season_number || 0), s]));
+  const filled = [];
+  for (let seasonNumber = 1; seasonNumber <= maxSeason; seasonNumber++) {
+    if (byNumber.has(seasonNumber)) {
+      filled.push(byNumber.get(seasonNumber));
+    } else {
+      filled.push({
+        _idx: `placeholder-${scope}-${seasonNumber}`,
+        _placeholder: true,
+        season_number: seasonNumber
+      });
+    }
+  }
+  return filled;
+}
+
+function resetQuickRateSeasons(mediaType, seasons = [], fillPlaceholders = false) {
   if ($['qrSeasonList']) $['qrSeasonList'].innerHTML = '';
   const isSeries = normalizeMediaType(mediaType) === 'series';
   $['qrSeasonSection'].classList.toggle('hidden', !isSeries);
   if (isSeries) {
-    seasons.forEach(s => addSeasonRow(s, 'qr'));
+    const rows = fillPlaceholders
+      ? buildSeasonRowsWithPlaceholders(seasons, getCurrentSeasonLimit('qr'), 'qr')
+      : seasons;
+    rows.forEach(s => addSeasonRow(s, 'qr'));
+    const firstRated = getSeasonCards('qr').find(card => card.dataset.seasonEnabled !== 'false');
+    const firstSeason = firstRated || getSeasonCards('qr')[0];
+    if (firstSeason) activateSeason(firstSeason.dataset.seasonIdx, 'qr');
     syncSeasonAverage('qr');
   } else {
     renderPrimaryRatingArea('qr', []);
@@ -5353,7 +5437,7 @@ function openQuickEdit(id) {
         comment: s.comment
       }))
     : [];
-  resetQuickRateSeasons(entry.type, seasons);
+  resetQuickRateSeasons(entry.type, seasons, true);
   bindDimSliders('qr');
   if (!seasons.length) updateQrTotal();
   $['quickRateModal'].classList.add('open');

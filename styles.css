@@ -237,6 +237,8 @@
 	  }
 	  .season-tab:hover { border-color: var(--gold); color: var(--text); }
 	  .season-tab.active { border-color: var(--gold); background: var(--gold-dim); color: var(--gold); }
+	  .season-tab.unrated strong { color: var(--text2); font-size: 0.72rem; }
+	  .season-tab.unrated.active strong { color: var(--gold); }
 	  .season-tab span { font-size: 0.72rem; font-weight: 700; }
 	  .season-tab strong { font-size: 0.85rem; }
 	  .season-card {
@@ -259,10 +261,16 @@
 	    cursor: pointer; user-select: none;
   }
   .season-header:hover { background: rgba(255,255,255,0.02); }
-  .season-title { font-weight: 600; font-size: 0.9rem; }
-  .season-score { color: var(--gold); font-weight: 700; }
+	  .season-title { font-weight: 600; font-size: 0.9rem; }
+	  .season-score { color: var(--gold); font-weight: 700; }
+	  .season-unrated-label { color: var(--text2); }
 	  .season-body { padding: 0 16px 16px; display: none; }
 	  .season-body.open { display: block; }
+	  .season-empty {
+	    min-height: 120px; display: grid; place-items: center; gap: 10px;
+	    padding: 18px 0; color: var(--text2); text-align: center;
+	  }
+	  .season-empty p { font-size: 0.86rem; }
 	  .season-body textarea {
 	    width: 100%; padding: 8px 12px; background: var(--surface); border: 1px solid var(--border);
 	    color: var(--text); border-radius: var(--radius); font-size: 0.85rem; font-family: inherit;

@@ -850,6 +850,7 @@ function checkOverviewOverflow(ovId) {
 }
 
 const MOVIE_DETAIL_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
+const SERIES_RUNTIME_DETAIL_VERSION = 1;
 
 function normalizeMovieDetail(input, credits) {
   if (!input) return null;
@@ -904,6 +905,7 @@ function normalizeSeasonDetailRecord(season) {
   if (!season || typeof season !== 'object') return null;
   const seasonNumber = Number(season.season_number || season.number || 0);
   if (!seasonNumber) return null;
+  const sourceEpisodes = Array.isArray(season.episodes) ? season.episodes : null;
   const episodes = Array.isArray(season.episodes)
     ? season.episodes.map(ep => ({
       episode_number: Number(ep?.episode_number || 0),
@@ -916,6 +918,10 @@ function normalizeSeasonDetailRecord(season) {
     || episodes.filter(ep => Number(ep.runtime || 0) > 0).length;
   const averageEpisodeRuntime = Math.max(0, Number(season.average_episode_runtime || 0))
     || (knownEpisodeRuntimeCount ? Math.round((episodeRuntimeTotal / knownEpisodeRuntimeCount) * 10) / 10 : 0);
+  const hasRuntimeDetail = Number(season.runtime_detail_version || 0) >= SERIES_RUNTIME_DETAIL_VERSION
+    || (sourceEpisodes && sourceEpisodes.length > 0)
+    || episodeRuntimeTotal > 0
+    || knownEpisodeRuntimeCount > 0;
   return {
     season_number: seasonNumber,
     season_title: season.season_title || season.name || '',
@@ -928,6 +934,7 @@ function normalizeSeasonDetailRecord(season) {
     episode_runtime_total: episodeRuntimeTotal,
     known_episode_runtime_count: knownEpisodeRuntimeCount,
     average_episode_runtime: averageEpisodeRuntime,
+    runtime_detail_version: hasRuntimeDetail ? SERIES_RUNTIME_DETAIL_VERSION : 0,
     episodes,
     director: season.director || '',
     cast: Array.isArray(season.cast) ? season.cast.map(c => typeof c === 'string' ? c : c?.name).filter(Boolean).slice(0, 8) : []
@@ -3029,9 +3036,7 @@ function getEntryRatedSeasons(entry) {
 
 function seasonDetailHasRuntimeShape(seasonDetail) {
   if (!seasonDetail) return false;
-  return Object.prototype.hasOwnProperty.call(seasonDetail, 'episode_runtime_total')
-    || Object.prototype.hasOwnProperty.call(seasonDetail, 'known_episode_runtime_count')
-    || Array.isArray(seasonDetail.episodes);
+  return Number(seasonDetail.runtime_detail_version || 0) >= SERIES_RUNTIME_DETAIL_VERSION;
 }
 
 function needsSeriesSeasonRecordsFetch(detail, forceSeries = false) {

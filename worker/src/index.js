@@ -455,6 +455,7 @@ function normalizeSeasonDetail(seasonDetail, seasonCredits, seriesCredits) {
     episode_runtime_total: episodeRuntimeTotal,
     known_episode_runtime_count: knownEpisodeRuntimes.length,
     average_episode_runtime: averageEpisodeRuntime,
+    runtime_detail_version: 1,
     episodes,
     director: directorNames.join(' / '),
     cast: castNames

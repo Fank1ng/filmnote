@@ -101,6 +101,8 @@ const $ = {
   // Discover
   get discoverContent() { return document.getElementById('discoverContent'); },
   get qrTitle() { return document.getElementById('qrTitle'); },
+  get qrModeTabs() { return document.getElementById('qrModeTabs'); },
+  get qrTotalPage() { return document.getElementById('qrTotalPage'); },
   get qrDims() { return document.getElementById('qrDims'); },
   get qrComment() { return document.getElementById('qrComment'); },
   get qrTotalScore() { return document.getElementById('qrTotalScore'); },
@@ -3357,6 +3359,9 @@ let discoverCooldownTimer = null;
 let discoverMovieMap = {};
 let quickRateMovie = null;
 let quickEditEntryId = null;
+let quickRateMode = 'total';
+let quickRateModeTabsEnabled = false;
+let quickRateTotalRatings = null;
 let discoverRatedCount = 0;
 let discoverRefreshStreak = 0;
 let discoverLastShownIds = [];
@@ -5539,12 +5544,44 @@ function buildSeasonRowsWithPlaceholders(seasons = [], limit = 0, scope = 'qr') 
   return filled;
 }
 
-function resetQuickRateSeasons(mediaType, seasons = [], fillPlaceholders = false, ratingMode = 'season') {
+function getQuickRateSliderRatings() {
+  const ratings = {};
+  document.querySelectorAll('input[type="range"][data-prefix="qr"]').forEach(s=>{
+    ratings[s.dataset.dim] = parseInt(s.value);
+  });
+  return ratings;
+}
+
+function applyQuickRateModeUI() {
+  const mediaType = normalizeMediaType(quickRateMovie?.media_type || quickRateMovie?.type || 'movie');
+  const isSeries = mediaType === 'series';
+  const showModeTabs = quickRateModeTabsEnabled && isSeries && !quickEditEntryId;
+  if ($['qrModeTabs']) {
+    $['qrModeTabs'].classList.toggle('hidden', !showModeTabs);
+    $['qrModeTabs'].querySelectorAll('button').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.qmode === quickRateMode);
+    });
+  }
+  const showTotalPage = !showModeTabs || quickRateMode === 'total';
+  $['qrTotalPage']?.classList.toggle('hidden', !showTotalPage);
+  $['qrSeasonSection']?.classList.toggle('hidden', !(isSeries && (!showModeTabs || quickRateMode === 'season')));
+  if (showTotalPage && showModeTabs) {
+    renderPrimaryRatingArea('qr', [], quickRateTotalRatings || {});
+  }
+}
+
+function setQuickRateMode(mode) {
+  if (quickRateMode === 'total') {
+    quickRateTotalRatings = getQuickRateSliderRatings();
+  }
+  quickRateMode = mode === 'season' ? 'season' : 'total';
+  applyQuickRateModeUI();
+}
+
+function resetQuickRateSeasons(mediaType, seasons = [], fillPlaceholders = false) {
   if ($['qrSeasonList']) $['qrSeasonList'].innerHTML = '';
   const isSeries = normalizeMediaType(mediaType) === 'series';
-  const showSeasonRating = isSeries && ratingMode !== 'total';
-  $['qrSeasonSection'].classList.toggle('hidden', !showSeasonRating);
-  if (showSeasonRating) {
+  if (isSeries) {
     const rows = fillPlaceholders
       ? buildSeasonRowsWithPlaceholders(seasons, getCurrentSeasonLimit('qr'), 'qr')
       : seasons;
@@ -5552,10 +5589,11 @@ function resetQuickRateSeasons(mediaType, seasons = [], fillPlaceholders = false
     const firstRated = getSeasonCards('qr').find(card => card.dataset.seasonEnabled !== 'false');
     const firstSeason = firstRated || getSeasonCards('qr')[0];
     if (firstSeason) activateSeason(firstSeason.dataset.seasonIdx, 'qr');
-    syncSeasonAverage('qr');
+    if (!quickRateModeTabsEnabled) syncSeasonAverage('qr');
   } else {
     renderPrimaryRatingArea('qr', []);
   }
+  applyQuickRateModeUI();
 }
 
 function openQuickRate(movie) {
@@ -5570,17 +5608,20 @@ function openQuickRate(movie) {
     director: movie.director || ''
   } : null);
   if (!normalized) return;
-  const ratingMode = movie?.ratingMode === 'total' ? 'total' : 'season';
+  quickRateMode = movie?.ratingMode === 'season' ? 'season' : 'total';
+  quickRateModeTabsEnabled = normalized.media_type === 'series';
+  quickRateTotalRatings = {};
   quickRateMovie = normalized;
   quickEditEntryId = null;
-  $['qrTitle'].textContent = (normalized.media_type === 'series' && ratingMode === 'season' ? '分季评价 ' : '评价 ') + normalized.title;
+  $['qrTitle'].textContent = '评价 ' + normalized.title;
   $['qrDims'].innerHTML = buildDimSliders('qr', {});
   $['qrTotalScore'].textContent = '5.0';
   $['qrComment'].value = '';
   $['qrSubmit'].textContent = '保存评价';
-  resetQuickRateSeasons(normalized.media_type, [], movie?.fillSeasonPlaceholders === true, ratingMode);
+  resetQuickRateSeasons(normalized.media_type, [], movie?.fillSeasonPlaceholders === true);
   bindDimSliders('qr');
   updateQrTotal();
+  applyQuickRateModeUI();
   $['quickRateModal'].classList.add('open');
 }
 
@@ -5588,6 +5629,9 @@ function openQuickEdit(id) {
   const entry = allEntries.find(e=>e.id===id);
   if (!entry) return;
   quickEditEntryId = id;
+  quickRateMode = 'season';
+  quickRateModeTabsEnabled = false;
+  quickRateTotalRatings = null;
   quickRateMovie = {
     id: entry.tmdb_id || null,
     tmdb_id: entry.tmdb_id || null,
@@ -5636,10 +5680,18 @@ document.addEventListener('input', e=>{
   if (e.target.matches('input[type="range"][data-prefix="qr"]')) updateQrTotal();
 });
 
+$['qrModeTabs']?.querySelectorAll('button').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    setQuickRateMode(btn.dataset.qmode);
+  });
+});
+
 $['qrCancel'].addEventListener('click', ()=>{
   $['quickRateModal'].classList.remove('open');
   quickRateMovie = null;
   quickEditEntryId = null;
+  quickRateModeTabsEnabled = false;
+  quickRateTotalRatings = null;
 });
 
 $['quickRateModal'].addEventListener('click', e=>{
@@ -5647,21 +5699,29 @@ $['quickRateModal'].addEventListener('click', e=>{
     $['quickRateModal'].classList.remove('open');
     quickRateMovie = null;
     quickEditEntryId = null;
+    quickRateModeTabsEnabled = false;
+    quickRateTotalRatings = null;
   }
 });
 
 $['qrSubmit'].addEventListener('click', async ()=>{
   if (!quickRateMovie) return;
-  const comment = $['qrComment'].value.trim();
   const isEdit = !!quickEditEntryId;
   const savedTmdbId = quickRateMovie.tmdb_id || null;
   const mediaType = normalizeMediaType(quickRateMovie.media_type || quickRateMovie.type || 'movie');
-  const seasons = mediaType === 'series' ? collectSeasonData($['qrSeasonList']).filter(s=>s.season_number>0) : [];
-  if (mediaType === 'series') {
+  const useSeasonMode = mediaType === 'series' && (isEdit || quickRateMode === 'season');
+  const seasons = useSeasonMode ? collectSeasonData($['qrSeasonList']).filter(s=>s.season_number>0) : [];
+  if (!isEdit && mediaType === 'series' && quickRateMode === 'season' && !seasons.length) {
+    toast('请先选择至少一季评分');
+    return;
+  }
+  if (useSeasonMode) {
     const seasonError = validateSeasonRows(seasons, getCurrentSeasonLimit('qr'));
     if (seasonError) { toast(seasonError); return; }
   }
-  const ratings = mediaType === 'series' && seasons.length
+  const useSeasonRatings = useSeasonMode && seasons.length > 0;
+  const comment = useSeasonRatings && !isEdit ? '' : $['qrComment'].value.trim();
+  const ratings = useSeasonRatings
     ? getSeasonAverageDims(seasons)
     : (() => {
       const r = {};
@@ -5670,7 +5730,7 @@ $['qrSubmit'].addEventListener('click', async ()=>{
       });
       return r;
     })();
-  const total = mediaType === 'series' && seasons.length ? getSeasonAverage(seasons) : calcTotal(ratings);
+  const total = useSeasonRatings ? getSeasonAverage(seasons) : calcTotal(ratings);
 
   const btn = $['qrSubmit'];
   const origText = btn.textContent;
@@ -5712,7 +5772,7 @@ $['qrSubmit'].addEventListener('click', async ()=>{
     if (inserted?.id) entryId = inserted.id;
   }
 
-  if (!error && mediaType === 'series' && entryId) {
+  if (!error && useSeasonRatings && entryId) {
     for (const s of seasons) {
       const {error: seasonErr} = await db.from('season_ratings').insert({
         entry_id: entryId,

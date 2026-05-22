@@ -327,14 +327,20 @@
 <div class="modal-overlay" id="quickRateModal">
   <div class="modal quick-rate-modal">
     <h3 id="qrTitle">评价</h3>
-    <div class="dim-list" id="qrDims"></div>
-    <div class="total-preview">
-      <span class="total-label">加权总分</span>
-      <span class="total-value" id="qrTotalScore">5.0</span>
+    <div class="list-subtabs quick-rate-mode-tabs hidden" id="qrModeTabs">
+      <button type="button" class="active" data-qmode="total">总评分</button>
+      <button type="button" data-qmode="season">分季评分</button>
     </div>
-    <div class="form-group">
-      <label>短评（可选）</label>
-      <textarea id="qrComment" rows="2" placeholder="一句话记录感受..."></textarea>
+    <div id="qrTotalPage">
+      <div class="dim-list" id="qrDims"></div>
+      <div class="total-preview">
+        <span class="total-label">加权总分</span>
+        <span class="total-value" id="qrTotalScore">5.0</span>
+      </div>
+      <div class="form-group">
+        <label>短评（可选）</label>
+        <textarea id="qrComment" rows="2" placeholder="一句话记录感受..."></textarea>
+      </div>
     </div>
     <div class="season-section hidden" id="qrSeasonSection">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">

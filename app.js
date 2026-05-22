@@ -888,7 +888,7 @@ function normalizeMovieDetail(input, credits) {
     vote_average: Number(input.vote_average || 0),
     vote_count: Number(input.vote_count || 0),
     popularity: Number(input.popularity || 0),
-    runtime: Number(input.runtime || 0),
+    runtime: Number(input.runtime || (Array.isArray(input.episode_run_time) ? input.episode_run_time[0] : 0) || 0),
     director: input.director || '',
     cast,
     keyword_ids: keywordIds,
@@ -904,6 +904,18 @@ function normalizeSeasonDetailRecord(season) {
   if (!season || typeof season !== 'object') return null;
   const seasonNumber = Number(season.season_number || season.number || 0);
   if (!seasonNumber) return null;
+  const episodes = Array.isArray(season.episodes)
+    ? season.episodes.map(ep => ({
+      episode_number: Number(ep?.episode_number || 0),
+      runtime: Math.max(0, Number(ep?.runtime || 0))
+    })).filter(ep => ep.episode_number > 0)
+    : [];
+  const episodeRuntimeTotal = Math.max(0, Number(season.episode_runtime_total || 0))
+    || episodes.reduce((sum, ep) => sum + Math.max(0, Number(ep.runtime || 0)), 0);
+  const knownEpisodeRuntimeCount = Math.max(0, Number(season.known_episode_runtime_count || 0))
+    || episodes.filter(ep => Number(ep.runtime || 0) > 0).length;
+  const averageEpisodeRuntime = Math.max(0, Number(season.average_episode_runtime || 0))
+    || (knownEpisodeRuntimeCount ? Math.round((episodeRuntimeTotal / knownEpisodeRuntimeCount) * 10) / 10 : 0);
   return {
     season_number: seasonNumber,
     season_title: season.season_title || season.name || '',
@@ -913,6 +925,10 @@ function normalizeSeasonDetailRecord(season) {
     poster_path: season.poster_path || '',
     vote_average: Number(season.vote_average || 0),
     episode_count: Number(season.episode_count || 0),
+    episode_runtime_total: episodeRuntimeTotal,
+    known_episode_runtime_count: knownEpisodeRuntimeCount,
+    average_episode_runtime: averageEpisodeRuntime,
+    episodes,
     director: season.director || '',
     cast: Array.isArray(season.cast) ? season.cast.map(c => typeof c === 'string' ? c : c?.name).filter(Boolean).slice(0, 8) : []
   };
@@ -1109,7 +1125,7 @@ function extractMovieDetail(details, credits) {
     vote_average: details?.vote_average || 0,
     vote_count: details?.vote_count || 0,
     popularity: details?.popularity || 0,
-    runtime: details?.runtime || 0,
+    runtime: details?.runtime || (Array.isArray(details?.episode_run_time) ? details.episode_run_time[0] : 0) || 0,
     director: director ? director.name : '',
     cast: cast.map(c => c.name),
     keyword_ids: keywords.map(k => k.id).filter(Boolean),
@@ -1201,6 +1217,8 @@ function buildSeasonRecordTabsHTML(localSeasons = [], tmdbSeasons = [], baseId =
             <div class="detail-season-meta">
               ${tmdb?.air_date ? `<span>首播 ${esc(tmdb.air_date)}</span>` : ''}
               ${tmdb?.episode_count ? `<span>${tmdb.episode_count} 集</span>` : ''}
+              ${tmdb?.episode_runtime_total ? `<span>本季 ${formatStatNumber(tmdb.episode_runtime_total)} 分钟</span>` : ''}
+              ${tmdb?.average_episode_runtime ? `<span>平均 ${Number(tmdb.average_episode_runtime).toFixed(1)} 分钟/集</span>` : ''}
               ${tmdb?.director ? `<span>导演/主创 ${esc(tmdb.director)}</span>` : ''}
               ${tmdb?.cast?.length ? `<span>演员 ${tmdb.cast.map(esc).join(' / ')}</span>` : ''}
             </div>
@@ -3002,14 +3020,39 @@ function getEntryRatedSeasons(entry) {
   return allSeasonRatings.filter(s => s.entry_id === entry.id && s.user_id === entry.user_id && Number(s.season_number) > 0);
 }
 
-function getSeriesEpisodeCountForRatedSeasons(entry, ratedSeasons) {
+function getSeriesRuntimeStatsForRatedSeasons(entry, ratedSeasons) {
   const detail = entry?.tmdb_id ? movieCache.get(entry) : null;
   const seasonDetails = Array.isArray(detail?.seasons) ? detail.seasons : [];
+  const fallbackRuntime = getEntryRuntimeMinutes(entry);
   return ratedSeasons.reduce((sum, season) => {
     const seasonNumber = Number(season.season_number || 0);
     const seasonDetail = seasonDetails.find(s => Number(s.season_number) === seasonNumber);
-    return sum + Math.max(0, Number(seasonDetail?.episode_count || 0));
-  }, 0);
+    const episodeCount = Math.max(0, Number(seasonDetail?.episode_count || 0));
+    const realRuntimeTotal = Math.max(0, Number(seasonDetail?.episode_runtime_total || 0));
+    const fallbackRuntimeTotal = episodeCount * fallbackRuntime;
+    return {
+      episodeCount: sum.episodeCount + episodeCount,
+      totalMinutes: sum.totalMinutes + (realRuntimeTotal || fallbackRuntimeTotal)
+    };
+  }, { episodeCount: 0, totalMinutes: 0 });
+}
+
+function isSeriesDetailMissingRuntimeForEntries(entries) {
+  return (entries || []).some(entry => {
+    const detail = entry?.tmdb_id ? movieCache.get(entry) : null;
+    if (!detail || !Array.isArray(detail.seasons) || !detail.seasons.length) return true;
+    const ratedSeasons = getEntryRatedSeasons(entry);
+    if (!ratedSeasons.length) return false;
+    return ratedSeasons.some(season => {
+      const seasonNumber = Number(season.season_number || 0);
+      const seasonDetail = detail.seasons.find(s => Number(s.season_number) === seasonNumber);
+      if (!seasonDetail) return true;
+      const hasRuntimeShape = Object.prototype.hasOwnProperty.call(seasonDetail, 'episode_runtime_total')
+        || Object.prototype.hasOwnProperty.call(seasonDetail, 'known_episode_runtime_count')
+        || Array.isArray(seasonDetail.episodes);
+      return !hasRuntimeShape;
+    });
+  });
 }
 
 function formatStatNumber(value) {
@@ -3023,7 +3066,7 @@ function queueStatsDetailFetch(entries, mediaType) {
       const detail = movieCache.get(e);
       if (!detail) return true;
       if (mediaType === 'movie') return !Number(detail.runtime || 0);
-      return !Number(detail.runtime || 0) || !(Array.isArray(detail.seasons) && detail.seasons.length);
+      return isSeriesDetailMissingRuntimeForEntries([e]);
     })
     .map(e => Number(e.tmdb_id))
     .filter(Boolean))];
@@ -3058,11 +3101,10 @@ function calcStats(entries, type = statsType) {
     let totalMinutes = 0;
     entries.forEach(entry => {
       const ratedSeasons = getEntryRatedSeasons(entry);
-      const entryEpisodeCount = getSeriesEpisodeCountForRatedSeasons(entry, ratedSeasons);
-      const runtime = getEntryRuntimeMinutes(entry);
+      const runtimeStats = getSeriesRuntimeStatsForRatedSeasons(entry, ratedSeasons);
       ratedSeasonCount += ratedSeasons.length;
-      episodeCount += entryEpisodeCount;
-      totalMinutes += entryEpisodeCount * runtime;
+      episodeCount += runtimeStats.episodeCount;
+      totalMinutes += runtimeStats.totalMinutes;
     });
     return { ...stats, series: entries.length, ratedSeasonCount, episodeCount, totalMinutes };
   }

@@ -432,6 +432,17 @@ function normalizeSeasonDetail(seasonDetail, seasonCredits, seriesCredits) {
   const seasonCrew = seasonCredits?.crew?.length ? seasonCredits : null;
   const directorNames = crewNamesByJobs(seasonCrew || seriesCredits, ['Director', 'Creator', 'Executive Producer', 'Showrunner'], 3);
   const castNames = namesFromPeople(seasonCredits?.cast?.length ? seasonCredits.cast : seriesCredits?.cast, 8);
+  const episodes = Array.isArray(seasonDetail.episodes)
+    ? seasonDetail.episodes.map(ep => ({
+      episode_number: Number(ep?.episode_number || 0),
+      runtime: Math.max(0, Number(ep?.runtime || 0))
+    })).filter(ep => ep.episode_number > 0)
+    : [];
+  const knownEpisodeRuntimes = episodes.filter(ep => ep.runtime > 0);
+  const episodeRuntimeTotal = knownEpisodeRuntimes.reduce((sum, ep) => sum + ep.runtime, 0);
+  const averageEpisodeRuntime = knownEpisodeRuntimes.length
+    ? Math.round((episodeRuntimeTotal / knownEpisodeRuntimes.length) * 10) / 10
+    : 0;
   return {
     season_number: seasonNumber,
     season_title: seasonDetail.name || '',
@@ -440,7 +451,11 @@ function normalizeSeasonDetail(seasonDetail, seasonCredits, seriesCredits) {
     air_date: seasonDetail.air_date || '',
     poster_path: seasonDetail.poster_path || '',
     vote_average: seasonDetail.vote_average || 0,
-    episode_count: Array.isArray(seasonDetail.episodes) ? seasonDetail.episodes.length : Number(seasonDetail.episode_count || 0),
+    episode_count: episodes.length || Number(seasonDetail.episode_count || 0),
+    episode_runtime_total: episodeRuntimeTotal,
+    known_episode_runtime_count: knownEpisodeRuntimes.length,
+    average_episode_runtime: averageEpisodeRuntime,
+    episodes,
     director: directorNames.join(' / '),
     cast: castNames
   };

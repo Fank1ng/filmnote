@@ -271,6 +271,8 @@
 	    padding: 18px 0; color: var(--text2); text-align: center;
 	  }
 	  .season-empty p { font-size: 0.86rem; }
+	  .season-empty .detail-season-meta { justify-content: center; margin-top: 0; }
+	  .season-empty .detail-season-overview { max-width: 100%; text-align: left; margin-top: 0; }
 	  .season-body textarea {
 	    width: 100%; padding: 8px 12px; background: var(--surface); border: 1px solid var(--border);
 	    color: var(--text); border-radius: var(--radius); font-size: 0.85rem; font-family: inherit;

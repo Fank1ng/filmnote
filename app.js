@@ -1769,12 +1769,13 @@ function enableSeasonRating(idx, scope = 'main') {
   if (!card || card.dataset.seasonEnabled !== 'false') return;
   const prefix = card.dataset.seasonPrefix;
   const seasonNumber = parseInt(card.dataset.seasonNumber) || 1;
+  const seasonTitle = card.dataset.seasonTitle || '';
   card.dataset.seasonEnabled = 'true';
   card.dataset.seasonPlaceholder = 'false';
   card.classList.remove('season-unrated');
   card.innerHTML = `
     <div class="season-panel-head">
-      <span class="season-title">第 <input type="number" value="${seasonNumber}" min="1" max="${getCurrentSeasonLimit(scope) || 50}" placeholder="?" title="季号不可重复"> 季 · <input type="text" value="" placeholder="季标题（可选）"></span>
+      <span class="season-title">第 <input type="number" value="${seasonNumber}" min="1" max="${getCurrentSeasonLimit(scope) || 50}" placeholder="?" title="季号不可重复"> 季 · <input type="text" value="${esc(seasonTitle)}" placeholder="季标题（可选）"></span>
       <div style="display:flex;align-items:center;gap:8px">
         <span class="season-score" id="seasonTotal-${prefix}">5.0</span>
         <button type="button" class="btn btn-xs btn-danger" onclick="removeSeason('${idx}', '${scope}')" title="删除此季">✕</button>
@@ -1802,6 +1803,11 @@ function addSeasonRow(seasonData, scope = 'main') {
   const sidx = seasonData?._idx || (isPlaceholder ? `placeholder-${scope}-${seasonData?.season_number || Date.now()}` : Date.now());
   const snum = seasonData?.season_number || '';
   const stitle = seasonData?.season_title || '';
+  const overview = seasonData?.overview || '';
+  const airDate = seasonData?.air_date || '';
+  const episodeCount = Number(seasonData?.episode_count || 0);
+  const runtimeTotal = Number(seasonData?.episode_runtime_total || 0);
+  const averageRuntime = Number(seasonData?.average_episode_runtime || 0);
   const ratings = seasonData?.ratings || {};
   const comment = seasonData?.comment || '';
   const prefix = `${scope === 'qr' ? 'qs' : 's'}${sidx}`;
@@ -1812,17 +1818,26 @@ function addSeasonRow(seasonData, scope = 'main') {
   card.dataset.seasonScope = scope;
   card.dataset.seasonPrefix = prefix;
   card.dataset.seasonNumber = String(snum || '');
+  card.dataset.seasonTitle = stitle;
   card.dataset.seasonEnabled = isPlaceholder ? 'false' : 'true';
   card.dataset.seasonPlaceholder = isPlaceholder ? 'true' : 'false';
   card.classList.toggle('season-unrated', isPlaceholder);
+  const meta = [
+    airDate ? `首播 ${esc(airDate)}` : '',
+    episodeCount ? `${episodeCount} 集` : '',
+    runtimeTotal ? `本季 ${formatStatNumber(runtimeTotal)} 分钟` : '',
+    averageRuntime ? `平均 ${Number(averageRuntime).toFixed(1)} 分钟/集` : ''
+  ].filter(Boolean);
   card.innerHTML = isPlaceholder ? `
     <div class="season-panel-head">
-      <span class="season-title">第 <input type="number" value="${snum}" min="1" max="${limit || 50}" disabled> 季</span>
+      <span class="season-title">第 <input type="number" value="${snum}" min="1" max="${limit || 50}" disabled> 季${stitle ? ' · ' + esc(stitle) : ''}</span>
       <span class="season-score season-unrated-label">未评价</span>
     </div>
     <div class="season-body open">
       <div class="season-empty">
         <p>S${snum} 未评价</p>
+        ${meta.length ? `<div class="detail-season-meta">${meta.map(item => `<span>${item}</span>`).join('')}</div>` : ''}
+        ${overview ? `<p class="detail-season-overview">${esc(overview)}</p>` : ''}
         <button type="button" class="btn btn-sm btn-secondary" onclick="enableSeasonRating('${sidx}', '${scope}')">评价本季</button>
       </div>
     </div>
@@ -3362,6 +3377,8 @@ let quickEditEntryId = null;
 let quickRateMode = 'total';
 let quickRateModeTabsEnabled = false;
 let quickRateTotalRatings = null;
+let quickRateSeasonDetailSeq = 0;
+let quickRateSeasonDetailAttemptedId = null;
 let discoverRatedCount = 0;
 let discoverRefreshStreak = 0;
 let discoverLastShownIds = [];
@@ -5524,23 +5541,58 @@ async function loadTopRated() {
 }
 
 // ===== QUICK RATE =====
-function buildSeasonRowsWithPlaceholders(seasons = [], limit = 0, scope = 'qr') {
+function normalizeSeasonPlaceholder(season, scope = 'qr') {
+  const seasonNumber = Number(season?.season_number || season?.number || 0);
+  if (!seasonNumber) return null;
+  return {
+    _idx: `placeholder-${scope}-${seasonNumber}`,
+    _placeholder: true,
+    season_number: seasonNumber,
+    season_title: season?.season_title || season?.name || '',
+    overview: season?.overview || '',
+    air_date: season?.air_date || '',
+    episode_count: Number(season?.episode_count || 0),
+    episode_runtime_total: Number(season?.episode_runtime_total || 0),
+    average_episode_runtime: Number(season?.average_episode_runtime || 0),
+    poster_path: season?.poster_path || ''
+  };
+}
+
+function getSeriesSeasonPlaceholders(mediaOrEntry, scope = 'qr') {
+  const detail = mediaOrEntry?.tmdb_id ? movieCache.get(mediaOrEntry) : null;
+  const detailSeasons = Array.isArray(detail?.seasons) ? detail.seasons : [];
+  const seasons = detailSeasons
+    .map(season => normalizeSeasonPlaceholder(season, scope))
+    .filter(season => season && season.season_number > 0);
+  if (seasons.length) return seasons;
+  const limit = Number(mediaOrEntry?.number_of_seasons || detail?.number_of_seasons || 0);
+  return Array.from({ length: limit }, (_, i) => normalizeSeasonPlaceholder({ season_number: i + 1 }, scope));
+}
+
+function buildSeasonRowsWithPlaceholders(seasons = [], limit = 0, scope = 'qr', placeholders = null) {
   const rows = [...(seasons || [])].sort((a, b) => Number(a.season_number || 0) - Number(b.season_number || 0));
   const maxSeason = Number(limit || 0);
-  if (!maxSeason) return rows;
+  const placeholderRows = Array.isArray(placeholders) && placeholders.length
+    ? placeholders.map(season => normalizeSeasonPlaceholder(season, scope)).filter(Boolean)
+    : [];
+  if (!maxSeason && !placeholderRows.length) return rows;
   const byNumber = new Map(rows.map(s => [Number(s.season_number || 0), s]));
+  const byPlaceholderNumber = new Map(placeholderRows.map(s => [Number(s.season_number || 0), s]));
+  const seasonNumbers = new Set([
+    ...rows.map(s => Number(s.season_number || 0)).filter(Boolean),
+    ...placeholderRows.map(s => Number(s.season_number || 0)).filter(Boolean)
+  ]);
+  for (let seasonNumber = 1; seasonNumber <= maxSeason; seasonNumber++) seasonNumbers.add(seasonNumber);
   const filled = [];
-  for (let seasonNumber = 1; seasonNumber <= maxSeason; seasonNumber++) {
+  [...seasonNumbers].sort((a, b) => a - b).forEach(seasonNumber => {
     if (byNumber.has(seasonNumber)) {
       filled.push(byNumber.get(seasonNumber));
+    } else if (byPlaceholderNumber.has(seasonNumber)) {
+      filled.push(byPlaceholderNumber.get(seasonNumber));
     } else {
-      filled.push({
-        _idx: `placeholder-${scope}-${seasonNumber}`,
-        _placeholder: true,
-        season_number: seasonNumber
-      });
+      filled.push(normalizeSeasonPlaceholder({ season_number: seasonNumber }, scope));
     }
-  }
+  });
   return filled;
 }
 
@@ -5576,14 +5628,18 @@ function setQuickRateMode(mode) {
   }
   quickRateMode = mode === 'season' ? 'season' : 'total';
   applyQuickRateModeUI();
+  if (quickRateMode === 'season') {
+    resetQuickRateSeasons('series', collectSeasonData($['qrSeasonList']), true);
+  }
 }
 
 function resetQuickRateSeasons(mediaType, seasons = [], fillPlaceholders = false) {
   if ($['qrSeasonList']) $['qrSeasonList'].innerHTML = '';
   const isSeries = normalizeMediaType(mediaType) === 'series';
   if (isSeries) {
+    const placeholders = quickRateModeTabsEnabled ? getSeriesSeasonPlaceholders(quickRateMovie, 'qr') : null;
     const rows = fillPlaceholders
-      ? buildSeasonRowsWithPlaceholders(seasons, getCurrentSeasonLimit('qr'), 'qr')
+      ? buildSeasonRowsWithPlaceholders(seasons, getCurrentSeasonLimit('qr'), 'qr', placeholders)
       : seasons;
     rows.forEach(s => addSeasonRow(s, 'qr'));
     const firstRated = getSeasonCards('qr').find(card => card.dataset.seasonEnabled !== 'false');
@@ -5594,6 +5650,33 @@ function resetQuickRateSeasons(mediaType, seasons = [], fillPlaceholders = false
     renderPrimaryRatingArea('qr', []);
   }
   applyQuickRateModeUI();
+  if (quickRateModeTabsEnabled && isSeries) queueQuickRateSeasonDetailFetch();
+}
+
+function needsQuickRateSeasonDetailFetch() {
+  if (!quickRateMovie?.tmdb_id || normalizeMediaType(quickRateMovie.media_type) !== 'series') return false;
+  const detail = movieCache.get(quickRateMovie);
+  const seasons = Array.isArray(detail?.seasons) ? detail.seasons.filter(s => Number(s.season_number || 0) > 0) : [];
+  const expected = Number(quickRateMovie.number_of_seasons || detail?.number_of_seasons || 0);
+  return !seasons.length || (expected > 0 && seasons.length < expected);
+}
+
+function queueQuickRateSeasonDetailFetch() {
+  if (!quickRateModeTabsEnabled || quickRateMode !== 'season' || !needsQuickRateSeasonDetailFetch()) return;
+  const tmdbId = Number(quickRateMovie.tmdb_id || 0);
+  if (!tmdbId || quickRateSeasonDetailAttemptedId === tmdbId) return;
+  quickRateSeasonDetailAttemptedId = tmdbId;
+  const seq = ++quickRateSeasonDetailSeq;
+  fetchMovieDetail('series', tmdbId, { force: true }).then(detail => {
+    if (!detail || seq !== quickRateSeasonDetailSeq) return;
+    if (!$['quickRateModal'].classList.contains('open')) return;
+    if (!quickRateMovie || Number(quickRateMovie.tmdb_id || 0) !== tmdbId) return;
+    quickRateMovie = {
+      ...quickRateMovie,
+      number_of_seasons: detail.number_of_seasons || quickRateMovie.number_of_seasons || 0
+    };
+    resetQuickRateSeasons('series', collectSeasonData($['qrSeasonList']), true);
+  }).catch(()=>{});
 }
 
 function openQuickRate(movie) {
@@ -5611,6 +5694,7 @@ function openQuickRate(movie) {
   quickRateMode = movie?.ratingMode === 'season' ? 'season' : 'total';
   quickRateModeTabsEnabled = normalized.media_type === 'series';
   quickRateTotalRatings = {};
+  quickRateSeasonDetailAttemptedId = null;
   quickRateMovie = normalized;
   quickEditEntryId = null;
   $['qrTitle'].textContent = '评价 ' + normalized.title;
@@ -5632,6 +5716,7 @@ function openQuickEdit(id) {
   quickRateMode = 'season';
   quickRateModeTabsEnabled = false;
   quickRateTotalRatings = null;
+  quickRateSeasonDetailAttemptedId = null;
   quickRateMovie = {
     id: entry.tmdb_id || null,
     tmdb_id: entry.tmdb_id || null,
@@ -5692,6 +5777,7 @@ $['qrCancel'].addEventListener('click', ()=>{
   quickEditEntryId = null;
   quickRateModeTabsEnabled = false;
   quickRateTotalRatings = null;
+  quickRateSeasonDetailAttemptedId = null;
 });
 
 $['quickRateModal'].addEventListener('click', e=>{
@@ -5701,6 +5787,7 @@ $['quickRateModal'].addEventListener('click', e=>{
     quickEditEntryId = null;
     quickRateModeTabsEnabled = false;
     quickRateTotalRatings = null;
+    quickRateSeasonDetailAttemptedId = null;
   }
 });
 
@@ -5822,6 +5909,9 @@ $['qrSubmit'].addEventListener('click', async ()=>{
   $['quickRateModal'].classList.remove('open');
   quickRateMovie = null;
   quickEditEntryId = null;
+  quickRateModeTabsEnabled = false;
+  quickRateTotalRatings = null;
+  quickRateSeasonDetailAttemptedId = null;
   btn.textContent = origText; btn.disabled = false;
   const wasOnDiscover = getActiveTab()==='discover';
   const wasOnSearch = getActiveTab()==='rate';

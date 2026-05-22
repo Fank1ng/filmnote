@@ -1197,7 +1197,7 @@ function buildSeasonRecordTabsHTML(localSeasons = [], tmdbSeasons = [], baseId =
       <h4 style="font-size:0.85rem;color:var(--text2);margin-bottom:8px">每季详情</h4>
       <div class="season-tabs detail-season-tabs">
         ${records.map(record => {
-          const score = record.local?.total_score ? Number(record.local.total_score).toFixed(1) : (record.tmdb?.vote_average ? Number(record.tmdb.vote_average).toFixed(1) : '');
+          const score = record.local?.total_score ? Number(record.local.total_score).toFixed(1) : '未评价';
           return `<button type="button" class="season-tab${record.season_number === active ? ' active' : ''}" data-season="${record.season_number}" onclick="activateSeasonRecord('${baseId}', ${record.season_number})"><span>S${record.season_number}</span>${score ? `<strong>${score}</strong>` : ''}</button>`;
         }).join('')}
       </div>
@@ -1209,7 +1209,7 @@ function buildSeasonRecordTabsHTML(localSeasons = [], tmdbSeasons = [], baseId =
           <div class="detail-season-panel${record.season_number === active ? ' active' : ''}" data-season-panel="${record.season_number}">
             <div class="detail-season-head">
               <strong>S${record.season_number}${title ? ' · ' + esc(title) : ''}</strong>
-              ${local?.total_score ? `<span>${Number(local.total_score).toFixed(1)} / 10</span>` : ''}
+              <span>${local?.total_score ? Number(local.total_score).toFixed(1) + ' / 10' : '未评价'}</span>
             </div>
             ${local?.ratings ? `<div class="mc-dim-dots" style="margin:8px 0">${buildDimTagsHTML(local.ratings, { main: 'var(--gold)' })}</div>` : ''}
             ${local?.comment ? `<p class="detail-season-comment">"${esc(local.comment)}"</p>` : ''}
@@ -1903,6 +1903,12 @@ function listKey(mediaTypeOrMovie, tmdbId = null) {
     return `${normalizeMediaType(mediaTypeOrMovie.media_type || mediaTypeOrMovie.type)}:${Number(mediaTypeOrMovie.tmdb_id || mediaTypeOrMovie.id)}`;
   }
   return `${normalizeMediaType(mediaTypeOrMovie)}:${Number(tmdbId)}`;
+}
+
+function inlineMediaPayload(movie, extra = {}) {
+  const item = normalizeListMovie(movie);
+  if (!item) return '';
+  return encodeURIComponent(JSON.stringify({ ...item, ...extra })).replace(/'/g, '%27');
 }
 
 function setEntryType(nextType) {
@@ -2768,7 +2774,7 @@ async function showDetail(id) {
   const entry = allEntries.find(e=>e.id===id);
   if (!entry) return;
   const cached = entry.tmdb_id ? movieCache.get(entry) : null;
-  const shouldFetchDetail = entry.tmdb_id && needsMovieDetailFetch(cached);
+  const shouldFetchDetail = entry.tmdb_id && (needsMovieDetailFetch(cached) || (entry.type === 'series' && needsSeriesSeasonRecordsFetch(cached, true)));
   const hasDetailCache = cached && !shouldFetchDetail;
   if (cached) applyMovieDetailToEntry(entry, cached);
 
@@ -2935,7 +2941,7 @@ async function showListItemDetail(movieOrId) {
   }
 
   const cached = movieCache.get(item);
-  const shouldFetchDetail = needsMovieDetailFetch(cached);
+  const shouldFetchDetail = needsMovieDetailFetch(cached) || needsSeriesSeasonRecordsFetch(cached, true);
   const poster = item.poster_path ? posterUrl(item.poster_path) : '';
   const content = $['modalContent'];
   content.innerHTML = `
@@ -2951,7 +2957,8 @@ async function showListItemDetail(movieOrId) {
     </div>
     <div id="tmdbSeriesSeasons">${buildSeasonRecordTabsHTML([], cached?.seasons || [], 'tmdbSeriesSeasons-' + item.tmdb_id)}</div>
     <div class="btn-group" style="justify-content:flex-end;margin-top:8px">
-      <button class="btn btn-primary btn-sm" onclick="closeModal();openEntryFormForListMovie({id:${item.tmdb_id},media_type:'series',title:'${esc(item.title).replace(/'/g,"\\'")}',year:${item.year || 'null'},poster_path:'${item.poster_path || ''}'})">＋我的评分</button>
+      <button class="btn btn-secondary btn-sm" onclick="closeModal();openQuickRate(JSON.parse(decodeURIComponent('${inlineMediaPayload(item, { number_of_seasons: cached?.number_of_seasons || item.number_of_seasons || 0, director: cached?.director || item.director || '' })}')))">总评分</button>
+      <button class="btn btn-primary btn-sm" onclick="closeModal();openQuickRate(JSON.parse(decodeURIComponent('${inlineMediaPayload(item, { fillSeasonPlaceholders: true, number_of_seasons: cached?.number_of_seasons || item.number_of_seasons || 0, director: cached?.director || item.director || '' })}')))">分季评分</button>
       <button class="btn btn-secondary btn-sm" onclick="closeModal()">关闭</button>
     </div>
   `;
@@ -3020,6 +3027,20 @@ function getEntryRatedSeasons(entry) {
   return allSeasonRatings.filter(s => s.entry_id === entry.id && s.user_id === entry.user_id && Number(s.season_number) > 0);
 }
 
+function seasonDetailHasRuntimeShape(seasonDetail) {
+  if (!seasonDetail) return false;
+  return Object.prototype.hasOwnProperty.call(seasonDetail, 'episode_runtime_total')
+    || Object.prototype.hasOwnProperty.call(seasonDetail, 'known_episode_runtime_count')
+    || Array.isArray(seasonDetail.episodes);
+}
+
+function needsSeriesSeasonRecordsFetch(detail, forceSeries = false) {
+  if (!detail) return false;
+  if (!forceSeries && normalizeMediaType(detail.media_type || detail.type) !== 'series') return false;
+  if (!Array.isArray(detail.seasons) || !detail.seasons.length) return true;
+  return detail.seasons.some(season => !seasonDetailHasRuntimeShape(season));
+}
+
 function getSeriesRuntimeStatsForRatedSeasons(entry, ratedSeasons) {
   const detail = entry?.tmdb_id ? movieCache.get(entry) : null;
   const seasonDetails = Array.isArray(detail?.seasons) ? detail.seasons : [];
@@ -3047,10 +3068,7 @@ function isSeriesDetailMissingRuntimeForEntries(entries) {
       const seasonNumber = Number(season.season_number || 0);
       const seasonDetail = detail.seasons.find(s => Number(s.season_number) === seasonNumber);
       if (!seasonDetail) return true;
-      const hasRuntimeShape = Object.prototype.hasOwnProperty.call(seasonDetail, 'episode_runtime_total')
-        || Object.prototype.hasOwnProperty.call(seasonDetail, 'known_episode_runtime_count')
-        || Array.isArray(seasonDetail.episodes);
-      return !hasRuntimeShape;
+      return !seasonDetailHasRuntimeShape(seasonDetail);
     });
   });
 }
@@ -3076,7 +3094,7 @@ function queueStatsDetailFetch(entries, mediaType) {
     statsDetailFetches.add(key);
     fetchMovieDetail(mediaType, tmdbId, { force: true }).then(detail => {
       if (!detail) return;
-      if (getActiveTab() === 'stats' && statsType === mediaType) renderStats();
+      if (getActiveTab() === 'stats' && (statsType === mediaType || mediaType === 'series')) renderStats();
     }).finally(() => {
       setTimeout(() => statsDetailFetches.delete(key), 60000);
     });
@@ -5553,7 +5571,7 @@ function openQuickRate(movie) {
   $['qrTotalScore'].textContent = '5.0';
   $['qrComment'].value = '';
   $['qrSubmit'].textContent = '保存评价';
-  resetQuickRateSeasons(normalized.media_type);
+  resetQuickRateSeasons(normalized.media_type, [], movie?.fillSeasonPlaceholders === true);
   bindDimSliders('qr');
   updateQrTotal();
   $['quickRateModal'].classList.add('open');

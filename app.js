@@ -613,33 +613,43 @@ const movieCache = (() => {
   }
 
   return {
-    get(tmdbId) {
-      if (!tmdbId) return null;
-      const cached = loadAll()[tmdbId] || null;
+    get(mediaTypeOrEntry, tmdbId = null) {
+      const all = loadAll();
+      const key = mediaSearchKey(mediaTypeOrEntry, tmdbId);
+      const legacyId = typeof mediaTypeOrEntry === 'object' && mediaTypeOrEntry
+        ? mediaTypeOrEntry.tmdb_id || mediaTypeOrEntry.id
+        : mediaTypeOrEntry;
+      const cached = (key && all[key]) || all[legacyId] || null;
       return cached ? normalizeMovieDetail(cached) : null;
     },
-    hasFull(tmdbId) {
-      return !needsMovieDetailFetch(this.get(tmdbId));
+    hasFull(mediaTypeOrEntry, tmdbId = null) {
+      return !needsMovieDetailFetch(this.get(mediaTypeOrEntry, tmdbId));
     },
 
-    set(tmdbId, data) {
-      if (!tmdbId || !data) return;
+    set(mediaTypeOrEntry, tmdbIdOrData, data = null) {
+      const value = data === null ? tmdbIdOrData : data;
+      const key = data === null
+        ? (typeof mediaTypeOrEntry === 'object' ? mediaSearchKey(mediaTypeOrEntry) : mediaSearchKey('movie', mediaTypeOrEntry))
+        : mediaSearchKey(mediaTypeOrEntry, tmdbIdOrData);
+      if (!key || !value) return;
       const all = loadAll();
-      if (typeof data === 'string') {
-        all[tmdbId] = mergeMovieDetail(all[tmdbId], { overview: data });
+      if (typeof value === 'string') {
+        all[key] = mergeMovieDetail(all[key], { overview: value });
       } else {
-        all[tmdbId] = mergeMovieDetail(all[tmdbId], data);
+        all[key] = mergeMovieDetail(all[key], value);
       }
       saveAll(all);
     },
     setBatch(map) {
       if (!map || !Object.keys(map).length) return;
       const all = loadAll();
-      for (const [id, val] of Object.entries(map)) {
+      for (const [rawKey, val] of Object.entries(map)) {
+        const key = rawKey.includes(':') ? rawKey : mediaSearchKey(val || 'movie', rawKey);
+        if (!key) continue;
         if (typeof val === 'string') {
-          all[id] = mergeMovieDetail(all[id], { overview: val });
+          all[key] = mergeMovieDetail(all[key], { overview: val });
         } else {
-          all[id] = mergeMovieDetail(all[id], val);
+          all[key] = mergeMovieDetail(all[key], val);
         }
       }
       saveAll(all);
@@ -647,8 +657,11 @@ const movieCache = (() => {
     applyDetailsTo(entries) {
       const all = loadAll();
       for (const e of entries) {
-        if (!e.tmdb_id || !all[e.tmdb_id]) continue;
-        applyMovieDetailToEntry(e, normalizeMovieDetail(all[e.tmdb_id]));
+        if (!e.tmdb_id) continue;
+        const key = mediaSearchKey(e);
+        const cached = all[key] || all[e.tmdb_id];
+        if (!cached) continue;
+        applyMovieDetailToEntry(e, normalizeMovieDetail(cached));
       }
     },
     applyOverviewTo(entries) { this.applyDetailsTo(entries); }
@@ -773,7 +786,7 @@ async function loadAllData() {
     // Backfill movieCache from Supabase (migration: overviews stored in DB before refactor)
     const batch = {};
     for (const e of allEntries) {
-      if (e.tmdb_id && e.overview) batch[e.tmdb_id] = e.overview;
+      if (e.tmdb_id && e.overview) batch[mediaSearchKey(e)] = e.overview;
     }
     if (Object.keys(batch).length) movieCache.setBatch(batch);
     movieCache.applyOverviewTo(allEntries);
@@ -862,6 +875,7 @@ function normalizeMovieDetail(input, credits) {
 
   return {
     id: input.id || input.tmdb_id || null,
+    media_type: normalizeMediaType(input.media_type || input.type || (input.number_of_seasons || input.first_air_date ? 'series' : 'movie')),
     title: input.title || input.name || '',
     original_title: input.original_title || input.original_name || '',
     overview: input.overview || '',
@@ -880,7 +894,27 @@ function normalizeMovieDetail(input, credits) {
     keyword_ids: keywordIds,
     keyword_names: keywordNames,
     original_language: input.original_language || '',
+    number_of_seasons: Number(input.number_of_seasons || 0),
+    seasons: Array.isArray(input.seasons) ? input.seasons.map(normalizeSeasonDetailRecord).filter(Boolean) : [],
     fetched_at: input.fetched_at || 0
+  };
+}
+
+function normalizeSeasonDetailRecord(season) {
+  if (!season || typeof season !== 'object') return null;
+  const seasonNumber = Number(season.season_number || season.number || 0);
+  if (!seasonNumber) return null;
+  return {
+    season_number: seasonNumber,
+    season_title: season.season_title || season.name || '',
+    name: season.name || season.season_title || '',
+    overview: season.overview || '',
+    air_date: season.air_date || '',
+    poster_path: season.poster_path || '',
+    vote_average: Number(season.vote_average || 0),
+    episode_count: Number(season.episode_count || 0),
+    director: season.director || '',
+    cast: Array.isArray(season.cast) ? season.cast.map(c => typeof c === 'string' ? c : c?.name).filter(Boolean).slice(0, 8) : []
   };
 }
 
@@ -908,6 +942,9 @@ function mergeMovieDetail(existing, incoming) {
     keyword_ids: next.keyword_ids?.length ? next.keyword_ids : (prev.keyword_ids || []),
     keyword_names: next.keyword_names?.length ? next.keyword_names : (prev.keyword_names || []),
     original_language: next.original_language || prev.original_language || '',
+    media_type: next.media_type || prev.media_type || 'movie',
+    number_of_seasons: next.number_of_seasons || prev.number_of_seasons || 0,
+    seasons: next.seasons?.length ? next.seasons : (prev.seasons || []),
     fetched_at: next.fetched_at || prev.fetched_at || 0
   };
 }
@@ -950,46 +987,81 @@ async function backfillMovieDetailToDB(entry, detail) {
   db.from('entries').update(updates).eq('id', entry.id).then(()=>{}).catch(()=>{});
 }
 
-async function fetchMovieDetail(tmdbId, opts = {}) {
-  if (!tmdbId) return null;
-  const cached = movieCache.get(tmdbId);
-  if (!opts.force && cached && !needsMovieDetailFetch(cached)) return cached;
-  if (!opts.force && tmdbDetailCache[tmdbId]) return tmdbDetailCache[tmdbId];
-  const detail = await fetchMovieDetailFromWorker(tmdbId)
-    || await fetchMovieDetailFromPrefetch(tmdbId)
-    || await fetchMovieDetailDirect(tmdbId);
+function resolveMediaDetailRequest(mediaTypeOrEntry, tmdbIdOrOpts = null, opts = {}) {
+  if (typeof mediaTypeOrEntry === 'object' && mediaTypeOrEntry) {
+    return {
+      mediaType: normalizeMediaType(mediaTypeOrEntry.media_type || mediaTypeOrEntry.type || 'movie'),
+      tmdbId: Number(mediaTypeOrEntry.tmdb_id || mediaTypeOrEntry.id),
+      opts: tmdbIdOrOpts || {}
+    };
+  }
+  if (typeof tmdbIdOrOpts === 'object' && tmdbIdOrOpts !== null) {
+    return {
+      mediaType: normalizeMediaType(tmdbIdOrOpts.mediaType || tmdbIdOrOpts.media_type || 'movie'),
+      tmdbId: Number(mediaTypeOrEntry),
+      opts: tmdbIdOrOpts
+    };
+  }
+  if (tmdbIdOrOpts === null || tmdbIdOrOpts === undefined) {
+    return {
+      mediaType: normalizeMediaType(opts.mediaType || opts.media_type || 'movie'),
+      tmdbId: Number(mediaTypeOrEntry),
+      opts
+    };
+  }
+  return {
+    mediaType: normalizeMediaType(mediaTypeOrEntry),
+    tmdbId: Number(tmdbIdOrOpts),
+    opts
+  };
+}
+
+async function fetchMovieDetail(mediaTypeOrEntry, tmdbIdOrOpts = null, opts = {}) {
+  const req = resolveMediaDetailRequest(mediaTypeOrEntry, tmdbIdOrOpts, opts);
+  if (!req.tmdbId) return null;
+  const cacheRef = { media_type: req.mediaType, tmdb_id: req.tmdbId };
+  const cached = movieCache.get(cacheRef);
+  if (!req.opts.force && cached && !needsMovieDetailFetch(cached)) return cached;
+  const memoryKey = mediaSearchKey(cacheRef);
+  if (!req.opts.force && tmdbDetailCache[memoryKey]) return tmdbDetailCache[memoryKey];
+  const detail = await fetchMovieDetailFromWorker(req.mediaType, req.tmdbId)
+    || await fetchMovieDetailFromPrefetch(req.mediaType, req.tmdbId)
+    || await fetchMovieDetailDirect(req.mediaType, req.tmdbId);
   if (!detail) return cached || null;
-  tmdbDetailCache[tmdbId] = detail;
-  movieCache.set(tmdbId, detail);
-  if (detail.original_title) originalTitleCache[tmdbId] = detail.original_title;
+  tmdbDetailCache[memoryKey] = detail;
+  movieCache.set(cacheRef, detail);
+  if (detail.original_title) originalTitleCache[memoryKey] = detail.original_title;
   return detail;
 }
 
-async function fetchMovieDetailFromWorker(tmdbId) {
+async function fetchMovieDetailFromWorker(mediaType, tmdbId) {
   try {
-    const res = await fetch(TMDB_PROXY + '/detail/' + tmdbId);
+    const typeParam = normalizeMediaType(mediaType) === 'series' ? '?type=series' : '';
+    const res = await fetch(TMDB_PROXY + '/detail/' + tmdbId + typeParam);
     if (!res.ok) return null;
     const result = await res.json();
     return normalizeMovieDetail(result.movie || result);
   } catch(e) { return null; }
 }
 
-async function fetchMovieDetailFromPrefetch(tmdbId) {
+async function fetchMovieDetailFromPrefetch(mediaType, tmdbId) {
   try {
+    const key = mediaSearchKey(mediaType, tmdbId);
     const res = await fetch(TMDB_PROXY + '/prefetch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tmdb_ids: [Number(tmdbId)], return_overviews: true })
+      body: JSON.stringify({ items: [{ media_type: normalizeMediaType(mediaType), tmdb_id: Number(tmdbId) }], return_overviews: true })
     });
     if (!res.ok) return null;
     const result = await res.json();
-    return normalizeMovieDetail(result.details?.[tmdbId] || result.details?.[String(tmdbId)]);
+    return normalizeMovieDetail(result.details?.[key] || result.details?.[tmdbId] || result.details?.[String(tmdbId)]);
   } catch(e) { return null; }
 }
 
-async function fetchMovieDetailDirect(tmdbId) {
+async function fetchMovieDetailDirect(mediaType, tmdbId) {
   try {
-    const res = await tmdbFetch(`/movie/${tmdbId}?language=zh-CN`);
+    const tmdbType = normalizeMediaType(mediaType) === 'series' ? 'tv' : 'movie';
+    const res = await tmdbFetch(`/${tmdbType}/${tmdbId}?language=zh-CN`);
     if (!res.ok) return null;
     const detail = await res.json();
     return normalizeMovieDetail(detail);
@@ -1025,6 +1097,7 @@ function extractMovieDetail(details, credits) {
   if (!details || details.success === false) return null;
   return normalizeMovieDetail({
     id: details?.id || null,
+    media_type: details?.number_of_seasons || details?.first_air_date ? 'series' : 'movie',
     title: details?.title || details?.name || '',
     original_title: details?.original_title || details?.original_name || '',
     overview: details?.overview || '',
@@ -1069,31 +1142,112 @@ function buildTmdbDetailHTML(cached, ovId) {
     parts.push('<p style="font-size:0.8rem;color:var(--text2)">TMDB 暂无简介</p>');
   }
   if (cached.director) {
-    parts.push(`<h4 style="margin-top:8px">🎬 导演</h4><div class="tmdb-cast"><span class="cast-chip">${esc(cached.director)}</span></div>`);
+    parts.push(`<h4 style="margin-top:8px">🎬 ${cached.media_type === 'series' ? '导演 / 主创' : '导演'}</h4><div class="tmdb-cast"><span class="cast-chip">${esc(cached.director)}</span></div>`);
   }
   if (cached.cast && cached.cast.length) {
     parts.push(`<h4 style="margin-top:8px">👥 演员</h4><div class="tmdb-cast">${cached.cast.map(c => `<span class="cast-chip">${esc(c)}</span>`).join('')}</div>`);
   }
+  if (cached.number_of_seasons) {
+    parts.push(`<h4 style="margin-top:8px">📺 剧集信息</h4><div class="tmdb-cast"><span class="cast-chip">${cached.number_of_seasons} 季</span></div>`);
+  }
   return parts.join('');
+}
+
+function mergeSeasonRecords(localSeasons = [], tmdbSeasons = []) {
+  const byNumber = new Map();
+  for (const tmdb of tmdbSeasons || []) {
+    const num = Number(tmdb.season_number || 0);
+    if (!num) continue;
+    byNumber.set(num, { tmdb, local: null });
+  }
+  for (const local of localSeasons || []) {
+    const num = Number(local.season_number || 0);
+    if (!num) continue;
+    const prev = byNumber.get(num) || { tmdb: null, local: null };
+    prev.local = local;
+    byNumber.set(num, prev);
+  }
+  return [...byNumber.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([season_number, value]) => ({ season_number, ...value }));
+}
+
+function buildSeasonRecordTabsHTML(localSeasons = [], tmdbSeasons = [], baseId = 'seasonRecords') {
+  const records = mergeSeasonRecords(localSeasons, tmdbSeasons);
+  if (!records.length) return '';
+  const active = records[0].season_number;
+  return `
+    <div class="detail-season-section" data-season-records="${baseId}">
+      <h4 style="font-size:0.85rem;color:var(--text2);margin-bottom:8px">每季详情</h4>
+      <div class="season-tabs detail-season-tabs">
+        ${records.map(record => {
+          const score = record.local?.total_score ? Number(record.local.total_score).toFixed(1) : (record.tmdb?.vote_average ? Number(record.tmdb.vote_average).toFixed(1) : '');
+          return `<button type="button" class="season-tab${record.season_number === active ? ' active' : ''}" data-season="${record.season_number}" onclick="activateSeasonRecord('${baseId}', ${record.season_number})"><span>S${record.season_number}</span>${score ? `<strong>${score}</strong>` : ''}</button>`;
+        }).join('')}
+      </div>
+      ${records.map(record => {
+        const local = record.local;
+        const tmdb = record.tmdb;
+        const title = local?.season_title || tmdb?.season_title || tmdb?.name || '';
+        return `
+          <div class="detail-season-panel${record.season_number === active ? ' active' : ''}" data-season-panel="${record.season_number}">
+            <div class="detail-season-head">
+              <strong>S${record.season_number}${title ? ' · ' + esc(title) : ''}</strong>
+              ${local?.total_score ? `<span>${Number(local.total_score).toFixed(1)} / 10</span>` : ''}
+            </div>
+            ${local?.ratings ? `<div class="mc-dim-dots" style="margin:8px 0">${buildDimTagsHTML(local.ratings, { main: 'var(--gold)' })}</div>` : ''}
+            ${local?.comment ? `<p class="detail-season-comment">"${esc(local.comment)}"</p>` : ''}
+            ${tmdb?.overview ? `<p class="detail-season-overview">${esc(tmdb.overview)}</p>` : ''}
+            <div class="detail-season-meta">
+              ${tmdb?.air_date ? `<span>首播 ${esc(tmdb.air_date)}</span>` : ''}
+              ${tmdb?.episode_count ? `<span>${tmdb.episode_count} 集</span>` : ''}
+              ${tmdb?.director ? `<span>导演/主创 ${esc(tmdb.director)}</span>` : ''}
+              ${tmdb?.cast?.length ? `<span>演员 ${tmdb.cast.map(esc).join(' / ')}</span>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function renderSeasonRecordDetails(containerId, localSeasons = [], tmdbSeasons = [], baseId = containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = buildSeasonRecordTabsHTML(localSeasons, tmdbSeasons, baseId);
+}
+
+function activateSeasonRecord(baseId, seasonNumber) {
+  const root = document.querySelector(`[data-season-records="${baseId}"]`);
+  if (!root) return;
+  root.querySelectorAll('.season-tab').forEach(btn => btn.classList.toggle('active', Number(btn.dataset.season) === Number(seasonNumber)));
+  root.querySelectorAll('.detail-season-panel').forEach(panel => panel.classList.toggle('active', Number(panel.dataset.seasonPanel) === Number(seasonNumber)));
 }
 
 // Batch-prefetch missing/stale movie details after data load (hits Worker cache, non-blocking)
 async function prefetchOverviews() {
-  const missing = allEntries.filter(e => e.tmdb_id && needsMovieDetailFetch(movieCache.get(e.tmdb_id)));
+  const missing = allEntries.filter(e => e.tmdb_id && needsMovieDetailFetch(movieCache.get(e)));
   if (!missing.length) return;
-  const ids = [...new Set(missing.map(e => e.tmdb_id))];
-  const byTmdbId = {};
+  const items = [];
+  const seen = new Set();
+  const byKey = {};
   for (const entry of missing) {
-    if (!byTmdbId[entry.tmdb_id]) byTmdbId[entry.tmdb_id] = [];
-    byTmdbId[entry.tmdb_id].push(entry);
+    const key = mediaSearchKey(entry);
+    if (!key) continue;
+    if (!seen.has(key)) {
+      seen.add(key);
+      items.push({ media_type: normalizeMediaType(entry.type), tmdb_id: Number(entry.tmdb_id) });
+    }
+    if (!byKey[key]) byKey[key] = [];
+    byKey[key].push(entry);
   }
-  for (let offset = 0; offset < ids.length; offset += 50) {
-    const idBatch = ids.slice(offset, offset + 50);
+  for (let offset = 0; offset < items.length; offset += 50) {
+    const itemBatch = items.slice(offset, offset + 50);
     try {
       const res = await fetch(TMDB_PROXY + '/prefetch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tmdb_ids: idBatch, return_overviews: true })
+        body: JSON.stringify({ items: itemBatch, return_overviews: true })
       });
       if (res.ok) {
         const data = await res.json();
@@ -1102,9 +1256,9 @@ async function prefetchOverviews() {
         ) : {});
         if (Object.keys(detailMap).length) {
           movieCache.setBatch(detailMap);
-          for (const [tmdbId, rawDetail] of Object.entries(detailMap)) {
+          for (const [detailKey, rawDetail] of Object.entries(detailMap)) {
             const detail = normalizeMovieDetail(rawDetail);
-            const entries = byTmdbId[parseInt(tmdbId)];
+            const entries = byKey[detailKey] || byKey[mediaSearchKey(detail)];
             if (!detail || !entries) continue;
             for (const entry of entries) {
               backfillMovieDetailToDB(entry, detail);
@@ -1380,6 +1534,81 @@ function buildDimSliders(prefix, ratings) {
   `).join('');
 }
 
+function buildDimReadonly(ratings, userColor = { main: 'var(--gold)' }) {
+  return `<div class="dim-readonly">${Object.entries(DIM_LABELS).map(([dim, label])=>`
+    <div class="dim-readonly-item">
+      <span>${esc(label)}</span>
+      <strong style="color:${userColor.main}">${Number(ratings?.[dim] || 5).toFixed(1)}</strong>
+    </div>
+  `).join('')}</div>`;
+}
+
+function getSeasonAverage(seasons) {
+  const valid = (seasons || []).filter(s => Number(s.total_score) > 0);
+  if (!valid.length) return 0;
+  return Math.round((valid.reduce((sum, s) => sum + Number(s.total_score || 0), 0) / valid.length) * 10) / 10;
+}
+
+function getSeasonAverageDims(seasons) {
+  const valid = (seasons || []).filter(s => s.ratings && Object.keys(s.ratings).length);
+  const result = {};
+  for (const dim of Object.keys(WEIGHTS)) {
+    result[dim] = valid.length
+      ? Math.round((valid.reduce((sum, s) => sum + Number(s.ratings?.[dim] || 5), 0) / valid.length) * 10) / 10
+      : 5;
+  }
+  return result;
+}
+
+function renderPrimaryRatingArea(scope, seasons = null, fallbackRatings = {}) {
+  const isQr = scope === 'qr';
+  const dimsEl = isQr ? $['qrDims'] : $['mainDims'];
+  const totalEl = isQr ? $['qrTotalScore'] : $['totalScorePreview'];
+  const labelEl = totalEl?.parentElement?.querySelector('.total-label');
+  const validSeasons = Array.isArray(seasons) ? seasons.filter(s => s.season_number > 0) : [];
+  if (validSeasons.length) {
+    const avgDims = getSeasonAverageDims(validSeasons);
+    dimsEl.innerHTML = buildDimReadonly(avgDims);
+    if (totalEl) totalEl.textContent = getSeasonAverage(validSeasons).toFixed(1);
+    if (labelEl) labelEl.textContent = '分季平均';
+    return;
+  }
+  if (!dimsEl.querySelector('input[type="range"]')) {
+    dimsEl.innerHTML = buildDimSliders(isQr ? 'qr' : 'main', fallbackRatings);
+    bindDimSliders(isQr ? 'qr' : 'main');
+  }
+  if (labelEl) labelEl.textContent = '加权总分';
+  if (isQr) updateQrTotal(); else updateTotalPreview();
+}
+
+function getCurrentSeasonLimit(scope = 'main') {
+  const ref = scope === 'qr'
+    ? quickRateMovie
+    : { media_type: entryType, tmdb_id: parseInt($['tmdbId'].value) || null, number_of_seasons: selectedSearchMovie?.number_of_seasons || 0 };
+  return getSeriesSeasonLimit(ref);
+}
+
+function getSeriesSeasonLimit(mediaOrEntry) {
+  if (!mediaOrEntry) return 0;
+  const direct = Number(mediaOrEntry.number_of_seasons || 0);
+  if (direct > 0) return direct;
+  const detail = movieCache.get(mediaOrEntry);
+  return Number(detail?.number_of_seasons || 0);
+}
+
+function validateSeasonRows(seasons, limit = 0) {
+  const snums = seasons.map(s => s.season_number).filter(Boolean);
+  const dup = snums.find((n,i)=>snums.indexOf(n)!==i);
+  if (dup) return `季号 S${dup} 重复，请修改后再保存`;
+  const invalid = seasons.find(s => s.season_number <= 0);
+  if (invalid) return '季号必须大于 0';
+  if (limit > 0) {
+    const over = seasons.find(s => s.season_number > limit);
+    if (over) return `该剧集共 ${limit} 季，不能添加 S${over.season_number}`;
+  }
+  return '';
+}
+
 
 $['mainDims'].innerHTML = buildDimSliders('main', {});
 bindDimSliders('main');
@@ -1412,12 +1641,88 @@ function updateSeasonPreview(prefix) {
   document.querySelectorAll(`.dim-slider input[data-prefix="${prefix}"]`).forEach(s=>{ r[s.dataset.dim]=parseInt(s.value); });
   const badge = document.getElementById(`seasonTotal-${prefix}`);
   if (badge) badge.textContent = calcTotal(r).toFixed(1);
+  const card = document.querySelector(`.season-card[data-season-prefix="${prefix}"]`);
+  if (card) {
+    const scope = card.dataset.seasonScope || 'main';
+    renderSeasonTabs(scope);
+    syncSeasonAverage(scope);
+  }
 }
 
 // ===== SEASON RATINGS UI =====
-function addSeasonRow(seasonData, scope = 'main') {
-  const listEl = scope === 'qr' ? $['qrSeasonList'] : $['seasonList'];
+function getSeasonListEl(scope = 'main') {
+  return scope === 'qr' ? $['qrSeasonList'] : $['seasonList'];
+}
+
+function getSeasonCards(scope = 'main') {
+  const listEl = getSeasonListEl(scope);
+  return listEl ? [...listEl.querySelectorAll(`.season-card[data-season-scope="${scope}"]`)] : [];
+}
+
+function activateSeason(idx, scope = 'main') {
+  const listEl = getSeasonListEl(scope);
   if (!listEl) return;
+  listEl.dataset.activeSeasonIdx = String(idx);
+  getSeasonCards(scope).forEach(card => card.classList.toggle('active', String(card.dataset.seasonIdx) === String(idx)));
+  listEl.querySelectorAll('.season-tab').forEach(btn => btn.classList.toggle('active', String(btn.dataset.seasonIdx) === String(idx)));
+}
+
+function renderSeasonTabs(scope = 'main') {
+  const listEl = getSeasonListEl(scope);
+  if (!listEl) return;
+  const cards = getSeasonCards(scope);
+  let tabs = listEl.querySelector('.season-tabs');
+  if (!cards.length) {
+    if (tabs) tabs.remove();
+    delete listEl.dataset.activeSeasonIdx;
+    return;
+  }
+  if (!tabs) {
+    tabs = document.createElement('div');
+    tabs.className = 'season-tabs';
+    listEl.prepend(tabs);
+  }
+  const activeStillExists = cards.some(card => String(card.dataset.seasonIdx) === String(listEl.dataset.activeSeasonIdx));
+  const activeIdx = activeStillExists ? listEl.dataset.activeSeasonIdx : cards[0].dataset.seasonIdx;
+  tabs.innerHTML = cards.map(card => {
+    const numInput = card.querySelector('input[type="number"]');
+    const seasonNumber = parseInt(numInput?.value) || '?';
+    const score = card.querySelector('.season-score')?.textContent || '5.0';
+    const idx = card.dataset.seasonIdx;
+    return `<button type="button" class="season-tab${String(idx) === String(activeIdx) ? ' active' : ''}" data-season-idx="${idx}"><span>S${seasonNumber}</span><strong>${score}</strong></button>`;
+  }).join('');
+  tabs.querySelectorAll('.season-tab').forEach(btn => {
+    btn.addEventListener('click', () => activateSeason(btn.dataset.seasonIdx, scope));
+  });
+  activateSeason(activeIdx, scope);
+}
+
+function syncSeasonAverage(scope = 'main') {
+  const seasons = collectSeasonData(getSeasonListEl(scope));
+  renderPrimaryRatingArea(scope, seasons);
+  syncSeasonLimit(scope);
+}
+
+function syncSeasonLimit(scope = 'main') {
+  const btn = scope === 'qr' ? $['qrAddSeasonBtn'] : $['addSeasonBtn'];
+  if (!btn) return;
+  const limit = getCurrentSeasonLimit(scope);
+  const seasons = collectSeasonData(getSeasonListEl(scope)).filter(s => s.season_number > 0);
+  const reached = limit > 0 && seasons.length >= limit;
+  btn.disabled = reached;
+  btn.textContent = reached ? `已达到 ${limit} 季` : '+ 添加新季';
+}
+
+function addSeasonRow(seasonData, scope = 'main') {
+  const listEl = getSeasonListEl(scope);
+  if (!listEl) return;
+  const limit = getCurrentSeasonLimit(scope);
+  const existing = collectSeasonData(listEl).filter(s => s.season_number > 0);
+  if (limit > 0 && existing.length >= limit && !seasonData?._id) {
+    toast(`该剧集共 ${limit} 季，不能继续添加`);
+    syncSeasonLimit(scope);
+    return;
+  }
   const sidx = seasonData?._idx || Date.now();
   const snum = seasonData?.season_number || '';
   const stitle = seasonData?.season_title || '';
@@ -1429,38 +1734,42 @@ function addSeasonRow(seasonData, scope = 'main') {
   card.className = 'season-card';
   card.dataset.seasonIdx = sidx;
   card.dataset.seasonScope = scope;
+  card.dataset.seasonPrefix = prefix;
   card.innerHTML = `
-    <div class="season-header" data-prefix="${prefix}">
-      <span class="season-title">📺 第 <input type="number" value="${snum}" min="1" max="50" placeholder="?" style="width:50px;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:0.85rem" onclick="event.stopPropagation()" title="季号不可重复"> 季 · <input type="text" value="${esc(stitle)}" placeholder="季标题（可选）" style="width:140px;background:transparent;border:1px solid var(--border);color:var(--text);border-radius:4px;padding:2px 6px;font-size:0.85rem" onclick="event.stopPropagation()"></span>
+    <div class="season-panel-head">
+      <span class="season-title">第 <input type="number" value="${snum}" min="1" max="${limit || 50}" placeholder="?" title="季号不可重复"> 季 · <input type="text" value="${esc(stitle)}" placeholder="季标题（可选）"></span>
       <div style="display:flex;align-items:center;gap:8px">
         <span class="season-score" id="seasonTotal-${prefix}">${calcTotal(ratings).toFixed(1)}</span>
         <button type="button" class="btn btn-xs btn-danger" onclick="removeSeason('${sidx}', '${scope}')" title="删除此季">✕</button>
       </div>
     </div>
-    <div class="season-body">
+    <div class="season-body open">
       <div class="dim-list">${buildDimSliders(prefix, ratings)}</div>
       <div class="form-group">
         <label>短评（可选）</label>
-        <textarea placeholder="对这季的评价..." style="width:100%;padding:8px 12px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius);font-size:0.85rem;font-family:inherit" rows="1">${esc(comment)}</textarea>
+        <textarea placeholder="对这季的评价..." rows="1">${esc(comment)}</textarea>
       </div>
     </div>
   `;
   listEl.appendChild(card);
 
-  // Toggle expand
-  card.querySelector('.season-header').addEventListener('click', function(e) {
-    if (e.target.tagName==='INPUT') return;
-    card.querySelector('.season-body').classList.toggle('open');
-  });
-  // Expand by default for new seasons
-  if (!seasonData?._id) card.querySelector('.season-body').classList.add('open');
-
   bindDimSliders(prefix);
+  card.querySelectorAll('input[type="number"], input[type="text"], textarea').forEach(input => {
+    input.addEventListener('input', () => {
+      renderSeasonTabs(scope);
+      syncSeasonAverage(scope);
+    });
+  });
+  renderSeasonTabs(scope);
+  activateSeason(sidx, scope);
+  syncSeasonAverage(scope);
 }
 
 function removeSeason(idx, scope = 'main') {
   const card = document.querySelector(`.season-card[data-season-idx="${idx}"][data-season-scope="${scope}"]`);
   if (card) card.remove();
+  renderSeasonTabs(scope);
+  syncSeasonAverage(scope);
 }
 
 function collectSeasonData(listEl = $['seasonList']) {
@@ -1469,8 +1778,8 @@ function collectSeasonData(listEl = $['seasonList']) {
   listEl.querySelectorAll('.season-card').forEach(card=>{
     const idx = card.dataset.seasonIdx;
     const prefix = `${card.dataset.seasonScope === 'qr' ? 'qs' : 's'}${idx}`;
-    const numInput = card.querySelector('.season-header input[type="number"]');
-    const titleInput = card.querySelector('.season-header input[type="text"]');
+    const numInput = card.querySelector('.season-panel-head input[type="number"]');
+    const titleInput = card.querySelector('.season-panel-head input[type="text"]');
     const ratings = {};
     card.querySelectorAll(`input[type="range"][data-prefix="${prefix}"]`).forEach(s=>{
       ratings[s.dataset.dim] = parseInt(s.value);
@@ -1534,6 +1843,7 @@ function setEntryType(nextType) {
   $['tmdbSearch'].placeholder = isSeries ? '🔍 搜索剧集，选择后添加评价或加入清单...' : '🔍 搜索电影，选择后添加评价或加入清单...';
   clearSelectedSearchMovie();
   $['searchResults'].classList.remove('open');
+  syncSeasonLimit('main');
 }
 
 document.querySelectorAll('#typeToggle button').forEach(btn=>{
@@ -1615,6 +1925,8 @@ async function hydrateSelectedSearchMovie(seq) {
       const credData = credRes ? await credRes.json().catch(() => ({})) : {};
       const creator = (detailData.created_by || [])[0] || (credData.crew||[]).find(c=>c.job==='Director'||c.job==='Executive Producer');
       detail = {
+        id: movie.tmdb_id,
+        media_type: 'series',
         overview: detailData.overview || '',
         director: creator?.name || '',
         poster_path: detailData.poster_path || movie.poster_path,
@@ -1624,6 +1936,7 @@ async function hydrateSelectedSearchMovie(seq) {
         number_of_seasons: detailData.number_of_seasons || 0,
         original_language: detailData.original_language || movie.original_language || ''
       };
+      movieCache.set({ media_type: 'series', tmdb_id: movie.tmdb_id }, detail);
     } else {
       detail = await fetchMovieDetail(movie.tmdb_id);
     }
@@ -1703,6 +2016,18 @@ async function fillFromTmdbSearchItem(item) {
       const credData = await credRes.json();
       const creator = (detailData.created_by || [])[0] || (credData.crew||[]).find(c=>c.job==='Director'||c.job==='Executive Producer');
       director = creator?.name || '';
+      movieCache.set({ media_type: 'series', tmdb_id: tmdbId }, {
+        id: Number(tmdbId),
+        media_type: 'series',
+        overview: detailData.overview || '',
+        director,
+        poster_path: detailData.poster_path || '',
+        year: parseInt(String(detailData.first_air_date || '').slice(0, 4)) || null,
+        release_date: detailData.first_air_date || '',
+        vote_average: detailData.vote_average || 0,
+        number_of_seasons: detailData.number_of_seasons || 0,
+        original_language: detailData.original_language || ''
+      });
     } else {
       const detail = await fetchMovieDetail(tmdbId);
       director = detail?.director || '';
@@ -1712,6 +2037,7 @@ async function fillFromTmdbSearchItem(item) {
       }
     }
     if (director) $['director'].value = director;
+    if (mediaType === 'series') syncSeasonLimit('main');
   } catch(e){}
   toast('已自动填入信息');
 }
@@ -1808,8 +2134,15 @@ $['movieForm'].addEventListener('submit', async e=>{
     const yearVal = parseInt($['year'].value);
     if ($['year'].value && (isNaN(yearVal) || yearVal < 1900 || yearVal > 2100)) { toast('年份需在 1900-2100 之间'); btn.textContent=origText; btn.disabled=false; return; }
 
-    const ratings = getMainRatings();
     const tmdbIdVal = parseInt($['tmdbId'].value) || null;
+    const seasons = entryType === 'series' ? collectSeasonData().filter(s=>s.season_number>0) : [];
+    if (entryType === 'series') {
+      const seasonError = validateSeasonRows(seasons, getCurrentSeasonLimit('main'));
+      if (seasonError) { toast(seasonError); btn.textContent=origText; btn.disabled=false; return; }
+    }
+    const hasSeasonRatings = entryType === 'series' && seasons.length > 0;
+    const ratings = hasSeasonRatings ? getSeasonAverageDims(seasons) : getMainRatings();
+    const totalScore = hasSeasonRatings ? getSeasonAverage(seasons) : calcTotal(ratings);
     const entryData = {
       user_id: currentUser.id,
       type: entryType,
@@ -1819,12 +2152,12 @@ $['movieForm'].addEventListener('submit', async e=>{
       director: $['director'].value.trim(),
       poster_path: $['posterPath'].value,
       ratings,
-      total_score: calcTotal(ratings),
+      total_score: totalScore,
       comment: $['comment'].value.trim(),
       updated_at: new Date().toISOString()
     };
-    if (entryType === 'movie' && tmdbIdVal) {
-      const cachedDetail = movieCache.get(tmdbIdVal);
+    if (tmdbIdVal) {
+      const cachedDetail = movieCache.get({ media_type: entryType, tmdb_id: tmdbIdVal });
       if (cachedDetail) applyMovieDetailToEntry(entryData, cachedDetail);
     }
 
@@ -1851,10 +2184,6 @@ $['movieForm'].addEventListener('submit', async e=>{
     }
 
     if (entryType==='series') {
-      const seasons = collectSeasonData().filter(s=>s.season_number>0);
-      const snums = seasons.map(s=>s.season_number);
-      const dup = snums.find((n,i)=>snums.indexOf(n)!==i);
-      if (dup) { toast(`季号 S${dup} 重复，请修改后再保存`); btn.textContent=origText; btn.disabled=false; return; }
       for (const s of seasons) {
         await db.from('season_ratings').insert({
           entry_id: entryId,
@@ -1873,9 +2202,9 @@ $['movieForm'].addEventListener('submit', async e=>{
     toast(editingEntryId ? '评价已更新' : '评价已保存');
     const savedMediaType = entryTypeToMediaType(entryType);
     if (tmdbIdVal) await reconcileListsAfterRatings(savedMediaType, tmdbIdVal, currentUser.id);
-    // Fire-and-forget: warm KV cache + backfill normalized movie detail to saved entry
-    if (entryType === 'movie' && entryData.tmdb_id) {
-      fetchMovieDetail(entryData.tmdb_id).then(detail => {
+    // Fire-and-forget: warm KV cache + backfill normalized TMDB detail to saved entry
+    if (entryData.tmdb_id) {
+      fetchMovieDetail(entryType, entryData.tmdb_id).then(detail => {
         if (detail && entryId) {
           const e = allEntries.find(x => x.id === entryId) || { ...entryData, id: entryId };
           backfillMovieDetailToDB(e, detail);
@@ -2028,7 +2357,7 @@ function collectEntrySearchFields(entry) {
   addSearchField(fields, entry.director);
 
   if (entry.tmdb_id) {
-    const cachedDetail = movieCache.get(entry.tmdb_id);
+      const cachedDetail = movieCache.get(entry);
     if (cachedDetail) {
       addSearchField(fields, cachedDetail.title);
       addSearchField(fields, cachedDetail.original_title);
@@ -2362,13 +2691,14 @@ function renderList() {
 async function showDetail(id) {
   const entry = allEntries.find(e=>e.id===id);
   if (!entry) return;
-  const cached = entry.tmdb_id ? movieCache.get(entry.tmdb_id) : null;
+  const cached = entry.tmdb_id ? movieCache.get(entry) : null;
   const shouldFetchDetail = entry.tmdb_id && needsMovieDetailFetch(cached);
   const hasDetailCache = cached && !shouldFetchDetail;
   if (cached) applyMovieDetailToEntry(entry, cached);
 
   const isMine = entry.user_id===currentUser.id;
   const ownerName = allProfiles[entry.user_id]?.display_name||'未知';
+  const detailLabel = entry.type === 'series' ? '剧集' : '电影';
 
   // Find friend ratings using same group key as renderList
   const entryKey = getGroupKey(entry);
@@ -2398,17 +2728,7 @@ async function showDetail(id) {
       ${buildDimTagsHTML(entry.ratings||{}, getUserColor(entry.user_id))}
     </div>
     ${entry.comment ? `<p style="font-style:italic;color:var(--text2);margin-bottom:12px">"${esc(entry.comment)}"</p>` : ''}
-    ${seasons.length ? `
-      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
-        <h4 style="font-size:0.85rem;color:var(--text2);margin-bottom:8px">分季评分</h4>
-        ${seasons.map(s=>`
-          <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">
-            <span style="font-size:0.85rem">S${s.season_number} ${s.season_title?esc(s.season_title):''}</span>
-            <span style="font-weight:700;color:var(--gold)">${s.total_score.toFixed(1)}</span>
-          </div>
-        `).join('')}
-      </div>
-    ` : ''}
+    <div id="seasonRecords-${entry.id}">${buildSeasonRecordTabsHTML(seasons, cached?.seasons || [], 'seasonRecords-' + entry.id)}</div>
     ${friendEntries.length ? `
       <div class="friend-section">
         <h4>朋友评分</h4>
@@ -2431,8 +2751,8 @@ async function showDetail(id) {
       const ovId = 'tmdbOv-' + entry.id;
       if (hasDetailCache) return `<div class="tmdb-section" id="tmdbDetail-${entry.id}">${buildTmdbDetailHTML(cached, ovId)}</div>`;
       if (cached?.overview) return `<div class="tmdb-section" id="tmdbDetail-${entry.id}">${buildOverviewHTML(ovId, cached.overview)}<div class="detail-spinner"></div> 加载演职员信息...</div>`;
-      if (cached) return `<div class="tmdb-section" id="tmdbDetail-${entry.id}">${buildTmdbDetailHTML(cached, ovId)}<div class="detail-spinner"></div> 补充电影详情...</div>`;
-      return `<div class="tmdb-section" id="tmdbDetail-${entry.id}"><div class="detail-spinner"></div> 加载电影详情...</div>`;
+      if (cached) return `<div class="tmdb-section" id="tmdbDetail-${entry.id}">${buildTmdbDetailHTML(cached, ovId)}<div class="detail-spinner"></div> 补充${detailLabel}详情...</div>`;
+      return `<div class="tmdb-section" id="tmdbDetail-${entry.id}"><div class="detail-spinner"></div> 加载${detailLabel}详情...</div>`;
     })()}
     <div class="btn-group" style="justify-content:flex-end">
       ${isMine ? `<button class="btn btn-secondary btn-sm" onclick="${editActionForEntry(entry)};closeModal()">编辑</button>` : ''}
@@ -2445,21 +2765,25 @@ async function showDetail(id) {
 
   // Async: fetch when normalized movie detail is missing, stale, or legacy-partial
   if (shouldFetchDetail) {
-    fetchAndRenderTmdbDetail(entry.tmdb_id, 'tmdbDetail-' + entry.id, 'tmdbOv-' + entry.id,
-      detail => backfillMovieDetailToDB(entry, detail));
+    fetchAndRenderTmdbDetail(entry.type, entry.tmdb_id, 'tmdbDetail-' + entry.id, 'tmdbOv-' + entry.id,
+      detail => {
+        backfillMovieDetailToDB(entry, detail);
+        renderSeasonRecordDetails('seasonRecords-' + entry.id, seasons, detail?.seasons || [], 'seasonRecords-' + entry.id);
+      });
   }
 }
 
 // Unified async: fetch TMDB detail, cache full data, render complete section
-async function fetchAndRenderTmdbDetail(tmdbId, sectionId, ovId, onBackfill) {
+async function fetchAndRenderTmdbDetail(mediaType, tmdbId, sectionId, ovId, onBackfill) {
   const section = document.getElementById(sectionId);
   if (!section) return;
-  const detail = await fetchMovieDetail(tmdbId, { force: true });
+  const normalizedType = normalizeMediaType(mediaType);
+  const detail = await fetchMovieDetail(normalizedType, tmdbId, { force: true });
   if (!detail) {
     if (section.querySelector('.detail-spinner')) {
-      section.innerHTML = '<p style="font-size:0.8rem;color:var(--text2)">电影详情加载失败，请稍后重试</p>';
+      section.innerHTML = `<p style="font-size:0.8rem;color:var(--text2)">${normalizedType === 'series' ? '剧集' : '电影'}详情加载失败，请稍后重试</p>`;
     }
-    console.warn('Movie detail failed for tmdb_id:', tmdbId);
+    console.warn('TMDB detail failed for:', normalizedType, tmdbId);
     return;
   }
   if (onBackfill) onBackfill(detail);
@@ -2513,7 +2837,7 @@ async function showMovieDetail(tmdbId) {
   if (movie.overview || cached?.overview || hasDetailCache) checkOverviewOverflow(ovId);
 
   if (shouldFetchDetail) {
-    fetchAndRenderTmdbDetail(tmdbId, 'tmdbDiscoverDetail', ovId,
+    fetchAndRenderTmdbDetail('movie', tmdbId, 'tmdbDiscoverDetail', ovId,
       detail => {
         if (!movie.overview && detail?.overview) movie.overview = detail.overview;
       });
@@ -2534,6 +2858,8 @@ async function showListItemDetail(movieOrId) {
     return;
   }
 
+  const cached = movieCache.get(item);
+  const shouldFetchDetail = needsMovieDetailFetch(cached);
   const poster = item.poster_path ? posterUrl(item.poster_path) : '';
   const content = $['modalContent'];
   content.innerHTML = `
@@ -2545,8 +2871,9 @@ async function showListItemDetail(movieOrId) {
       </div>
     </div>
     <div class="tmdb-section" id="tmdbSeriesDetail">
-      <div class="detail-spinner"></div> 加载剧集详情...
+      ${cached && !shouldFetchDetail ? buildTmdbDetailHTML(cached, 'tmdbSeriesOv-' + item.tmdb_id) : '<div class="detail-spinner"></div> 加载剧集详情...'}
     </div>
+    <div id="tmdbSeriesSeasons">${buildSeasonRecordTabsHTML([], cached?.seasons || [], 'tmdbSeriesSeasons-' + item.tmdb_id)}</div>
     <div class="btn-group" style="justify-content:flex-end;margin-top:8px">
       <button class="btn btn-primary btn-sm" onclick="closeModal();openEntryFormForListMovie({id:${item.tmdb_id},media_type:'series',title:'${esc(item.title).replace(/'/g,"\\'")}',year:${item.year || 'null'},poster_path:'${item.poster_path || ''}'})">＋我的评分</button>
       <button class="btn btn-secondary btn-sm" onclick="closeModal()">关闭</button>
@@ -2554,32 +2881,23 @@ async function showListItemDetail(movieOrId) {
   `;
   $['detailModal'].classList.add('open');
 
-  try {
-    const [detailRes, creditsRes] = await Promise.all([
-      tmdbFetch(`/tv/${item.tmdb_id}?language=zh-CN`),
-      tmdbFetch(`/tv/${item.tmdb_id}/credits?language=zh-CN`).catch(() => null)
-    ]);
-    const detail = await detailRes.json().catch(() => ({}));
-    const credits = creditsRes ? await creditsRes.json().catch(() => ({})) : {};
-    const genres = (detail.genres || []).map(g => g.name).filter(Boolean).slice(0, 5);
-    const creators = (detail.created_by || []).map(c => c.name).filter(Boolean).slice(0, 3);
-    const cast = (credits.cast || []).map(c => c.name).filter(Boolean).slice(0, 8);
-    const section = document.getElementById('tmdbSeriesDetail');
-    if (!section) return;
-    section.innerHTML = `
-      ${detail.overview ? buildOverviewHTML('tmdbSeriesOv-' + item.tmdb_id, detail.overview) : '<p style="font-size:0.8rem;color:var(--text2)">暂无简介</p>'}
-      <div style="display:grid;gap:8px;margin-top:12px;font-size:0.82rem;color:var(--text2)">
-        ${genres.length ? `<div><strong style="color:var(--text)">类型</strong> · ${genres.map(esc).join(' / ')}</div>` : ''}
-        ${creators.length ? `<div><strong style="color:var(--text)">主创</strong> · ${creators.map(esc).join(' / ')}</div>` : ''}
-        ${cast.length ? `<div><strong style="color:var(--text)">演员</strong> · ${cast.map(esc).join(' / ')}</div>` : ''}
-        ${detail.number_of_seasons ? `<div><strong style="color:var(--text)">季数</strong> · ${detail.number_of_seasons}</div>` : ''}
-        ${detail.vote_average ? `<div><strong style="color:var(--text)">TMDB</strong> · ${Number(detail.vote_average).toFixed(1)}</div>` : ''}
-      </div>
-    `;
-    if (detail.overview) checkOverviewOverflow('tmdbSeriesOv-' + item.tmdb_id);
-  } catch (e) {
-    const section = document.getElementById('tmdbSeriesDetail');
-    if (section) section.innerHTML = '<p style="font-size:0.8rem;color:var(--text2)">剧集详情加载失败，请稍后重试</p>';
+  if (cached?.overview) checkOverviewOverflow('tmdbSeriesOv-' + item.tmdb_id);
+  if (shouldFetchDetail) {
+    try {
+      const detail = await fetchMovieDetail('series', item.tmdb_id, { force: true });
+      const section = document.getElementById('tmdbSeriesDetail');
+      if (!section) return;
+      if (!detail) {
+        section.innerHTML = '<p style="font-size:0.8rem;color:var(--text2)">剧集详情加载失败，请稍后重试</p>';
+        return;
+      }
+      section.innerHTML = buildTmdbDetailHTML(detail, 'tmdbSeriesOv-' + item.tmdb_id) || '<p style="font-size:0.8rem;color:var(--text2)">暂无详细信息</p>';
+      renderSeasonRecordDetails('tmdbSeriesSeasons', [], detail.seasons || [], 'tmdbSeriesSeasons-' + item.tmdb_id);
+      checkOverviewOverflow('tmdbSeriesOv-' + item.tmdb_id);
+    } catch (e) {
+      const section = document.getElementById('tmdbSeriesDetail');
+      if (section) section.innerHTML = '<p style="font-size:0.8rem;color:var(--text2)">剧集详情加载失败，请稍后重试</p>';
+    }
   }
 }
 
@@ -3649,7 +3967,7 @@ function averageDims(entries) {
 }
 
 function getEntryGenres(entry) {
-  const detail = entry.tmdb_id ? movieCache.get(entry.tmdb_id) : null;
+  const detail = entry.tmdb_id ? movieCache.get(entry) : null;
   if (detail?.genres?.length) return detail.genres;
   if (detail?.genre_ids?.length) return detail.genre_ids.map(id => genreMap[id]).filter(Boolean);
   return [];
@@ -3811,7 +4129,7 @@ function getCoupleMovieEntries(userId) {
 
 function getEntryDetail(entry) {
   if (!entry?.tmdb_id) return null;
-  return movieCache.get(entry.tmdb_id) || discoverMovieMap[entry.tmdb_id] || null;
+  return movieCache.get(entry) || discoverMovieMap[entry.tmdb_id] || null;
 }
 
 function getEntryPosterPath(entry) {
@@ -4973,6 +5291,9 @@ function resetQuickRateSeasons(mediaType, seasons = []) {
   $['qrSeasonSection'].classList.toggle('hidden', !isSeries);
   if (isSeries) {
     seasons.forEach(s => addSeasonRow(s, 'qr'));
+    syncSeasonAverage('qr');
+  } else {
+    renderPrimaryRatingArea('qr', []);
   }
 }
 
@@ -5012,7 +5333,8 @@ function openQuickEdit(id) {
     title: entry.title,
     year: entry.year || null,
     poster_path: entry.poster_path || '',
-    director: entry.director || ''
+    director: entry.director || '',
+    number_of_seasons: movieCache.get(entry)?.number_of_seasons || 0
   };
   $['qrTitle'].textContent = '编辑 ' + entry.title;
   $['qrDims'].innerHTML = buildDimSliders('qr', entry.ratings||{});
@@ -5033,13 +5355,15 @@ function openQuickEdit(id) {
     : [];
   resetQuickRateSeasons(entry.type, seasons);
   bindDimSliders('qr');
-  updateQrTotal();
+  if (!seasons.length) updateQrTotal();
   $['quickRateModal'].classList.add('open');
 }
 
 function updateQrTotal() {
   const ratings = {};
-  document.querySelectorAll('input[type="range"][data-prefix="qr"]').forEach(s=>{
+  const sliders = document.querySelectorAll('input[type="range"][data-prefix="qr"]');
+  if (!sliders.length) return;
+  sliders.forEach(s=>{
     ratings[s.dataset.dim] = parseInt(s.value);
   });
   $['qrTotalScore'].textContent = calcTotal(ratings).toFixed(1);
@@ -5066,21 +5390,25 @@ $['quickRateModal'].addEventListener('click', e=>{
 
 $['qrSubmit'].addEventListener('click', async ()=>{
   if (!quickRateMovie) return;
-  const ratings = {};
-  document.querySelectorAll('input[type="range"][data-prefix="qr"]').forEach(s=>{
-    ratings[s.dataset.dim] = parseInt(s.value);
-  });
   const comment = $['qrComment'].value.trim();
-  const total = calcTotal(ratings);
   const isEdit = !!quickEditEntryId;
   const savedTmdbId = quickRateMovie.tmdb_id || null;
   const mediaType = normalizeMediaType(quickRateMovie.media_type || quickRateMovie.type || 'movie');
   const seasons = mediaType === 'series' ? collectSeasonData($['qrSeasonList']).filter(s=>s.season_number>0) : [];
   if (mediaType === 'series') {
-    const snums = seasons.map(s=>s.season_number);
-    const dup = snums.find((n,i)=>snums.indexOf(n)!==i);
-    if (dup) { toast(`季号 S${dup} 重复，请修改后再保存`); return; }
+    const seasonError = validateSeasonRows(seasons, getCurrentSeasonLimit('qr'));
+    if (seasonError) { toast(seasonError); return; }
   }
+  const ratings = mediaType === 'series' && seasons.length
+    ? getSeasonAverageDims(seasons)
+    : (() => {
+      const r = {};
+      document.querySelectorAll('input[type="range"][data-prefix="qr"]').forEach(s=>{
+        r[s.dataset.dim] = parseInt(s.value);
+      });
+      return r;
+    })();
+  const total = mediaType === 'series' && seasons.length ? getSeasonAverage(seasons) : calcTotal(ratings);
 
   const btn = $['qrSubmit'];
   const origText = btn.textContent;
@@ -5115,7 +5443,7 @@ $['qrSubmit'].addEventListener('click', async ()=>{
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
-    const cachedDetail = mediaType === 'movie' && savedTmdbId ? movieCache.get(savedTmdbId) : null;
+    const cachedDetail = savedTmdbId ? movieCache.get({ media_type: mediaType, tmdb_id: savedTmdbId }) : null;
     if (cachedDetail) applyMovieDetailToEntry(entryData, cachedDetail);
     const {data: inserted, error: insertErr} = await db.from('entries').insert(entryData).select('id').single();
     error = insertErr;
@@ -5150,9 +5478,9 @@ $['qrSubmit'].addEventListener('click', async ()=>{
 
   toast(isEdit ? '评价已更新！' : '评价已保存！');
   if (savedTmdbId) await reconcileListsAfterRatings(mediaType, savedTmdbId, currentUser.id);
-  // Fire-and-forget: backfill normalized movie detail for new entries (non-blocking)
-  if (mediaType === 'movie' && savedTmdbId) {
-    fetchMovieDetail(savedTmdbId).then(detail => {
+  // Fire-and-forget: backfill normalized TMDB detail for new entries (non-blocking)
+  if (savedTmdbId) {
+    fetchMovieDetail(mediaType, savedTmdbId).then(detail => {
       if (!detail) return;
       const e = allEntries.find(x => x.tmdb_id === savedTmdbId && x.user_id === currentUser.id);
       if (e) {
@@ -5164,7 +5492,7 @@ $['qrSubmit'].addEventListener('click', async ()=>{
         if (detail.poster_path) updates.poster_path = detail.poster_path;
         if (detail.year) updates.year = detail.year;
         if (Object.keys(updates).length) {
-          db.from('entries').update(updates).eq('tmdb_id', savedTmdbId).eq('user_id', currentUser.id).then(()=>{}).catch(()=>{});
+          db.from('entries').update(updates).eq('tmdb_id', savedTmdbId).eq('user_id', currentUser.id).eq('type', mediaType).then(()=>{}).catch(()=>{});
         }
       }
     });

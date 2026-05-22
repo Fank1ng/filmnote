@@ -187,13 +187,21 @@
     flex: 1; -webkit-appearance: none; appearance: none;
     height: 6px; background: var(--border); border-radius: 3px; outline: none;
   }
-  .dim-slider input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none; appearance: none;
-    width: 20px; height: 20px; border-radius: 50%;
-    background: var(--gold); cursor: pointer; border: 2px solid var(--bg);
-  }
-  .dim-score { width: 32px; text-align: center; font-weight: 700; font-size: 1rem; color: var(--gold); }
-  .total-preview {
+	  .dim-slider input[type="range"]::-webkit-slider-thumb {
+	    -webkit-appearance: none; appearance: none;
+	    width: 20px; height: 20px; border-radius: 50%;
+	    background: var(--gold); cursor: pointer; border: 2px solid var(--bg);
+	  }
+	  .dim-score { width: 32px; text-align: center; font-weight: 700; font-size: 1rem; color: var(--gold); }
+	  .dim-readonly { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; margin-bottom: 20px; }
+	  .dim-readonly-item {
+	    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+	    padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px;
+	    background: rgba(255,255,255,0.03);
+	  }
+	  .dim-readonly-item span { color: var(--text2); font-size: 0.78rem; }
+	  .dim-readonly-item strong { font-size: 0.95rem; }
+	  .total-preview {
     background: var(--gold-dim); border: 1px solid var(--gold);
     border-radius: var(--radius); padding: 14px 20px;
     display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;
@@ -217,28 +225,71 @@
   .btn-group { display: flex; gap: 10px; margin-top: 20px; }
   .quick-rate-modal { max-width: 640px; max-height: min(86vh, 760px); overflow-y: auto; }
 
-  /* ── Season Rating Cards ── */
-  .season-section { margin-bottom: 20px; }
-  .season-card {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); margin-bottom: 8px; overflow: hidden;
-  }
-  .season-header {
-    padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;
-    cursor: pointer; user-select: none;
+	  /* ── Season Rating Cards ── */
+	  .season-section { margin-bottom: 20px; }
+	  .season-tabs {
+	    display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; margin-bottom: 8px;
+	  }
+	  .season-tab {
+	    min-width: 58px; flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; gap: 1px;
+	    padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px;
+	    background: transparent; color: var(--text2); cursor: pointer; transition: var(--t);
+	  }
+	  .season-tab:hover { border-color: var(--gold); color: var(--text); }
+	  .season-tab.active { border-color: var(--gold); background: var(--gold-dim); color: var(--gold); }
+	  .season-tab span { font-size: 0.72rem; font-weight: 700; }
+	  .season-tab strong { font-size: 0.85rem; }
+	  .season-card {
+	    background: var(--surface); border: 1px solid var(--border);
+	    border-radius: var(--radius); margin-bottom: 8px; overflow: hidden; display: none;
+	  }
+	  .season-card.active { display: block; }
+	  .season-panel-head {
+	    padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+	    border-bottom: 1px solid var(--border);
+	  }
+	  .season-panel-head input {
+	    background: transparent; border: 1px solid var(--border); color: var(--text);
+	    border-radius: 4px; padding: 2px 6px; font-size: 0.85rem;
+	  }
+	  .season-panel-head input[type="number"] { width: 52px; }
+	  .season-panel-head input[type="text"] { width: min(180px, 44vw); }
+	  .season-header {
+	    padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;
+	    cursor: pointer; user-select: none;
   }
   .season-header:hover { background: rgba(255,255,255,0.02); }
   .season-title { font-weight: 600; font-size: 0.9rem; }
   .season-score { color: var(--gold); font-weight: 700; }
-  .season-body { padding: 0 16px 16px; display: none; }
-  .season-body.open { display: block; }
+	  .season-body { padding: 0 16px 16px; display: none; }
+	  .season-body.open { display: block; }
+	  .season-body textarea {
+	    width: 100%; padding: 8px 12px; background: var(--surface); border: 1px solid var(--border);
+	    color: var(--text); border-radius: var(--radius); font-size: 0.85rem; font-family: inherit;
+	  }
   .season-body .dim-list { gap: 8px; }
-  .season-body .dim-info { min-width: 100px; }
-  .season-body .dim-name { font-size: 0.8rem; }
-  .season-body .dim-slider input[type="range"]::-webkit-slider-thumb { width: 16px; height: 16px; }
-  .season-body .dim-score { font-size: 0.85rem; }
+	  .season-body .dim-info { min-width: 100px; }
+	  .season-body .dim-name { font-size: 0.8rem; }
+	  .season-body .dim-slider input[type="range"]::-webkit-slider-thumb { width: 16px; height: 16px; }
+	  .season-body .dim-score { font-size: 0.85rem; }
+	  .detail-season-section { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+	  .detail-season-tabs { margin-bottom: 8px; }
+	  .detail-season-panel {
+	    display: none; border: 1px solid var(--border); border-radius: 8px;
+	    padding: 10px 12px; background: rgba(255,255,255,0.02);
+	  }
+	  .detail-season-panel.active { display: block; }
+	  .detail-season-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 0.86rem; }
+	  .detail-season-head span { color: var(--gold); font-weight: 700; }
+	  .detail-season-comment { font-size: 0.8rem; color: var(--text2); font-style: italic; margin-top: 6px; }
+	  .detail-season-overview { font-size: 0.82rem; color: var(--text2); line-height: 1.7; margin-top: 8px; }
+	  .detail-season-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+	  .detail-season-meta span {
+	    padding: 2px 7px; border-radius: 6px; background: rgba(255,255,255,0.04);
+	    color: var(--text2); font-size: 0.72rem;
+	  }
 
-  /* ── List ── */
+	  /* ── List ── */
   .section-title-switch { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
   .section-title-switch button {
     background: transparent; border: none; color: var(--text2);

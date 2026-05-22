@@ -403,6 +403,7 @@ function normalizeTmdbMovieDetail(details, credits, keywords) {
   const keywordItems = keywords?.keywords || keywords?.results || [];
   return {
     id: details.id || null,
+    media_type: 'movie',
     title: details.title || details.name || '',
     original_title: details.original_title || details.original_name || '',
     overview: details.overview || '',
@@ -421,6 +422,60 @@ function normalizeTmdbMovieDetail(details, credits, keywords) {
     keyword_ids: keywordItems.map(k => k.id).filter(Boolean),
     keyword_names: keywordItems.map(k => k.name).filter(Boolean),
     original_language: details.original_language || '',
+    fetched_at: Date.now()
+  };
+}
+
+function normalizeSeasonDetail(seasonDetail, seasonCredits, seriesCredits) {
+  if (!seasonDetail || seasonDetail.success === false) return null;
+  const seasonNumber = Number(seasonDetail.season_number || 0);
+  const seasonCrew = seasonCredits?.crew?.length ? seasonCredits : null;
+  const directorNames = crewNamesByJobs(seasonCrew || seriesCredits, ['Director', 'Creator', 'Executive Producer', 'Showrunner'], 3);
+  const castNames = namesFromPeople(seasonCredits?.cast?.length ? seasonCredits.cast : seriesCredits?.cast, 8);
+  return {
+    season_number: seasonNumber,
+    season_title: seasonDetail.name || '',
+    name: seasonDetail.name || '',
+    overview: seasonDetail.overview || '',
+    air_date: seasonDetail.air_date || '',
+    poster_path: seasonDetail.poster_path || '',
+    vote_average: seasonDetail.vote_average || 0,
+    episode_count: Array.isArray(seasonDetail.episodes) ? seasonDetail.episodes.length : Number(seasonDetail.episode_count || 0),
+    director: directorNames.join(' / '),
+    cast: castNames
+  };
+}
+
+function normalizeTmdbSeriesDetail(details, credits, seasonDetails) {
+  if (!details || details.success === false) return null;
+  const createdBy = namesFromPeople(details.created_by, 3);
+  const directorNames = createdBy.length ? createdBy : crewNamesByJobs(credits, ['Creator', 'Director', 'Executive Producer', 'Showrunner'], 3);
+  const seasons = (seasonDetails || [])
+    .filter(Boolean)
+    .sort((a, b) => a.season_number - b.season_number);
+  return {
+    id: details.id || null,
+    media_type: 'series',
+    title: details.name || details.title || '',
+    original_title: details.original_name || details.original_title || '',
+    overview: details.overview || '',
+    overview_missing: !details.overview,
+    release_date: details.first_air_date || details.release_date || '',
+    year: parseInt(String(details.first_air_date || details.release_date || '').slice(0, 4)) || null,
+    poster_path: details.poster_path || '',
+    genres: (details.genres || []).map(g => g.name).filter(Boolean),
+    genre_ids: (details.genres || []).map(g => g.id).filter(Boolean),
+    vote_average: details.vote_average || 0,
+    vote_count: details.vote_count || 0,
+    popularity: details.popularity || 0,
+    runtime: Array.isArray(details.episode_run_time) ? Number(details.episode_run_time[0] || 0) : 0,
+    director: directorNames.join(' / '),
+    cast: namesFromPeople(credits?.cast, 8),
+    keyword_ids: [],
+    keyword_names: [],
+    original_language: details.original_language || '',
+    number_of_seasons: Number(details.number_of_seasons || 0),
+    seasons,
     fetched_at: Date.now()
   };
 }
@@ -461,6 +516,69 @@ async function fetchMovieDetailBundle(tmdbId, env) {
     credits: creditsZh,
     movie: normalizeTmdbMovieDetail(details, creditsZh, keywords)
   };
+}
+
+async function fetchSeriesDetailBundle(tmdbId, env) {
+  const [detailsZh, creditsZh] = await Promise.all([
+    fetchTmdb(`/tv/${tmdbId}?language=zh-CN`, env),
+    fetchTmdb(`/tv/${tmdbId}/credits?language=zh-CN`, env)
+  ]);
+  if (detailsZh?.success === false) {
+    return { details: detailsZh, credits: creditsZh, movie: null };
+  }
+
+  let details = detailsZh || {};
+  if (!details.overview) {
+    const fallbacks = await Promise.allSettled([
+      fetchTmdb(`/tv/${tmdbId}?language=zh-TW`, env),
+      fetchTmdb(`/tv/${tmdbId}?language=en-US`, env)
+    ]);
+    const fallbackDetail = fallbacks
+      .map(r => r.status === 'fulfilled' ? r.value : null)
+      .find(d => d && d.success !== false && d.overview);
+    if (fallbackDetail) {
+      details = {
+        ...fallbackDetail,
+        ...details,
+        overview: fallbackDetail.overview,
+        episode_run_time: details.episode_run_time || fallbackDetail.episode_run_time || [],
+      };
+    }
+  }
+
+  const seasonSeeds = (details.seasons || [])
+    .filter(s => Number(s.season_number) > 0)
+    .slice(0, 30);
+  const seasonResults = await Promise.allSettled(
+    seasonSeeds.map(async season => {
+      const seasonNumber = Number(season.season_number);
+      const [seasonDetail, seasonCredits] = await Promise.all([
+        fetchTmdb(`/tv/${tmdbId}/season/${seasonNumber}?language=zh-CN`, env),
+        fetchTmdb(`/tv/${tmdbId}/season/${seasonNumber}/credits?language=zh-CN`, env).catch(() => null)
+      ]);
+      const normalized = normalizeSeasonDetail({
+        ...season,
+        ...seasonDetail,
+        season_number: seasonNumber
+      }, seasonCredits, creditsZh);
+      return normalized || normalizeSeasonDetail(season, null, creditsZh);
+    })
+  );
+  const seasons = seasonResults
+    .map(r => r.status === 'fulfilled' ? r.value : null)
+    .filter(Boolean);
+
+  return {
+    details,
+    credits: creditsZh,
+    movie: normalizeTmdbSeriesDetail(details, creditsZh, seasons)
+  };
+}
+
+async function fetchMediaDetailBundle(mediaType, tmdbId, env) {
+  return mediaType === 'series'
+    ? fetchSeriesDetailBundle(tmdbId, env)
+    : fetchMovieDetailBundle(tmdbId, env);
 }
 
 function titleFromDetail(detail) {
@@ -1515,7 +1633,10 @@ export default {
     const detailMatch = url.pathname.match(/^\/detail\/(\d+)$/);
     if (detailMatch && request.method === 'GET') {
       const tmdbId = parseInt(detailMatch[1]);
-      const { details, credits, movie } = await fetchMovieDetailBundle(tmdbId, env);
+      const mediaType = url.searchParams.get('type') === 'series' || url.searchParams.get('type') === 'tv'
+        ? 'series'
+        : 'movie';
+      const { details, credits, movie } = await fetchMediaDetailBundle(mediaType, tmdbId, env);
       if (!movie) {
         const statusCode = details?.status_code;
         const status = statusCode >= 400 && statusCode <= 599 ? statusCode : 502;
@@ -1531,7 +1652,9 @@ export default {
     if (url.pathname === '/prefetch' && request.method === 'POST') {
       try {
         const body = await readJsonBody(request);
-        const unique = normalizeIds(body.tmdb_ids, MAX_PREFETCH_IDS);
+        const itemList = normalizeSearchIndexItems(body.items, MAX_PREFETCH_IDS);
+        const legacyIds = normalizeIds(body.tmdb_ids, MAX_PREFETCH_IDS);
+        const unique = itemList || (legacyIds ? legacyIds.map(id => ({ media_type: 'movie', tmdb_id: id, key: String(id) })) : null);
         if (!unique) {
           return errorResponse('Missing or invalid tmdb_ids', request, env, 400);
         }
@@ -1543,7 +1666,7 @@ export default {
         for (let i = 0; i < unique.length; i += 5) {
           const batch = unique.slice(i, i + 5);
           const results = await Promise.allSettled(
-            batch.map(id => fetchMovieDetailBundle(id, env))
+            batch.map(item => fetchMediaDetailBundle(item.media_type, item.tmdb_id, env))
           );
           results.forEach(r => { r.status === 'fulfilled' ? cached++ : errors++; });
           if (returnOverviews) {
@@ -1552,8 +1675,9 @@ export default {
               if (detailResult.status === 'fulfilled') {
                 const movie = detailResult.value.movie;
                 if (movie) {
-                  details[batch[j]] = movie;
-                  if (movie.overview) overviews[batch[j]] = movie.overview;
+                  const key = batch[j].key;
+                  details[key] = movie;
+                  if (movie.overview) overviews[key] = movie.overview;
                 }
               }
             }

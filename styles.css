@@ -392,6 +392,18 @@
   .stat-bar-track { flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
   .stat-bar-fill { height: 100%; background: var(--gold); border-radius: 4px; transition: width 0.5s ease; }
   .stat-bar-value { width: 34px; font-size: 0.82rem; font-weight: 600; }
+  .stats-radar-wrap { margin: 0 auto 18px; }
+  .stats-radar { display: block; width: 100%; max-width: 620px; aspect-ratio: 1; margin: 0 auto; overflow: visible; }
+  .stats-radar-label { fill: var(--text); font-size: 12px; font-weight: 700; }
+  .stats-radar-score { fill: var(--text2); font-size: 9px; }
+  .stats-radar-legend {
+    display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+    gap: 14px; color: var(--text); font-size: 0.78rem; margin-top: -8px;
+  }
+  .stats-radar-legend i {
+    display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    margin-right: 6px; vertical-align: -1px;
+  }
   .score-dist { display: flex; gap: 6px; align-items: stretch; height: 180px; margin-bottom: 20px; padding: 0 4px; position: relative; }
   .score-dist::before {
     content: ''; position: absolute; inset: 0;
@@ -751,6 +763,10 @@
     .couple-radar-label { font-size: 9px; }
     .couple-radar-label.type { font-size: 7px; }
     .couple-radar-score { display: none; }
+    .stats-radar { max-width: 100%; margin-top: 4px; }
+    .stats-radar-label { font-size: 9px; }
+    .stats-radar-score { display: none; }
+    .stats-radar-legend { margin-top: 0; font-size: 0.72rem; }
     .couple-wheel-row { grid-template-columns: 116px 1fr; }
     .couple-wheel { width: 112px; height: 112px; }
     .couple-wheel b { inset: 35px; }

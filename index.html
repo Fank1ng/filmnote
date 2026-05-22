@@ -293,15 +293,14 @@
     <!-- ═══ 统计 ═══ -->
     <section class="tab-panel" id="panel-stats">
       <h2 class="section-title">统计概览</h2>
+      <div class="list-subtabs" id="statsTypeFilter">
+        <button class="active" data-st="movie">电影</button>
+        <button data-st="series">剧集</button>
+      </div>
       <div class="list-subtabs" id="statsFilter" style="margin-bottom:8px">
         <button class="active" data-sf="me">自己</button>
         <button data-sf="others">他人</button>
         <button data-sf="compare">对比</button>
-      </div>
-      <div class="list-subtabs" id="statsTypeFilter" style="margin-bottom:8px">
-        <button class="active" data-st="all">全部</button>
-        <button data-st="movie">电影</button>
-        <button data-st="series">剧集</button>
       </div>
       <div id="statsUserRow" class="hidden" style="margin-bottom:12px">
         <select id="statsUserPicker" style="padding:6px 12px;background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;font-size:0.85rem"></select>

@@ -2965,8 +2965,9 @@ document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
 
 // ===== STATS =====
 let statsFilter = 'me';
-let statsType = 'all';
+let statsType = 'movie';
 let statsOtherUser = null;
+const statsDetailFetches = new Set();
 
 document.querySelectorAll('#statsFilter button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
@@ -2981,7 +2982,7 @@ document.querySelectorAll('#statsTypeFilter button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     document.querySelectorAll('#statsTypeFilter button').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
-    statsType = btn.dataset.st;
+    statsType = normalizeMediaType(btn.dataset.st);
     renderStats();
   });
 });
@@ -2991,43 +2992,156 @@ $['statsUserPicker'].addEventListener('change', function(){
   renderStats();
 });
 
-function calcStats(entries) {
+function getEntryRuntimeMinutes(entry) {
+  const detail = entry?.tmdb_id ? movieCache.get(entry) : null;
+  return Math.max(0, Number(detail?.runtime || 0));
+}
+
+function getEntryRatedSeasons(entry) {
+  if (!entry?.id) return [];
+  return allSeasonRatings.filter(s => s.entry_id === entry.id && s.user_id === entry.user_id && Number(s.season_number) > 0);
+}
+
+function getSeriesEpisodeCountForRatedSeasons(entry, ratedSeasons) {
+  const detail = entry?.tmdb_id ? movieCache.get(entry) : null;
+  const seasonDetails = Array.isArray(detail?.seasons) ? detail.seasons : [];
+  return ratedSeasons.reduce((sum, season) => {
+    const seasonNumber = Number(season.season_number || 0);
+    const seasonDetail = seasonDetails.find(s => Number(s.season_number) === seasonNumber);
+    return sum + Math.max(0, Number(seasonDetail?.episode_count || 0));
+  }, 0);
+}
+
+function formatStatNumber(value) {
+  return Math.round(Number(value || 0)).toLocaleString('zh-CN');
+}
+
+function queueStatsDetailFetch(entries, mediaType) {
+  const ids = [...new Set((entries || [])
+    .filter(e => e?.tmdb_id)
+    .filter(e => {
+      const detail = movieCache.get(e);
+      if (!detail) return true;
+      if (mediaType === 'movie') return !Number(detail.runtime || 0);
+      return !Number(detail.runtime || 0) || !(Array.isArray(detail.seasons) && detail.seasons.length);
+    })
+    .map(e => Number(e.tmdb_id))
+    .filter(Boolean))];
+  ids.forEach(tmdbId => {
+    const key = mediaSearchKey(mediaType, tmdbId);
+    if (!key || statsDetailFetches.has(key)) return;
+    statsDetailFetches.add(key);
+    fetchMovieDetail(mediaType, tmdbId, { force: true }).then(detail => {
+      if (!detail) return;
+      if (getActiveTab() === 'stats' && statsType === mediaType) renderStats();
+    }).finally(() => {
+      setTimeout(() => statsDetailFetches.delete(key), 60000);
+    });
+  });
+}
+
+function calcStats(entries, type = statsType) {
   if (!entries.length) return null;
   const avgTotal = entries.reduce((s,m)=>s+getEntryScore(m),0)/entries.length;
   const best = entries.reduce((a,b)=>getEntryScore(a)>getEntryScore(b)?a:b);
   const worst = entries.reduce((a,b)=>getEntryScore(a)<getEntryScore(b)?a:b);
-  const movies = entries.filter(e=>e.type==='movie').length;
-  const series = entries.filter(e=>e.type==='series').length;
   const dimAvgs = {};
   for (const dim of Object.keys(WEIGHTS)) {
-    dimAvgs[dim] = entries.reduce((s,m)=>s+(m.ratings[dim]||5),0)/entries.length;
+    dimAvgs[dim] = entries.reduce((s,m)=>s+(m.ratings?.[dim]||5),0)/entries.length;
   }
   const dist = new Array(10).fill(0);
   entries.forEach(m=>{ const b=Math.min(Math.floor(getEntryScore(m))-1,9); if(b>=0) dist[b]++; });
-  return { avgTotal, best, worst, movies, series, dimAvgs, dist, count: entries.length };
+  const stats = { avgTotal, best, worst, dimAvgs, dist, count: entries.length, type };
+  if (type === 'series') {
+    let ratedSeasonCount = 0;
+    let episodeCount = 0;
+    let totalMinutes = 0;
+    entries.forEach(entry => {
+      const ratedSeasons = getEntryRatedSeasons(entry);
+      const entryEpisodeCount = getSeriesEpisodeCountForRatedSeasons(entry, ratedSeasons);
+      const runtime = getEntryRuntimeMinutes(entry);
+      ratedSeasonCount += ratedSeasons.length;
+      episodeCount += entryEpisodeCount;
+      totalMinutes += entryEpisodeCount * runtime;
+    });
+    return { ...stats, series: entries.length, ratedSeasonCount, episodeCount, totalMinutes };
+  }
+  const totalMinutes = entries.reduce((sum, entry) => sum + getEntryRuntimeMinutes(entry), 0);
+  return { ...stats, movies: entries.length, totalMinutes };
 }
 
-function renderStatCards(stats, c) {
+function renderStatCards(stats, c, type = statsType) {
   if (!stats) return '<div class="stat-card"><div class="stat-value">-</div><div class="stat-label">无数据</div></div>';
   const mc = c?.main||'#d4a853';
-  return `
-    <div class="stat-card"><div class="stat-value" style="color:${mc}">${stats.avgTotal.toFixed(1)}</div><div class="stat-label">平均分</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:${mc}">${stats.movies}</div><div class="stat-label">电影</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:${mc}">${stats.series}</div><div class="stat-label">剧集</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:${mc}">${getEntryScore(stats.best).toFixed(1)}</div><div class="stat-label">最高分 · ${esc(stats.best.title.slice(0,8))}</div></div>
-    <div class="stat-card"><div class="stat-value" style="color:${mc}">${getEntryScore(stats.worst).toFixed(1)}</div><div class="stat-label">最低分 · ${esc(stats.worst.title.slice(0,8))}</div></div>
-  `;
+  const cards = [
+    { value: stats.avgTotal.toFixed(1), label: '平均分' }
+  ];
+  if (type === 'series') {
+    cards.push(
+      { value: formatStatNumber(stats.series), label: '剧集数' },
+      { value: formatStatNumber(stats.ratedSeasonCount), label: '已评价季数' },
+      { value: formatStatNumber(stats.episodeCount), label: '已评价集数' },
+      { value: formatStatNumber(stats.totalMinutes), label: '总分钟数' }
+    );
+  } else {
+    cards.push(
+      { value: formatStatNumber(stats.movies), label: '电影部数' },
+      { value: formatStatNumber(stats.totalMinutes), label: '总分钟数' }
+    );
+  }
+  cards.push(
+    { value: getEntryScore(stats.best).toFixed(1), label: `最高分 · ${esc(stats.best.title.slice(0,8))}` },
+    { value: getEntryScore(stats.worst).toFixed(1), label: `最低分 · ${esc(stats.worst.title.slice(0,8))}` }
+  );
+  return cards.map(card => `
+    <div class="stat-card"><div class="stat-value" style="color:${mc}">${card.value}</div><div class="stat-label">${card.label}</div></div>
+  `).join('');
 }
 
-function renderDimBars(dimAvgs, c) {
-  const mc = c?.main||'#d4a853';
-  return Object.entries(dimAvgs).map(([dim,avg])=>`
-    <div class="stat-bar-row">
-      <span class="stat-bar-label">${DIM_LABELS[dim]}</span>
-      <div class="stat-bar-track"><div class="stat-bar-fill" style="width:${(avg/10)*100}%;background:${mc}"></div></div>
-      <span class="stat-bar-value">${avg.toFixed(1)}</span>
+function renderStatsRadar(seriesList, title = '六维图') {
+  const axes = Object.keys(WEIGHTS).map(dim => ({ key: dim, label: DIM_LABELS[dim] }));
+  const cx = 210;
+  const cy = 210;
+  const radius = 136;
+  const levels = [0.2, 0.4, 0.6, 0.8, 1];
+  const grid = levels.map(level => {
+    const points = axes.map((_, i) => radarPoint(cx, cy, radius * level, i, axes.length).map(n => n.toFixed(1)).join(',')).join(' ');
+    return `<polygon points="${points}" fill="none" stroke="var(--border)" stroke-width="1"/>`;
+  }).join('');
+  const spokes = axes.map((_, i) => {
+    const [x, y] = radarPoint(cx, cy, radius, i, axes.length);
+    return `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/>`;
+  }).join('');
+  const labels = axes.map((axis, i) => {
+    const [x, y] = radarPoint(cx, cy, radius + 44, i, axes.length);
+    const anchor = x < cx - 16 ? 'end' : x > cx + 16 ? 'start' : 'middle';
+    const values = seriesList
+      .map(s => `${esc(s.shortLabel || s.label)} ${Number(s.dimAvgs?.[axis.key] || 0).toFixed(1)}`)
+      .join(' / ');
+    return `
+      <text x="${x.toFixed(1)}" y="${(y - 4).toFixed(1)}" text-anchor="${anchor}" class="stats-radar-label">${esc(axis.label)}</text>
+      <text x="${x.toFixed(1)}" y="${(y + 13).toFixed(1)}" text-anchor="${anchor}" class="stats-radar-score">${values}</text>
+    `;
+  }).join('');
+  const polygons = seriesList.map(s => {
+    const points = radarPolygon(axes.map(axis => s.dimAvgs?.[axis.key] || 0), cx, cy, radius, 10);
+    return `<polygon points="${points}" fill="${s.color}" fill-opacity="0.2" stroke="${s.color}" stroke-width="3" stroke-linejoin="round"></polygon>`;
+  }).join('');
+  const legend = seriesList.length > 1 ? `
+    <div class="stats-radar-legend">
+      ${seriesList.map(s => `<span><i style="background:${s.color}"></i>${esc(s.label)}</span>`).join('')}
     </div>
-  `).join('');
+  ` : '';
+  return `
+    <div class="stats-radar-wrap">
+      <svg class="stats-radar" viewBox="0 0 420 420" role="img" aria-label="${esc(title)}">
+        ${grid}${spokes}${polygons}
+        <circle cx="${cx}" cy="${cy}" r="3" fill="var(--text2)"></circle>
+        ${labels}
+      </svg>
+      ${legend}
+    </div>
+  `;
 }
 
 function renderDist(dist, c) {
@@ -3043,25 +3157,25 @@ function renderDist(dist, c) {
 }
 
 function filterByType(entries) {
-  if (statsType==='all') return entries;
-  return entries.filter(e=>e.type===statsType);
+  const type = normalizeMediaType(statsType);
+  return entries.filter(e=>e.type===type);
 }
 
 // Stats sub-renderers
 function buildMeStatsHTML(myStats, myColor, typeSuffix) {
-  return `<div class="stats-grid">${renderStatCards(myStats, myColor)}</div>
-    <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分${typeSuffix}</h3>
-    ${renderDimBars(myStats.dimAvgs, myColor)}
+  return `<div class="stats-grid">${renderStatCards(myStats, myColor, statsType)}</div>
+    <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">六维图${typeSuffix}</h3>
+    ${renderStatsRadar([{ label: currentProfile?.display_name || '我', shortLabel: '我', dimAvgs: myStats.dimAvgs, color: myColor.main }], `六维图${typeSuffix}`)}
     <h3 style="margin:20px 0 10px;font-size:0.9rem;color:var(--text2)">评分分布${typeSuffix}</h3>
     <div class="score-dist">${renderDist(myStats.dist, myColor)}</div>`;
 }
 
 function buildOthersStatsHTML(otherStats, otherColor, typeSuffix, otherName) {
   return `<h3 style="margin-bottom:14px;font-size:0.9rem;color:${otherColor.main}">${esc(otherName)}${typeSuffix}</h3>
-    <div class="stats-grid">${renderStatCards(otherStats, otherColor)}</div>
-    <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分</h3>
-    ${renderDimBars(otherStats.dimAvgs, otherColor)}
-    <h3 style="margin:20px 0 10px;font-size:0.9rem;color:var(--text2)">评分分布</h3>
+    <div class="stats-grid">${renderStatCards(otherStats, otherColor, statsType)}</div>
+    <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">六维图${typeSuffix}</h3>
+    ${renderStatsRadar([{ label: otherName, shortLabel: '他人', dimAvgs: otherStats.dimAvgs, color: otherColor.main }], `六维图${typeSuffix}`)}
+    <h3 style="margin:20px 0 10px;font-size:0.9rem;color:var(--text2)">评分分布${typeSuffix}</h3>
     <div class="score-dist">${renderDist(otherStats.dist, otherColor)}</div>`;
 }
 
@@ -3071,26 +3185,21 @@ function buildCompareStatsHTML(myStats, otherStats, myColor, otherColor, typeSuf
   let html = `<div class="stats-grid">
     <div class="stat-card"><div class="stat-value" style="color:${myColor.main}">${myStats?myStats.avgTotal.toFixed(1):'-'}</div><div class="stat-label">${esc(myName)}均分${typeSuffix}</div></div>
     <div class="stat-card"><div class="stat-value" style="color:${otherColor.main}">${otherStats?otherStats.avgTotal.toFixed(1):'-'}</div><div class="stat-label">${esc(otherLabel)}均分${typeSuffix}</div></div>
-    <div class="stat-card"><div class="stat-value">${myStats?myStats.movies:0}/${otherStats?otherStats.movies:0}</div><div class="stat-label">电影 (我/${esc(otherLabel)})</div></div>
-    <div class="stat-card"><div class="stat-value">${myStats?myStats.series:0}/${otherStats?otherStats.series:0}</div><div class="stat-label">剧集 (我/${esc(otherLabel)})</div></div>
-    <div class="stat-card"><div class="stat-value">${myStats?myStats.count:0}/${otherStats?otherStats.count:0}</div><div class="stat-label">总计 (我/${esc(otherLabel)})</div></div>
+    ${statsType === 'series' ? `
+      <div class="stat-card"><div class="stat-value">${formatStatNumber(myStats?.series)}/${formatStatNumber(otherStats?.series)}</div><div class="stat-label">剧集数 (我/${esc(otherLabel)})</div></div>
+      <div class="stat-card"><div class="stat-value">${formatStatNumber(myStats?.ratedSeasonCount)}/${formatStatNumber(otherStats?.ratedSeasonCount)}</div><div class="stat-label">已评价季数 (我/${esc(otherLabel)})</div></div>
+      <div class="stat-card"><div class="stat-value">${formatStatNumber(myStats?.episodeCount)}/${formatStatNumber(otherStats?.episodeCount)}</div><div class="stat-label">已评价集数 (我/${esc(otherLabel)})</div></div>
+      <div class="stat-card"><div class="stat-value">${formatStatNumber(myStats?.totalMinutes)}/${formatStatNumber(otherStats?.totalMinutes)}</div><div class="stat-label">总分钟数 (我/${esc(otherLabel)})</div></div>
+    ` : `
+      <div class="stat-card"><div class="stat-value">${formatStatNumber(myStats?.movies)}/${formatStatNumber(otherStats?.movies)}</div><div class="stat-label">电影部数 (我/${esc(otherLabel)})</div></div>
+      <div class="stat-card"><div class="stat-value">${formatStatNumber(myStats?.totalMinutes)}/${formatStatNumber(otherStats?.totalMinutes)}</div><div class="stat-label">总分钟数 (我/${esc(otherLabel)})</div></div>
+    `}
   </div>
-  <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">各维度均分对比 <span style="font-size:0.75rem"><span style="color:${myColor.main}">${esc(myName)}</span> / <span style="color:${otherColor.main}">${esc(otherLabel)}</span></span></h3>`;
-  for (const dim of Object.keys(WEIGHTS)) {
-    const mv = myStats?myStats.dimAvgs[dim]:0;
-    const ov = otherStats?otherStats.dimAvgs[dim]:0;
-    html += `<div class="stat-compare-row">
-      <span class="stat-compare-label">${DIM_LABELS[dim]}</span>
-      <div class="stat-compare-bars">
-        <div style="height:7px;border-radius:3px;background:${myColor.main};width:${(mv/10)*100}%"></div>
-        <div style="height:7px;border-radius:3px;background:${otherColor.main};width:${(ov/10)*100}%"></div>
-      </div>
-      <div class="stat-compare-values">
-        <span style="color:${myColor.main}">${mv.toFixed(1)}</span>
-        <span style="color:${otherColor.main}">${ov.toFixed(1)}</span>
-      </div>
-    </div>`;
-  }
+  <h3 style="margin-bottom:10px;font-size:0.9rem;color:var(--text2)">六维图对比${typeSuffix}</h3>
+  ${renderStatsRadar([
+    { label: myName, shortLabel: '我', dimAvgs: myStats?.dimAvgs || {}, color: myColor.main },
+    { label: otherLabel, shortLabel: '他人', dimAvgs: otherStats?.dimAvgs || {}, color: otherColor.main }
+  ], `六维图对比${typeSuffix}`)}`;
   html += `<h3 style="margin:20px 0 10px;font-size:0.9rem;color:var(--text2)">评分分布对比</h3>
   <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:0.65rem">
     <span style="display:inline-block;width:10px;height:10px;background:${myColor.main};border-radius:2px"></span> ${esc(myName)}
@@ -3146,8 +3255,10 @@ function renderStats() {
     otherEntries = filterByType(allEntries.filter(e=>e.user_id!==currentUser.id));
   }
 
-  const myStats = calcStats(myEntries);
-  const otherStats = calcStats(otherEntries);
+  queueStatsDetailFetch([...myEntries, ...otherEntries], statsType);
+
+  const myStats = calcStats(myEntries, statsType);
+  const otherStats = calcStats(otherEntries, statsType);
 
   const myColor = getUserColor(currentUser.id);
   const otherColor = statsOtherUser ? getUserColor(statsOtherUser) : { key:'friend', main:'#5b9db0', dim:'#1a2a30' };

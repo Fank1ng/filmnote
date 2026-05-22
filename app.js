@@ -2964,8 +2964,8 @@ async function showListItemDetail(movieOrId) {
     </div>
     <div id="tmdbSeriesSeasons">${buildSeasonRecordTabsHTML([], cached?.seasons || [], 'tmdbSeriesSeasons-' + item.tmdb_id)}</div>
     <div class="btn-group" style="justify-content:flex-end;margin-top:8px">
-      <button class="btn btn-secondary btn-sm" onclick="closeModal();openQuickRate(JSON.parse(decodeURIComponent('${inlineMediaPayload(item, { number_of_seasons: cached?.number_of_seasons || item.number_of_seasons || 0, director: cached?.director || item.director || '' })}')))">总评分</button>
-      <button class="btn btn-primary btn-sm" onclick="closeModal();openQuickRate(JSON.parse(decodeURIComponent('${inlineMediaPayload(item, { fillSeasonPlaceholders: true, number_of_seasons: cached?.number_of_seasons || item.number_of_seasons || 0, director: cached?.director || item.director || '' })}')))">分季评分</button>
+      <button class="btn btn-secondary btn-sm" onclick="closeModal();openQuickRate(JSON.parse(decodeURIComponent('${inlineMediaPayload(item, { ratingMode: 'total', number_of_seasons: cached?.number_of_seasons || item.number_of_seasons || 0, director: cached?.director || item.director || '' })}')))">总评分</button>
+      <button class="btn btn-primary btn-sm" onclick="closeModal();openQuickRate(JSON.parse(decodeURIComponent('${inlineMediaPayload(item, { ratingMode: 'season', fillSeasonPlaceholders: true, number_of_seasons: cached?.number_of_seasons || item.number_of_seasons || 0, director: cached?.director || item.director || '' })}')))">分季评分</button>
       <button class="btn btn-secondary btn-sm" onclick="closeModal()">关闭</button>
     </div>
   `;
@@ -5539,11 +5539,12 @@ function buildSeasonRowsWithPlaceholders(seasons = [], limit = 0, scope = 'qr') 
   return filled;
 }
 
-function resetQuickRateSeasons(mediaType, seasons = [], fillPlaceholders = false) {
+function resetQuickRateSeasons(mediaType, seasons = [], fillPlaceholders = false, ratingMode = 'season') {
   if ($['qrSeasonList']) $['qrSeasonList'].innerHTML = '';
   const isSeries = normalizeMediaType(mediaType) === 'series';
-  $['qrSeasonSection'].classList.toggle('hidden', !isSeries);
-  if (isSeries) {
+  const showSeasonRating = isSeries && ratingMode !== 'total';
+  $['qrSeasonSection'].classList.toggle('hidden', !showSeasonRating);
+  if (showSeasonRating) {
     const rows = fillPlaceholders
       ? buildSeasonRowsWithPlaceholders(seasons, getCurrentSeasonLimit('qr'), 'qr')
       : seasons;
@@ -5569,14 +5570,15 @@ function openQuickRate(movie) {
     director: movie.director || ''
   } : null);
   if (!normalized) return;
+  const ratingMode = movie?.ratingMode === 'total' ? 'total' : 'season';
   quickRateMovie = normalized;
   quickEditEntryId = null;
-  $['qrTitle'].textContent = '评价 ' + normalized.title;
+  $['qrTitle'].textContent = (normalized.media_type === 'series' && ratingMode === 'season' ? '分季评价 ' : '评价 ') + normalized.title;
   $['qrDims'].innerHTML = buildDimSliders('qr', {});
   $['qrTotalScore'].textContent = '5.0';
   $['qrComment'].value = '';
   $['qrSubmit'].textContent = '保存评价';
-  resetQuickRateSeasons(normalized.media_type, [], movie?.fillSeasonPlaceholders === true);
+  resetQuickRateSeasons(normalized.media_type, [], movie?.fillSeasonPlaceholders === true, ratingMode);
   bindDimSliders('qr');
   updateQrTotal();
   $['quickRateModal'].classList.add('open');

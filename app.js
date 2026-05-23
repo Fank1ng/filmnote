@@ -2966,6 +2966,7 @@ function renderList() {
 
 // ===== DETAIL MODAL =====
 async function showDetail(id) {
+  if (window.FilmNoteVueDetail?.openEntry?.(id)) return;
   const entry = allEntries.find(e=>e.id===id);
   if (!entry) return;
   const cached = entry.tmdb_id ? movieCache.get(entry) : null;
@@ -3179,7 +3180,10 @@ async function showListItemDetail(movieOrId) {
   }
 }
 
-function closeModal() { $['detailModal'].classList.remove('open'); }
+function closeModal() {
+  window.FilmNoteVueDetail?.close?.();
+  $['detailModal'].classList.remove('open');
+}
 $['detailModal'].addEventListener('click', e=>{ if(e.target===e.currentTarget) closeModal(); });
 document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
 

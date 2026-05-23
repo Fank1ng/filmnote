@@ -19,6 +19,7 @@ export type Entry = {
   year?: number | null;
   director?: string;
   poster_path?: string;
+  overview?: string;
   ratings?: RatingDims;
   score?: number | null;
   total_score?: number | null;

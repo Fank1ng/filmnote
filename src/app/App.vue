@@ -9,7 +9,7 @@ import { DiscoverPanel } from '../features/discover/index.js';
 import { ListBody, ListControls, WatchlistGrid } from '../features/list/index.js';
 import { QuickRateModal, RatingsSearchPanel } from '../features/ratings/index.js';
 import { StatsContent, StatsControls } from '../features/stats/index.js';
-import { AppHeader, AppToast, ImportExportToolbar, TabShell } from '../shared/components/index.js';
+import { AppHeader, AppToast, EntryDetailModal, ImportExportToolbar, TabShell } from '../shared/components/index.js';
 import { mainTabs, type MainTab, useUiStore } from '../stores/ui.js';
 
 defineOptions({ name: 'FilmNoteApp' });
@@ -93,6 +93,7 @@ onUnmounted(() => {
   <AppToast :message="ui.toastMessage" :open="ui.toastOpen" />
   <AccountModals />
   <QuickRateModal />
+  <EntryDetailModal />
   <div class="vue-runtime-root" hidden aria-hidden="true">
     <FeatureArchitectureRoot />
   </div>

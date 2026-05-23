@@ -29,6 +29,10 @@ declare global {
       openQuickRate?: (movie: unknown) => boolean;
       openQuickEdit?: (id: string | number, opts?: unknown) => boolean;
     };
+    FilmNoteVueDetail?: {
+      openEntry?: (id: string | number) => boolean;
+      close?: () => void;
+    };
     SUPABASE_URL?: string;
     SUPABASE_KEY?: string;
     TMDB_IMG?: string;

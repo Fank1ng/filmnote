@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
-import { TMDB_IMG } from '../../config/constants.js';
+import { DIM_LABELS, TMDB_IMG, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
 import { getEntryScore } from '../../shared/scoring.js';
 import { useCoupleStore } from '../../stores/couple.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useListsStore } from '../../stores/lists.js';
 import { useSessionStore } from '../../stores/session.js';
-import type { Couple, CoupleQueueItem, MediaType, Profile, TmdbMedia } from '../../types/domain.js';
+import type { Couple, CoupleQueueItem, Entry, MediaType, Profile, TmdbMedia } from '../../types/domain.js';
 
 defineOptions({ name: 'CouplePanel' });
 
@@ -23,6 +23,39 @@ type UserColor = {
   main: string;
   dim: string;
 };
+type ArchiveAxis = {
+  key: string;
+  label: string;
+  mine: number;
+  partner: number;
+};
+type CacheDetail = {
+  genre_ids?: number[];
+  genres?: Array<string | { name?: string }>;
+  keyword_names?: string[];
+  poster_path?: string;
+};
+type EntryWithMeta = Entry & {
+  genre_ids?: number[];
+  genres?: Array<string | { name?: string }>;
+  keyword_names?: string[];
+};
+
+const coupleTypeDimensions = [
+  { key: 'action', label: '动作', ids: [28], names: ['动作'] },
+  { key: 'adventureFantasy', label: '冒险/奇幻', ids: [12, 14], names: ['冒险', '奇幻'] },
+  { key: 'sciFi', label: '科幻', ids: [878], names: ['科幻'] },
+  { key: 'thrillerHorror', label: '惊悚/恐怖', ids: [53, 27, 9648], names: ['惊悚', '恐怖', '悬疑'] },
+  { key: 'comedy', label: '喜剧', ids: [35], names: ['喜剧'] },
+  { key: 'romance', label: '爱情', ids: [10749], names: ['爱情'] },
+  { key: 'drama', label: '剧情', ids: [18], names: ['剧情'] },
+  { key: 'historyWar', label: '历史/战争', ids: [36, 10752], names: ['历史', '战争'] },
+  { key: 'animation', label: '动画', ids: [16], names: ['动画'] },
+  { key: 'familyKids', label: '家庭/儿童', ids: [10751], names: ['家庭', '儿童'] },
+  { key: 'musicDance', label: '音乐/歌舞', ids: [10402], names: ['音乐', '歌舞'] },
+  { key: 'documentaryBiopic', label: '纪录/传记', ids: [99], names: ['纪录'] },
+];
+const wheelLabels = ['剧情', '爱情', '科幻', '动画', '喜剧', '动作'];
 
 const couple = useCoupleStore();
 const entries = useEntriesStore();
@@ -33,6 +66,9 @@ const tab = ref<CoupleTab>('archive');
 const search = ref('');
 const queueAvailable = ref(true);
 const couplesAvailable = ref(true);
+const chartMode = ref<'score' | 'type'>('score');
+const wheelPickId = ref<string | number | null>(null);
+const detailCache = ref<Record<string, CacheDetail>>({});
 let stopLegacyReady: (() => void) | null = null;
 
 const currentUserId = computed(() => (session.currentUser as UserLike | null)?.id || '');
@@ -105,6 +141,75 @@ const disconnectByPartner = computed(() => !!disconnectRequester.value && !disco
 const disconnectText = computed(() => disconnectByMe.value ? '撤销解除申请' : (disconnectByPartner.value ? '同意解除 Couple' : '申请解除 Couple'));
 const disconnectClass = computed(() => disconnectByPartner.value ? 'btn-primary' : (disconnectByMe.value ? 'btn-secondary' : 'btn-danger'));
 const recommendationLoading = computed(() => couple.loading || couple.recommendationState === 'loading');
+const mineMovieEntries = computed(() => entries.entries.filter(entry => entry.user_id === currentUserId.value && mediaType(entry.type || entry.media_type) === 'movie'));
+const partnerMovieEntries = computed(() => entries.entries.filter(entry => entry.user_id === partnerId.value && mediaType(entry.type || entry.media_type) === 'movie'));
+const archiveData = computed(() => {
+  const pairs = commonPairs.value.map(pair => {
+    const mineScore = getEntryScore(pair.mine);
+    const partnerScore = getEntryScore(pair.partner);
+    return {
+      ...pair,
+      mineScore,
+      partnerScore,
+      avg: (mineScore + partnerScore) / 2,
+      diff: Math.abs(mineScore - partnerScore),
+    };
+  });
+  const harmony = pairs
+    .filter(pair => pair.avg >= 7)
+    .sort((a, b) => b.avg - a.avg || a.diff - b.diff)[0] || pairs.slice().sort((a, b) => a.diff - b.diff || b.avg - a.avg)[0] || null;
+  const split = pairs.slice().sort((a, b) => b.diff - a.diff)[0] || null;
+  return {
+    pairs,
+    harmony,
+    split,
+    mineDims: averageDims(mineMovieEntries.value),
+    partnerDims: averageDims(partnerMovieEntries.value),
+    myTypeDist: calcTypeDistribution(mineMovieEntries.value),
+    partnerTypeDist: calcTypeDistribution(partnerMovieEntries.value),
+    time: calcArchiveTime(pairs),
+  };
+});
+const radarAxes = computed<ArchiveAxis[]>(() => {
+  if (chartMode.value === 'type') {
+    return coupleTypeDimensions.map(dim => ({
+      key: dim.key,
+      label: dim.label,
+      mine: archiveData.value.myTypeDist[dim.key] || 0,
+      partner: archiveData.value.partnerTypeDist[dim.key] || 0,
+    }));
+  }
+  return (Object.keys(WEIGHTS) as RatingDim[]).map(dim => ({
+    key: dim,
+    label: DIM_LABELS[dim],
+    mine: archiveData.value.mineDims[dim] || 0,
+    partner: archiveData.value.partnerDims[dim] || 0,
+  }));
+});
+const radarMaxValue = computed(() => chartMode.value === 'type'
+  ? Math.max(1, ...radarAxes.value.map(axis => axis.mine), ...radarAxes.value.map(axis => axis.partner))
+  : 10);
+const wheelPick = computed(() => couple.queue.find(item => String(item.id) === String(wheelPickId.value)) || null);
+const topTypeLabel = computed(() => {
+  const top = coupleTypeDimensions
+    .map(dim => ({ label: dim.label, value: archiveData.value.myTypeDist[dim.key] || 0 }))
+    .sort((a, b) => b.value - a.value)[0];
+  return top && top.value > 0 ? top.label : '剧情';
+});
+const wheelHitCount = computed(() => {
+  const top = coupleTypeDimensions.find(dim => dim.label === topTypeLabel.value);
+  if (!top) return 0;
+  return couple.queue.filter(item => getTypeKeys(item as unknown as Entry).includes(top.key)).length;
+});
+const diffRows = computed(() => (Object.keys(WEIGHTS) as RatingDim[]).map(dim => {
+  const diff = Math.abs((archiveData.value.mineDims[dim] || 0) - (archiveData.value.partnerDims[dim] || 0));
+  return {
+    dim,
+    label: DIM_LABELS[dim],
+    diff,
+    color: diff >= 1 ? 'var(--ceci)' : diff >= 0.5 ? 'var(--gold)' : '#63c79d',
+  };
+}));
 
 function asControls(input: unknown): CoupleControls {
   return (input || {}) as CoupleControls;
@@ -112,6 +217,7 @@ function asControls(input: unknown): CoupleControls {
 
 function applyControls(controls: CoupleControls): void {
   if (controls.tab === 'archive' || controls.tab === 'recommend' || controls.tab === 'queue') tab.value = controls.tab;
+  if ((controls as { archiveChart?: string }).archiveChart) chartMode.value = (controls as { archiveChart?: string }).archiveChart === 'type' ? 'type' : 'score';
   if ('queueAvailable' in controls) queueAvailable.value = !!controls.queueAvailable;
   if ('couplesAvailable' in controls) couplesAvailable.value = !!controls.couplesAvailable;
 }
@@ -144,6 +250,20 @@ function posterUrl(path: string | null | undefined): string {
   return path ? TMDB_IMG + path : '';
 }
 
+function loadDetailCache(): void {
+  try {
+    detailCache.value = JSON.parse(localStorage.getItem('filmnote_movie_cache') || '{}') || {};
+  } catch {
+    detailCache.value = {};
+  }
+}
+
+function detailFor(entry: Pick<Entry, 'tmdb_id' | 'type' | 'media_type'>): CacheDetail | null {
+  const id = Number(entry.tmdb_id || 0);
+  if (!id) return null;
+  return detailCache.value[`${mediaType(entry.type || entry.media_type)}:${id}`] || detailCache.value[String(id)] || null;
+}
+
 function displayName(userId: string | undefined, fallback = '未知'): string {
   return userId ? entries.profiles[userId]?.display_name || fallback : fallback;
 }
@@ -163,6 +283,11 @@ function setTab(nextTab: CoupleTab): void {
   tab.value = nextTab;
   getLegacyBridge()?.couple?.updateControls?.({ tab: nextTab });
   if (nextTab === 'recommend' && couple.recommendationState === 'idle') void loadRecommendations(false);
+}
+
+function setChartMode(nextMode: 'score' | 'type'): void {
+  chartMode.value = nextMode;
+  getLegacyBridge()?.couple?.updateControls?.({ archiveChart: nextMode });
 }
 
 async function loadRecommendations(force = false): Promise<void> {
@@ -223,6 +348,131 @@ async function openRecommendation(movie: TmdbMedia): Promise<void> {
   await getLegacyBridge()?.discover?.showMovieDetail?.(tmdbId(movie));
 }
 
+function averageDims(source: Entry[]): Record<RatingDim, number> {
+  const result = {} as Record<RatingDim, number>;
+  (Object.keys(WEIGHTS) as RatingDim[]).forEach(dim => {
+    result[dim] = source.length ? source.reduce((sum, entry) => sum + Number(entry.ratings?.[dim] || 5), 0) / source.length : 0;
+  });
+  return result;
+}
+
+function genreIds(entry: EntryWithMeta): number[] {
+  const detail = detailFor(entry);
+  return (detail?.genre_ids || entry.genre_ids || []).map(Number).filter(Boolean);
+}
+
+function genreNames(entry: EntryWithMeta): string[] {
+  const detail = detailFor(entry);
+  const names = detail?.genres || entry.genres || [];
+  return names.map(genre => typeof genre === 'string' ? genre : genre.name || '').filter(Boolean);
+}
+
+function getTypeKeys(entry: EntryWithMeta): string[] {
+  const ids = new Set(genreIds(entry));
+  const names = new Set(genreNames(entry));
+  return coupleTypeDimensions
+    .filter(dim => dim.ids.some(id => ids.has(id)) || dim.names.some(name => names.has(name)))
+    .map(dim => dim.key);
+}
+
+function calcTypeDistribution(source: Entry[]): Record<string, number> {
+  const result = Object.fromEntries(coupleTypeDimensions.map(dim => [dim.key, 0])) as Record<string, number>;
+  source.forEach(entry => {
+    const keys = getTypeKeys(entry);
+    if (!keys.length) return;
+    const weight = 1 / keys.length;
+    keys.forEach(key => { result[key] += weight; });
+  });
+  return result;
+}
+
+function calcArchiveTime(pairs: Array<{ mine: Entry; partner: Entry; avg: number }>): { monthCount: number; daysAgo: number | null; streak: number } {
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const datedPairs = pairs.map(pair => {
+    const mineDate = new Date(pair.mine.created_at || pair.mine.updated_at || 0);
+    const partnerDate = new Date(pair.partner.created_at || pair.partner.updated_at || 0);
+    return { ...pair, latestDate: mineDate > partnerDate ? mineDate : partnerDate };
+  }).filter(pair => !Number.isNaN(pair.latestDate.getTime()));
+  const monthCount = datedPairs.filter(pair => pair.latestDate >= monthStart).length;
+  const recentHigh = datedPairs.filter(pair => pair.avg >= 7).sort((a, b) => Number(b.latestDate) - Number(a.latestDate))[0] || null;
+  const daysAgo = recentHigh ? Math.max(0, Math.floor((Date.now() - Number(recentHigh.latestDate)) / 86400000)) : null;
+  const weekStart = (date: Date): number => {
+    const copy = new Date(date);
+    copy.setHours(0, 0, 0, 0);
+    copy.setDate(copy.getDate() - ((copy.getDay() + 6) % 7));
+    return copy.getTime();
+  };
+  const weeks = new Set(datedPairs.map(pair => weekStart(pair.latestDate)));
+  let streak = 0;
+  let cursor = weekStart(now);
+  while (weeks.has(cursor)) {
+    streak += 1;
+    cursor -= 7 * 86400000;
+  }
+  return { monthCount, daysAgo, streak };
+}
+
+function posterFor(entry: Partial<Entry | CoupleQueueItem> | null | undefined): string {
+  if (!entry) return '';
+  return entry.poster_path || detailFor(entry as Entry)?.poster_path || '';
+}
+
+function posterStack(source: Array<Partial<Entry | CoupleQueueItem> | null | undefined>): string[] {
+  return source.map(posterFor).filter(Boolean).slice(0, 3);
+}
+
+function radarPoint(radius: number, index: number): [number, number] {
+  const angle = -Math.PI / 2 + (index * Math.PI * 2 / radarAxes.value.length);
+  return [210 + Math.cos(angle) * radius, 210 + Math.sin(angle) * radius];
+}
+
+function radarLevelPoints(level: number): string {
+  const radius = (chartMode.value === 'type' ? 148 : 136) * level;
+  return radarAxes.value.map((_, index) => radarPoint(radius, index).map(value => value.toFixed(1)).join(',')).join(' ');
+}
+
+function radarPolygon(side: 'mine' | 'partner'): string {
+  const radius = chartMode.value === 'type' ? 148 : 136;
+  return radarAxes.value.map((axis, index) => {
+    const value = Math.min(Number(axis[side] || 0) / radarMaxValue.value, 1);
+    return radarPoint(radius * value, index).map(point => point.toFixed(1)).join(',');
+  }).join(' ');
+}
+
+function axisPoint(index: number): { x: number; y: number; anchor: 'start' | 'middle' | 'end' } {
+  const [x, y] = radarPoint((chartMode.value === 'type' ? 148 : 136) + (chartMode.value === 'type' ? 36 : 48), index);
+  return {
+    x,
+    y,
+    anchor: x < 194 ? 'end' : x > 226 ? 'start' : 'middle',
+  };
+}
+
+function scoreQueueItem(item: CoupleQueueItem): number {
+  const keys = getTypeKeys(item as unknown as Entry);
+  const typeScore = keys.length
+    ? keys.reduce((sum, key) => sum + (archiveData.value.myTypeDist[key] || 0) + (archiveData.value.partnerTypeDist[key] || 0), 0) / keys.length
+    : 0;
+  const safety = keys.some(key => ['drama', 'romance', 'comedy', 'adventureFantasy', 'sciFi'].includes(key)) ? 1.4 : 1;
+  return Math.max(1, 1 + typeScore * 0.25) * safety;
+}
+
+function spinWheel(): void {
+  if (!couple.queue.length) return;
+  const weighted = couple.queue.map(item => ({ item, weight: scoreQueueItem(item) }));
+  const total = weighted.reduce((sum, item) => sum + item.weight, 0);
+  let needle = Math.random() * total;
+  for (const item of weighted) {
+    needle -= item.weight;
+    if (needle <= 0) {
+      wheelPickId.value = item.item.id;
+      return;
+    }
+  }
+  wheelPickId.value = weighted[0]?.item.id || null;
+}
+
 function ratingState(item: CoupleQueueItem): string {
   const mine = entries.entries.find(entry => entry.user_id === currentUserId.value && mediaType(entry.type || entry.media_type) === mediaType(item.media_type) && Number(entry.tmdb_id) === Number(item.tmdb_id));
   const partner = entries.entries.find(entry => entry.user_id === partnerId.value && mediaType(entry.type || entry.media_type) === mediaType(item.media_type) && Number(entry.tmdb_id) === Number(item.tmdb_id));
@@ -233,6 +483,7 @@ function ratingState(item: CoupleQueueItem): string {
 }
 
 onMounted(() => {
+  loadDetailCache();
   stopLegacyReady = onLegacyReady(bridge => applyControls(asControls(bridge.couple?.getControls?.())));
   window.addEventListener('filmnote:couple-controls', onControls);
 });
@@ -297,23 +548,155 @@ onBeforeUnmount(() => {
         <button type="button" :class="{ active: tab === 'queue' }" @click="setTab('queue')">下次看</button>
       </div>
 
-      <div v-if="tab === 'archive'" class="couple-section">
-        <div class="couple-section-title">关系仪表盘</div>
-        <div class="couple-stat-grid">
-          <div><strong>{{ compatibility.overall }}</strong><span>默契指数</span></div>
-          <div><strong>{{ compatibility.sample }}</strong><span>共同电影</span></div>
-          <div><strong>{{ couple.queue.length }}</strong><span>下次看</span></div>
-        </div>
-        <div class="couple-split-grid">
-          <div>
-            <span>最大共鸣</span>
-            <strong>{{ compatibility.harmonyTitle }}</strong>
-            <p>共同评分越多越准</p>
+      <div v-if="tab === 'archive'" class="couple-archive">
+        <div class="couple-archive-top">
+          <div class="couple-archive-card">
+            <div class="couple-poster-stack" :class="{ 'couple-poster-stack-empty': !posterStack(archiveData.pairs.map(pair => pair.mine)).length }">
+              <img v-for="poster in posterStack(archiveData.pairs.map(pair => pair.mine))" :key="poster" :src="poster" alt="">
+            </div>
+            <div class="couple-archive-card-body">
+              <span>关系仪表盘</span>
+              <strong style="color:var(--gold)">{{ compatibility.overall }}</strong>
+              <p>默契指数 · 共同样本 {{ compatibility.sample }} 部</p>
+            </div>
           </div>
-          <div>
-            <span>最大分歧</span>
-            <strong>{{ compatibility.splitTitle }}</strong>
-            <p>平均分差 {{ compatibility.avgDiff.toFixed(1) }}</p>
+          <div class="couple-archive-card">
+            <div class="couple-poster-stack" :class="{ 'couple-poster-stack-empty': !posterStack([archiveData.harmony?.mine]).length }">
+              <img v-for="poster in posterStack([archiveData.harmony?.mine])" :key="poster" :src="poster" alt="">
+            </div>
+            <div class="couple-archive-card-body">
+              <span>共同封神</span>
+              <strong :style="{ color: partnerColor.main }">{{ archiveData.harmony?.mine.title || '暂无共同电影' }}</strong>
+              <p>{{ archiveData.harmony ? `你 ${archiveData.harmony.mineScore.toFixed(1)} / ${partnerName} ${archiveData.harmony.partnerScore.toFixed(1)}` : '共同评分后生成' }}</p>
+            </div>
+          </div>
+          <div class="couple-archive-card">
+            <div class="couple-poster-stack" :class="{ 'couple-poster-stack-empty': !posterStack(couple.queue).length }">
+              <img v-for="poster in posterStack(couple.queue)" :key="poster" :src="poster" alt="">
+            </div>
+            <div class="couple-archive-card-body">
+              <span>下次看决策</span>
+              <strong style="color:var(--friend)">{{ couple.queue.length }} 部</strong>
+              <p>点击转盘抽一部</p>
+            </div>
+          </div>
+          <div class="couple-archive-card">
+            <div class="couple-poster-stack couple-poster-stack-empty"></div>
+            <div class="couple-archive-card-body">
+              <span>时间节奏</span>
+              <strong style="color:#63c79d">{{ archiveData.time.monthCount }} 部</strong>
+              <p>本月共同评分 · 连续 {{ archiveData.time.streak || 0 }} 周</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="couple-archive-layout">
+          <div class="couple-archive-main">
+            <div class="couple-section-head">
+              <div>
+                <div class="couple-section-title">主图切换区</div>
+                <p class="couple-note">同一位置切换评分默契与 12 维类型分布</p>
+              </div>
+              <div class="couple-chart-toggle">
+                <button type="button" :class="{ active: chartMode === 'score' }" @click="setChartMode('score')">评分默契</button>
+                <button type="button" :class="{ active: chartMode === 'type' }" @click="setChartMode('type')">类型分布</button>
+              </div>
+            </div>
+            <svg class="couple-radar" viewBox="0 0 420 420" role="img" :aria-label="chartMode === 'type' ? '类型分布雷达图' : '评分默契雷达图'">
+              <polygon v-for="level in [0.2, 0.4, 0.6, 0.8, 1]" :key="level" :points="radarLevelPoints(level)" fill="none" stroke="var(--border)" stroke-width="1" />
+              <line
+                v-for="(_, index) in radarAxes"
+                :key="`spoke-${index}`"
+                x1="210"
+                y1="210"
+                :x2="radarPoint(chartMode === 'type' ? 148 : 136, index)[0].toFixed(1)"
+                :y2="radarPoint(chartMode === 'type' ? 148 : 136, index)[1].toFixed(1)"
+                stroke="var(--border)"
+                stroke-width="1"
+              />
+              <polygon :points="radarPolygon('mine')" :fill="myColor.main" fill-opacity="0.22" :stroke="myColor.main" stroke-width="3" stroke-linejoin="round"></polygon>
+              <polygon :points="radarPolygon('partner')" :fill="partnerColor.main" fill-opacity="0.22" :stroke="partnerColor.main" stroke-width="3" stroke-linejoin="round"></polygon>
+              <circle cx="210" cy="210" r="3" fill="var(--text2)"></circle>
+              <template v-for="(axis, index) in radarAxes" :key="axis.key">
+                <text :x="axisPoint(index).x.toFixed(1)" :y="(axisPoint(index).y - 4).toFixed(1)" :text-anchor="axisPoint(index).anchor" class="couple-radar-label" :class="{ type: chartMode === 'type' }">{{ axis.label }}</text>
+                <text :x="axisPoint(index).x.toFixed(1)" :y="(axisPoint(index).y + 13).toFixed(1)" :text-anchor="axisPoint(index).anchor" class="couple-radar-score">{{ axis.mine.toFixed(1) }} / {{ axis.partner.toFixed(1) }}</text>
+              </template>
+            </svg>
+            <div class="couple-radar-legend">
+              <span><i :style="{ background: myColor.main }"></i>我</span>
+              <span><i :style="{ background: partnerColor.main }"></i>{{ partnerName }}</span>
+              <em>{{ chartMode === 'type' ? '多类型电影按命中大类平分权重' : '重叠面积越大，评分默契越高' }}</em>
+            </div>
+          </div>
+
+          <div class="couple-archive-left">
+            <div class="couple-story-card">
+              <div class="couple-poster-stack" :class="{ 'couple-poster-stack-empty': !posterStack([archiveData.harmony?.mine]).length }">
+                <img v-for="poster in posterStack([archiveData.harmony?.mine])" :key="poster" :src="poster" alt="">
+              </div>
+              <span>最大共鸣</span>
+              <strong>{{ archiveData.harmony?.mine.title || '暂无共同电影' }}</strong>
+              <em>{{ archiveData.harmony ? `共同高分 · 差 ${archiveData.harmony.diff.toFixed(1)}` : '共同样本越多越准' }}</em>
+              <p>统计像故事，不只是数字</p>
+            </div>
+            <div class="couple-story-card">
+              <div class="couple-poster-stack" :class="{ 'couple-poster-stack-empty': !posterStack([archiveData.split?.mine]).length }">
+                <img v-for="poster in posterStack([archiveData.split?.mine])" :key="poster" :src="poster" alt="">
+              </div>
+              <span>最大分歧</span>
+              <strong>{{ archiveData.split?.mine.title || '暂无共同电影' }}</strong>
+              <em>{{ archiveData.split ? `总分差 ${archiveData.split.diff.toFixed(1)}` : '共同样本越多越准' }}</em>
+              <p>保留一点饭后讨论的趣味</p>
+            </div>
+            <div class="couple-story-card no-poster">
+              <span>Couple 成就</span>
+              <div class="couple-achievement"><strong style="color:var(--gold)">同步审美</strong><span>{{ archiveData.pairs.filter(pair => pair.diff < 1).length }} 部分差 &lt; 1</span></div>
+              <div class="couple-achievement"><strong style="color:var(--ceci)">分歧名场面</strong><span>{{ archiveData.pairs.filter(pair => pair.diff >= 3).length }} 部差距 >= 3</span></div>
+              <div class="couple-achievement"><strong style="color:var(--friend)">意见领袖</strong><span>{{ couple.queue.length }} 部待验证</span></div>
+            </div>
+          </div>
+
+          <div class="couple-archive-right">
+            <div class="couple-archive-side-card">
+              <div class="couple-section-title">下次看：转盘抽一部</div>
+              <p class="couple-note">从队列按默契权重随机</p>
+              <div class="couple-wheel-row">
+                <button class="couple-wheel" type="button" aria-label="抽一部" @click="spinWheel">
+                  <span v-for="(label, index) in wheelLabels" :key="label" :style="{ '--i': index }">{{ label }}</span>
+                  <b>抽</b>
+                </button>
+                <div class="couple-wheel-stats">
+                  <span>今晚命中率</span><strong>{{ wheelHitCount }}/{{ couple.queue.length || 0 }}</strong>
+                  <span>安全选择</span><strong>{{ topTypeLabel }}</strong>
+                </div>
+              </div>
+              <div v-if="wheelPick" class="couple-wheel-result" :data-queue-id="wheelPick.id" @click="openQueue(wheelPick)">
+                <img v-if="posterUrl(wheelPick.poster_path)" :src="posterUrl(wheelPick.poster_path)" alt="">
+                <div v-else></div>
+                <strong>{{ wheelPick.title }}</strong>
+                <span>{{ wheelPick.year || '未知' }} · {{ mediaTypeLabel(wheelPick.media_type) }}</span>
+                <button class="btn btn-xs btn-secondary" type="button" @click.stop="rateQueue(wheelPick)">评分</button>
+                <button class="btn btn-xs btn-danger" type="button" @click.stop="removeQueue(wheelPick); wheelPickId = null">移除</button>
+              </div>
+              <p v-else class="couple-muted">{{ couple.queue.length ? '点击转盘抽一部' : '下次看队列为空' }}</p>
+            </div>
+
+            <div class="couple-archive-side-card">
+              <div class="couple-section-title">分歧雷达</div>
+              <p class="couple-note">辅助评分默契图</p>
+              <div v-for="row in diffRows" :key="row.dim" class="couple-diff-row">
+                <span>{{ row.label }}</span>
+                <i><b :style="{ width: `${Math.min(row.diff / 2, 1) * 100}%`, background: row.color }"></b></i>
+                <em>{{ row.diff.toFixed(1) }}</em>
+              </div>
+            </div>
+
+            <div class="couple-archive-side-card">
+              <div class="couple-section-title">时间动态</div>
+              <strong class="couple-time-highlight">{{ archiveData.time.daysAgo === null ? '暂无同步高分' : `最近一次同步高分：${archiveData.time.daysAgo} 天前` }}</strong>
+              <p>本月共同评分 {{ archiveData.time.monthCount }} 部</p>
+              <p>连续 {{ archiveData.time.streak || 0 }} 周都有共同观影记录</p>
+            </div>
           </div>
         </div>
       </div>

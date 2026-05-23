@@ -468,6 +468,12 @@
   .modal-actions { justify-content: flex-end; margin-top: 12px; }
   .modal-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
   .modal-title-row h3 { margin: 0; color: var(--text2); }
+  .stats-user-row { margin-bottom: 12px; }
+  .stats-user-row select {
+    padding: 6px 12px; background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; font-size: 0.85rem;
+  }
+  .stats-user-row select:focus { border-color: var(--gold); outline: none; }
   .invite-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
   .invite-toolbar span { font-size: 0.75rem; color: var(--text2); }
   .invite-list { max-height: 240px; overflow-y: auto; }

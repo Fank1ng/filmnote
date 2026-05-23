@@ -3167,12 +3167,43 @@ let statsType = 'movie';
 let statsOtherUser = null;
 const statsDetailFetches = new Set();
 
+function getStatsControlsSnapshot() {
+  return {
+    filter: statsFilter,
+    type: statsType,
+    otherUser: statsOtherUser,
+    users: [...new Set(allEntries.filter(e => currentUser && e.user_id !== currentUser.id).map(e => e.user_id))]
+      .map(uid => ({ user_id: uid, display_name: allProfiles[uid]?.display_name || uid.slice(0, 8) }))
+  };
+}
+
+function syncLegacyStatsControlDom() {
+  document.querySelectorAll('#statsFilter button').forEach(b => b.classList.toggle('active', b.dataset.sf === statsFilter));
+  document.querySelectorAll('#statsTypeFilter button').forEach(b => b.classList.toggle('active', normalizeMediaType(b.dataset.st) === statsType));
+  if ($['statsUserPicker']) $['statsUserPicker'].value = statsOtherUser || '';
+}
+
+function notifyStatsControlsChanged() {
+  window.dispatchEvent(new CustomEvent('filmnote:stats-controls', { detail: getStatsControlsSnapshot() }));
+}
+
+function updateStatsControls(patch = {}) {
+  if (patch.filter) statsFilter = ['me', 'others', 'compare'].includes(patch.filter) ? patch.filter : 'me';
+  if (patch.type) statsType = normalizeMediaType(patch.type);
+  if ('otherUser' in patch) statsOtherUser = patch.otherUser || null;
+  if ($['statsUserPicker']) $['statsUserPicker'].value = statsOtherUser || '';
+  syncLegacyStatsControlDom();
+  renderStats();
+  notifyStatsControlsChanged();
+}
+
 document.querySelectorAll('#statsFilter button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     document.querySelectorAll('#statsFilter button').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
     statsFilter = btn.dataset.sf;
     renderStats();
+    notifyStatsControlsChanged();
   });
 });
 
@@ -3182,12 +3213,14 @@ document.querySelectorAll('#statsTypeFilter button').forEach(btn=>{
     btn.classList.add('active');
     statsType = normalizeMediaType(btn.dataset.st);
     renderStats();
+    notifyStatsControlsChanged();
   });
 });
 
 $['statsUserPicker'].addEventListener('change', function(){
   statsOtherUser = this.value || null;
   renderStats();
+  notifyStatsControlsChanged();
 });
 
 function getEntryRuntimeMinutes(entry) {
@@ -3471,6 +3504,8 @@ function renderStats() {
     userRow.classList.add('hidden');
     statsOtherUser = null;
   }
+  syncLegacyStatsControlDom();
+  notifyStatsControlsChanged();
 
   if (allEntries.length===0) {
     container.innerHTML = '<div class="empty-state"><p>暂无评价数据</p></div>';
@@ -6284,6 +6319,8 @@ window.FilmNoteLegacy = {
   },
   stats: {
     renderStats,
+    getControls: getStatsControlsSnapshot,
+    updateControls: updateStatsControls,
   },
   discover: {
     renderDiscover,

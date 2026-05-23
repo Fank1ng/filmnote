@@ -36,6 +36,8 @@ Ratings is partially migrated: the search panel and Quick Rate add/edit are now 
 
 List is partially migrated: the visible list mode tabs, media subtabs, search, sort, owner, score filters, entries card list, and watchlist grid are now Vue-rendered. Vue writes control changes through the legacy list adapter and uses Pinia entries/profiles/season ratings/watchlist state for rendering. Detail, edit, delete, add-my-rating, watchlist removal, and list-item detail actions still call the legacy adapter while those behaviors are migrated.
 
+Stats is partially migrated: the visible media type, scope tabs, and comparison user picker are now Vue-rendered. Vue writes changes through the legacy stats adapter while stats charts and metric content remain legacy-rendered.
+
 ## Module Direction
 
 - `app/`: Vue root app and legacy bootstrap.

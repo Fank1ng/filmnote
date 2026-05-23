@@ -47,6 +47,8 @@ export type LegacyBridge = {
   };
   stats?: {
     renderStats?: () => void;
+    getControls?: () => unknown;
+    updateControls?: (patch: unknown) => void;
   };
   discover?: {
     renderDiscover?: () => Promise<void>;

@@ -74,6 +74,14 @@ function listKey(media: Pick<NormalizedMedia, 'media_type' | 'tmdb_id'>): string
   return `${media.media_type}:${media.tmdb_id}`;
 }
 
+function listRuleErrorMessage(error: unknown, fallback: string): string {
+  const message = error instanceof Error ? error.message : String(error || '');
+  if (/list_rule_already_rated_watchlist/i.test(message)) return '你已评价，不能加入想看';
+  if (/list_rule_watchlist_queue_conflict/i.test(message)) return '已在另一个清单里，不能重复加入';
+  if (/watchlist_movies|schema cache|does not exist|relation|media_type|column/i.test(message)) return '想看清单表尚未升级，请先执行升级 SQL';
+  return message ? `${fallback}: ${message}` : fallback;
+}
+
 export function useMediaActions() {
   const ui = useUiStore();
   const session = useSessionStore();
@@ -122,12 +130,22 @@ export function useMediaActions() {
       ui.showToast('无法更新想看清单，影片信息不完整');
       return false;
     }
+    let fallbackError = '加入想看失败';
     try {
       if (lists.watchlistIds.has(listKey(media))) {
+        fallbackError = '移除想看失败';
         const { error } = await removeWatchlistItem(currentUserId, media.media_type, media.tmdb_id);
         if (error) throw error;
         ui.showToast('已移出想看');
       } else {
+        if (isRated(media)) {
+          ui.showToast('你已评价，不能加入想看');
+          return false;
+        }
+        if (couple.queue.some(item => item.media_type === media.media_type && Number(item.tmdb_id) === media.tmdb_id)) {
+          ui.showToast('已在下次看，不能重复加入想看');
+          return false;
+        }
         const { error } = await addWatchlistItem({
           user_id: currentUserId,
           media_type: media.media_type,
@@ -135,7 +153,6 @@ export function useMediaActions() {
           title: media.title,
           year: media.year,
           poster_path: media.poster_path,
-          release_date: media.release_date,
         });
         if (error) throw error;
         ui.showToast('已加入想看');
@@ -143,7 +160,7 @@ export function useMediaActions() {
       await refreshVueData();
       return true;
     } catch (error) {
-      ui.showToast(`想看清单更新失败: ${error instanceof Error ? error.message : String(error)}`);
+      ui.showToast(listRuleErrorMessage(error, fallbackError));
       return false;
     }
   }
@@ -167,6 +184,10 @@ export function useMediaActions() {
       ui.showToast('已在下次看');
       return true;
     }
+    if (lists.watchlistIds.has(listKey(media))) {
+      ui.showToast('已在想看，不能重复加入下次看');
+      return false;
+    }
     try {
       const maxPosition = couple.queue.reduce((max, item) => Math.max(max, Number(item.position || 0)), 0);
       const { error } = await addCoupleQueueItem({
@@ -184,7 +205,7 @@ export function useMediaActions() {
       ui.showToast('已加入下次看');
       return true;
     } catch (error) {
-      ui.showToast(`加入下次看失败: ${error instanceof Error ? error.message : String(error)}`);
+      ui.showToast(listRuleErrorMessage(error, '加入下次看失败'));
       return false;
     }
   }

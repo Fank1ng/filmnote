@@ -17,6 +17,7 @@ import {
 } from '../tmdb-detail.js';
 import { getEntryScore } from '../scoring.js';
 import BaseModal from './BaseModal.vue';
+import SeasonDetailTabs from './SeasonDetailTabs.vue';
 
 defineOptions({ name: 'MediaDetailModal' });
 
@@ -63,6 +64,14 @@ const detailChips = computed(() => {
   return chips;
 });
 const seasons = computed(() => (Array.isArray(detail.value?.seasons) ? detail.value?.seasons || [] : []) as Array<Record<string, unknown>>);
+const seasonRecords = computed(() => seasons.value
+  .map(season => ({
+    number: Number(season.season_number || 0),
+    title: String(season.name || season.season_title || ''),
+    local: null,
+    tmdb: season,
+  }))
+  .filter(record => record.number > 0));
 
 function openMedia(input: unknown, fallbackType: MediaType = 'movie'): boolean {
   const normalized = normalizeTmdbMedia(input, fallbackType);
@@ -97,12 +106,13 @@ async function loadDetail(): Promise<void> {
   const id = tmdbId.value;
   const cached = getCachedTmdbDetail(type, id);
   if (cached) detail.value = cached;
-  if (!needsTmdbDetailFetch(cached)) return;
+  const missingSeasonRecords = type === 'series' && !(Array.isArray(cached?.seasons) && cached.seasons.length);
+  if (!needsTmdbDetailFetch(cached) && !missingSeasonRecords) return;
 
   loading.value = true;
   errorMessage.value = '';
   try {
-    const fetched = await fetchTmdbDetail(type, id, { force: true });
+    const fetched = await fetchTmdbDetail(type, id, { force: missingSeasonRecords });
     if (seq === requestSeq && fetched) detail.value = fetched;
     if (seq === requestSeq && !fetched && !cached) errorMessage.value = '详情加载失败，请稍后重试';
   } catch (error) {
@@ -201,19 +211,7 @@ onBeforeUnmount(() => {
         </template>
       </div>
 
-      <div v-if="seasons.length" class="friend-section">
-        <h4>剧集信息</h4>
-        <div v-for="season in seasons" :key="String(season.season_number || season.name)" class="friend-rating">
-          <div class="fr-header">
-            <span class="fr-name">S{{ season.season_number }} {{ season.name || season.season_title || '' }}</span>
-            <span v-if="season.vote_average" class="fr-score">{{ Number(season.vote_average).toFixed(1) }}</span>
-          </div>
-          <p style="font-size:0.78rem;color:var(--text2);margin-top:4px">
-            <span v-if="season.episode_count">{{ season.episode_count }} 集</span>
-            <span v-if="season.average_episode_runtime"> · 平均 {{ season.average_episode_runtime }} 分钟</span>
-          </p>
-        </div>
-      </div>
+      <SeasonDetailTabs v-if="seasonRecords.length" :records="seasonRecords" />
 
       <div v-if="errorMessage" class="auth-error">{{ errorMessage }}</div>
 

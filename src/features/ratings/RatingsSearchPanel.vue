@@ -1,11 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
-import { addCoupleQueueItem } from '../../api/couple-api.js';
-import { addWatchlistItem, removeWatchlistItem } from '../../api/list-api.js';
 import { searchTmdbMedia, loadTmdbMediaDetail, type NormalizedSearchMedia } from '../../api/tmdb-api.js';
-import { refreshVueData } from '../../app/data-sync.js';
-import { getLegacyBridge } from '../../app/legacy-bridge.js';
 import { getCurrentUser } from '../../app/user-context.js';
+import { useMediaActions } from '../../shared/composables/useMediaActions.js';
 import { posterUrl } from '../../shared/tmdb.js';
 import { useCoupleStore } from '../../stores/couple.js';
 import { useEntriesStore } from '../../stores/entries.js';
@@ -25,6 +22,7 @@ const lists = useListsStore();
 const couple = useCoupleStore();
 const session = useSessionStore();
 const ui = useUiStore();
+const mediaActions = useMediaActions();
 
 const mediaType = ref<MediaType>('movie');
 const query = ref('');
@@ -138,54 +136,14 @@ async function addReview(): Promise<void> {
 
 async function addWatchlist(): Promise<void> {
   const movie = selected.value;
-  const userId = currentUser.value?.id;
-  if (!movie || !userId) return;
-  const bridge = getLegacyBridge();
-  if (bridge?.list?.toggleWatchlist) {
-    await bridge.list.toggleWatchlist(movie.tmdb_id, movie);
-  } else if (isWatchlisted.value) {
-    await removeWatchlistItem(userId, movie.media_type, movie.tmdb_id);
-    ui.showToast('已移出想看');
-  } else {
-    await addWatchlistItem({
-      user_id: userId,
-      media_type: movie.media_type,
-      tmdb_id: movie.tmdb_id,
-      title: movie.title,
-      year: movie.year,
-      poster_path: movie.poster_path || '',
-      release_date: movie.release_date || '',
-    });
-    ui.showToast('已加入想看');
-  }
-  await refreshVueData();
+  if (!movie) return;
+  await mediaActions.toggleWatchlist(movie);
 }
 
 async function addNext(): Promise<void> {
   const movie = selected.value;
-  const userId = currentUser.value?.id;
-  if (!movie || !userId || !couple.activeCouple) {
-    ui.showToast('请先绑定 Couple');
-    return;
-  }
-  const bridge = getLegacyBridge();
-  if (bridge?.couple?.addToCoupleQueue) {
-    await bridge.couple.addToCoupleQueue(movie);
-  } else if (!isQueued.value) {
-    const maxPosition = couple.queue.reduce((max, item) => Math.max(max, Number(item.position || 0)), 0);
-    await addCoupleQueueItem({
-      couple_id: couple.activeCouple.id,
-      media_type: movie.media_type,
-      tmdb_id: movie.tmdb_id,
-      title: movie.title,
-      year: movie.year,
-      poster_path: movie.poster_path || '',
-      position: maxPosition + 1,
-      added_by: userId,
-    });
-    ui.showToast('已加入下次看');
-  }
-  await refreshVueData();
+  if (!movie) return;
+  await mediaActions.addToNextWatch(movie);
 }
 
 watch(query, value => {

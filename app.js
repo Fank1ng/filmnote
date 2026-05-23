@@ -2887,6 +2887,7 @@ async function showDetail(id) {
       return `<div class="tmdb-section" id="tmdbDetail-${entry.id}"><div class="detail-spinner"></div> 加载${detailLabel}详情...</div>`;
     })()}
     <div class="btn-group" style="justify-content:flex-end">
+      ${isMine && entry.type !== 'series' ? `<button class="btn btn-secondary btn-sm" onclick="${editActionForEntry(entry)};closeModal()">编辑</button>` : ''}
       <button class="btn btn-secondary btn-sm" onclick="closeModal()">关闭</button>
     </div>
   `;

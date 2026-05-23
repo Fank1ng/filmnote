@@ -12,7 +12,7 @@ export async function createEntry(payload: Partial<Entry>) {
   return getSupabaseClient()
     .from('entries')
     .insert(payload)
-    .select('id')
+    .select('*')
     .single();
 }
 

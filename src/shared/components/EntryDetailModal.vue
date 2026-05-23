@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { deleteEntry as deleteEntryApi } from '../../api/entries-api.js';
+import { refreshVueData } from '../../app/data-sync.js';
 import { getLegacyBridge } from '../../app/legacy-bridge.js';
 import { DIM_LABELS, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import { getEntryScore } from '../scoring.js';
@@ -85,21 +87,37 @@ function editEntry(): void {
   const target = entry.value;
   if (!target) return;
   close();
-  getLegacyBridge()?.ratings?.openQuickEdit?.(target.id);
+  if (!window.FilmNoteVueRatings?.openQuickEdit?.(target.id)) {
+    getLegacyBridge()?.ratings?.openQuickEdit?.(target.id);
+  }
 }
 
-function deleteEntry(): void {
+async function deleteEntry(): Promise<void> {
   const target = entry.value;
   if (!target) return;
+  if (!window.confirm('确定删除这条评价？此操作不可恢复。')) return;
   close();
-  void getLegacyBridge()?.ratings?.deleteEntry?.(target.id);
+  const { error } = await deleteEntryApi(target.id);
+  if (error) void getLegacyBridge()?.ratings?.deleteEntry?.(target.id);
+  await refreshVueData();
 }
 
 function addMyRating(): void {
   const target = entry.value;
   if (!target) return;
   close();
-  getLegacyBridge()?.list?.addMyRating?.(target.id);
+  if (!window.FilmNoteVueRatings?.openQuickRate?.({
+    id: target.tmdb_id,
+    tmdb_id: target.tmdb_id,
+    media_type: target.type || target.media_type || 'movie',
+    type: target.type || target.media_type || 'movie',
+    title: target.title,
+    year: target.year || null,
+    poster_path: target.poster_path || '',
+    director: target.director || '',
+  })) {
+    getLegacyBridge()?.list?.addMyRating?.(target.id);
+  }
 }
 
 function onKeydown(event: KeyboardEvent): void {

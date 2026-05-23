@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { removeWatchlistItem } from '../../api/list-api.js';
+import { refreshVueData } from '../../app/data-sync.js';
 import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
 import { PaginationControls } from '../../shared/components/index.js';
 import { posterUrl } from '../../shared/tmdb.js';
@@ -58,7 +60,13 @@ function rateItem(item: WatchlistItem): void {
 }
 
 async function removeItem(item: WatchlistItem): Promise<void> {
-  await getLegacyBridge()?.list?.toggleWatchlist?.(item.tmdb_id, item);
+  const bridge = getLegacyBridge();
+  if (bridge?.list?.toggleWatchlist) {
+    await bridge.list.toggleWatchlist(item.tmdb_id, item);
+  } else {
+    await removeWatchlistItem(item.user_id, item.media_type, item.tmdb_id);
+  }
+  await refreshVueData();
 }
 
 async function showDetail(item: WatchlistItem): Promise<void> {

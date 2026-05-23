@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { deleteEntry as deleteEntryApi } from '../../api/entries-api.js';
+import { refreshVueData } from '../../app/data-sync.js';
 import { DIM_LABELS, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
 import { PaginationControls } from '../../shared/components/index.js';
@@ -212,15 +214,35 @@ function showDetail(entry: Entry): void {
 }
 
 function editEntry(entry: Entry): void {
-  getLegacyBridge()?.ratings?.openQuickEdit?.(entry.id);
+  if (!window.FilmNoteVueRatings?.openQuickEdit?.(entry.id)) {
+    getLegacyBridge()?.ratings?.openQuickEdit?.(entry.id);
+  }
 }
 
-function deleteEntry(entry: Entry): void {
-  getLegacyBridge()?.ratings?.deleteEntry?.(entry.id);
+async function deleteEntry(entry: Entry): Promise<void> {
+  if (!window.confirm('确定删除这条评价？此操作不可恢复。')) return;
+  const { error } = await deleteEntryApi(entry.id);
+  if (error) {
+    getLegacyBridge()?.ratings?.deleteEntry?.(entry.id);
+    return;
+  }
+  await refreshVueData();
+  getLegacyBridge()?.state?.sync?.('vue-entry-deleted');
 }
 
 function addMyRating(entry: Entry): void {
-  getLegacyBridge()?.list?.addMyRating?.(entry.id);
+  if (!window.FilmNoteVueRatings?.openQuickRate?.({
+    id: entry.tmdb_id,
+    tmdb_id: entry.tmdb_id,
+    media_type: mediaType(entry),
+    type: mediaType(entry),
+    title: entry.title,
+    year: entry.year || null,
+    poster_path: entry.poster_path || '',
+    director: entry.director || '',
+  })) {
+    getLegacyBridge()?.list?.addMyRating?.(entry.id);
+  }
 }
 
 function changePage(nextPage: number): void {

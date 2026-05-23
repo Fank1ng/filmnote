@@ -7,6 +7,7 @@ import {
   updateEntry,
 } from '../../api/entries-api.js';
 import { getLegacyBridge, switchLegacyTab } from '../../app/legacy-bridge.js';
+import { refreshVueData } from '../../app/data-sync.js';
 import { BaseModal, RatingSliders } from '../../shared/components/index.js';
 import { posterUrl } from '../../shared/tmdb.js';
 import { calcTotal } from '../../shared/scoring.js';
@@ -213,6 +214,7 @@ async function refreshLegacyAfterSave(entryId: Entry['id'] | null, wasNew: boole
   const bridge = getLegacyBridge();
   await bridge?.shell?.loadAllData?.();
   bridge?.state?.sync?.('vue-rating-saved');
+  await refreshVueData();
   const activeTab = bridge?.shell?.getActiveTab?.();
   if (wasNew && activeTab === 'rate' && entryId) {
     bridge?.list?.locateAndGoToList?.(entryId);

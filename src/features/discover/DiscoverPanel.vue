@@ -1,5 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { addCoupleQueueItem } from '../../api/couple-api.js';
+import { addBlockedMovie, addWatchlistItem, removeWatchlistItem } from '../../api/list-api.js';
+import { refreshVueData } from '../../app/data-sync.js';
 import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
 import { TMDB_IMG, TMDB_PROXY } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
@@ -159,6 +162,34 @@ function listKey(movie: TmdbMedia): string {
   return `${mediaType(movie)}:${tmdbId(movie)}`;
 }
 
+function recommendationEntries() {
+  return entries.entries.map(entry => ({
+    user_id: entry.user_id,
+    type: mediaType(entry),
+    tmdb_id: entry.tmdb_id || null,
+    total_score: entry.total_score || null,
+    created_at: entry.created_at || '',
+  }));
+}
+
+async function loadRecommendationsDirect(): Promise<TmdbMedia[] | null> {
+  if (!currentUserId.value || ratedCount.value < 25) return null;
+  const response = await fetch(`${TMDB_PROXY}/recommend`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      entries: recommendationEntries(),
+      userId: currentUserId.value,
+      blockedIds: [...blockedIds.value],
+      blockedMovies: [...blockedIds.value].map(tmdbId => ({ tmdb_id: tmdbId, reason: '' })),
+      excludeIds: [],
+    }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.error || `推荐接口异常 (${response.status})`);
+  return data.movies === null ? null : (data.movies || []);
+}
+
 function isRated(movie: TmdbMedia): boolean {
   return ratedTmdbIds.value.has(`tmdb_${tmdbId(movie)}`);
 }
@@ -197,14 +228,14 @@ async function loadActiveTab(): Promise<void> {
       if (activeTab.value === 'recommend') result = await bridge.discover.loadRecommendations?.();
       else if (activeTab.value === 'week') result = await bridge.discover.loadTrending?.();
       else result = await bridge.discover.loadTopRated?.();
+    } else if (activeTab.value === 'recommend') {
+      result = await loadRecommendationsDirect();
     } else if (activeTab.value === 'week' || activeTab.value === 'toprated') {
       const endpoint = activeTab.value === 'week' ? 'trending' : 'toprated';
       const response = await fetch(`${TMDB_PROXY}/${endpoint}`);
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || `接口异常 (${response.status})`);
       result = data.results || [];
-    } else {
-      result = ratedCount.value >= 25 ? [] : null;
     }
     if (seq !== loadSeq) return;
     movies.value = result === null ? null : (Array.isArray(result) ? result as TmdbMedia[] : []);
@@ -242,7 +273,9 @@ async function refreshRecommendations(): Promise<void> {
   loading.value = true;
   errorMessage.value = '';
   try {
-    const result = await bridge?.discover?.refreshRecommendations?.();
+    const result = bridge?.discover?.refreshRecommendations
+      ? await bridge.discover.refreshRecommendations()
+      : await loadRecommendationsDirect();
     movies.value = result === null ? null : (Array.isArray(result) ? result as TmdbMedia[] : []);
     applyControls(asControls(bridge?.discover?.getControls?.()));
   } catch (error) {
@@ -254,19 +287,64 @@ async function refreshRecommendations(): Promise<void> {
 }
 
 function rateMovie(movie: TmdbMedia): void {
-  getLegacyBridge()?.ratings?.openQuickRate?.({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) });
+  if (!window.FilmNoteVueRatings?.openQuickRate?.({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) })) {
+    getLegacyBridge()?.ratings?.openQuickRate?.({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) });
+  }
 }
 
 async function toggleWatch(movie: TmdbMedia): Promise<void> {
-  await getLegacyBridge()?.list?.toggleWatchlist?.(tmdbId(movie), { ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) });
+  const bridge = getLegacyBridge();
+  const normalized = { ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) };
+  if (bridge?.list?.toggleWatchlist) {
+    await bridge.list.toggleWatchlist(tmdbId(movie), normalized);
+  } else if (currentUserId.value) {
+    if (watchlistIds.value.has(listKey(normalized))) {
+      await removeWatchlistItem(currentUserId.value, mediaType(movie), tmdbId(movie));
+    } else {
+      await addWatchlistItem({
+        user_id: currentUserId.value,
+        media_type: mediaType(movie),
+        tmdb_id: tmdbId(movie),
+        title: titleOf(movie),
+        year: Number(yearOf(movie)) || null,
+        poster_path: movie.poster_path || '',
+        release_date: movie.release_date || movie.first_air_date || '',
+      });
+    }
+  }
+  await refreshVueData();
 }
 
 async function addNext(movie: TmdbMedia): Promise<void> {
-  await getLegacyBridge()?.couple?.addToCoupleQueue?.({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) });
+  const bridge = getLegacyBridge();
+  const normalized = { ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) };
+  if (bridge?.couple?.addToCoupleQueue) {
+    await bridge.couple.addToCoupleQueue(normalized);
+  } else if (currentUserId.value && couple.activeCouple && !queueIds.value.has(listKey(normalized))) {
+    const maxPosition = couple.queue.reduce((max, item) => Math.max(max, Number(item.position || 0)), 0);
+    await addCoupleQueueItem({
+      couple_id: couple.activeCouple.id,
+      media_type: mediaType(movie),
+      tmdb_id: tmdbId(movie),
+      title: titleOf(movie),
+      year: Number(yearOf(movie)) || null,
+      poster_path: movie.poster_path || '',
+      position: maxPosition + 1,
+      added_by: currentUserId.value,
+    });
+  }
+  await refreshVueData();
 }
 
 async function block(movie: TmdbMedia): Promise<void> {
-  await getLegacyBridge()?.discover?.blockMovie?.(tmdbId(movie));
+  const bridge = getLegacyBridge();
+  if (bridge?.discover?.blockMovie) {
+    await bridge.discover.blockMovie(tmdbId(movie));
+  } else if (currentUserId.value) {
+    await addBlockedMovie({ user_id: currentUserId.value, tmdb_id: tmdbId(movie), reason: '' });
+  }
+  await refreshVueData();
+  movies.value = (movies.value || []).filter(item => tmdbId(item) !== tmdbId(movie));
 }
 
 async function openDetail(movie: TmdbMedia): Promise<void> {

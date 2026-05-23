@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { removeCoupleQueueItem, updateCoupleQueueItem } from '../../api/couple-api.js';
+import { refreshVueData } from '../../app/data-sync.js';
 import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
 import { DIM_LABELS, TMDB_IMG, TMDB_PROXY, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
@@ -360,11 +362,24 @@ async function moveQueue(item: CoupleQueueItem, direction: number): Promise<void
   if (index < 0 || nextIndex < 0 || nextIndex >= couple.queue.length) return;
   const next = [...couple.queue];
   [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
-  couple.setQueue(next);
+  const normalized = next.map((row, rowIndex) => ({ ...row, position: rowIndex + 1 }));
+  couple.setQueue(normalized);
+  await Promise.all([
+    updateCoupleQueueItem(normalized[index].id, { position: normalized[index].position }),
+    updateCoupleQueueItem(normalized[nextIndex].id, { position: normalized[nextIndex].position }),
+  ]);
+  await refreshVueData();
 }
 
 async function removeQueue(item: CoupleQueueItem): Promise<void> {
-  await getLegacyBridge()?.couple?.removeQueueItem?.(item.id);
+  const bridge = getLegacyBridge();
+  if (bridge?.couple?.removeQueueItem) {
+    await bridge.couple.removeQueueItem(item.id);
+  } else {
+    couple.setQueue(couple.queue.filter(row => String(row.id) !== String(item.id)));
+    await removeCoupleQueueItem(item.id);
+  }
+  await refreshVueData();
 }
 
 function rateQueue(item: CoupleQueueItem): void {

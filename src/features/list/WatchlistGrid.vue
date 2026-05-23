@@ -62,7 +62,9 @@ async function removeItem(item: WatchlistItem): Promise<void> {
 }
 
 async function showDetail(item: WatchlistItem): Promise<void> {
-  await getLegacyBridge()?.list?.showListItemDetail?.(item);
+  if (!window.FilmNoteVueMediaDetail?.openListItem?.(item)) {
+    await getLegacyBridge()?.list?.showListItemDetail?.(item);
+  }
 }
 
 function changePage(nextPage: number): void {

@@ -345,7 +345,9 @@ async function addNext(movie: TmdbMedia): Promise<void> {
 }
 
 async function openRecommendation(movie: TmdbMedia): Promise<void> {
-  await getLegacyBridge()?.discover?.showMovieDetail?.(tmdbId(movie));
+  if (!window.FilmNoteVueMediaDetail?.openMovie?.({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie.media_type || movie.type) })) {
+    await getLegacyBridge()?.discover?.showMovieDetail?.(tmdbId(movie));
+  }
 }
 
 function averageDims(source: Entry[]): Record<RatingDim, number> {

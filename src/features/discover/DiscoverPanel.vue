@@ -262,7 +262,9 @@ async function block(movie: TmdbMedia): Promise<void> {
 
 async function openDetail(movie: TmdbMedia): Promise<void> {
   if (!tmdbId(movie)) return;
-  await getLegacyBridge()?.discover?.showMovieDetail?.(tmdbId(movie));
+  if (!window.FilmNoteVueMediaDetail?.openMovie?.({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) })) {
+    await getLegacyBridge()?.discover?.showMovieDetail?.(tmdbId(movie));
+  }
 }
 
 function onControls(event: Event): void {

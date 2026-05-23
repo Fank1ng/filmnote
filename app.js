@@ -6212,6 +6212,7 @@ window.FilmNoteLegacy = {
     renderList,
     showDetail,
     locateAndGoToList,
+    addToWatchlist,
   },
   stats: {
     renderStats,
@@ -6226,6 +6227,7 @@ window.FilmNoteLegacy = {
     renderCouple,
     loadCoupleState,
     loadCoupleQueue,
+    addToCoupleQueue,
   },
   importExport: {
     exportJson() { $['exportBtn']?.click(); },

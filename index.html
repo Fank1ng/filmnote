@@ -131,19 +131,20 @@
   <main>
     <!-- ═══ 搜索 ═══ -->
     <section class="tab-panel active" id="panel-rate">
-      <h2 class="section-title" id="formTitle">搜索并确认</h2>
+      <div id="filmnoteVueRatingsSearch"></div>
+      <h2 class="section-title" id="formTitle" hidden>搜索并确认</h2>
 
-      <div class="type-toggle" id="typeToggle">
+      <div class="type-toggle" id="typeToggle" hidden>
         <button class="active" data-type="movie">🎬 电影</button>
         <button data-type="series">📺 剧集</button>
       </div>
 
-      <div class="search-wrap">
+      <div class="search-wrap" hidden>
         <input type="text" id="tmdbSearch" placeholder="🔍 搜索电影或剧集，选择后添加评价或加入清单...">
         <div class="search-results" id="searchResults"></div>
       </div>
 
-      <div class="selected-search-preview" id="selectedSearchPreview">
+      <div class="selected-search-preview" id="selectedSearchPreview" hidden>
         <div class="selected-search-empty" id="selectedSearchEmpty">搜索并选择一部电影或剧集后确认信息</div>
         <div class="selected-search-card hidden" id="selectedSearchCard">
           <div class="selected-poster" id="selectedSearchPoster"></div>
@@ -167,7 +168,7 @@
         </div>
       </div>
 
-      <form id="movieForm" autocomplete="off" class="hidden">
+      <form id="movieForm" autocomplete="off" class="hidden" hidden>
         <input type="hidden" id="editId">
         <input type="hidden" id="tmdbId">
         <input type="hidden" id="posterPath">

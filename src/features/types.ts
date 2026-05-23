@@ -38,6 +38,7 @@ export type LegacyBridge = {
     renderList?: () => void;
     showDetail?: (id: string | number) => Promise<void>;
     locateAndGoToList?: (id: string | number) => void;
+    addToWatchlist?: (movie: unknown) => Promise<void>;
   };
   stats?: {
     renderStats?: () => void;
@@ -52,6 +53,7 @@ export type LegacyBridge = {
     renderCouple?: () => void;
     loadCoupleState?: () => Promise<void>;
     loadCoupleQueue?: () => Promise<void>;
+    addToCoupleQueue?: (movie: unknown) => Promise<void>;
   };
   importExport?: {
     exportJson?: () => void;

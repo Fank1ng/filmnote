@@ -117,6 +117,11 @@
     cursor: pointer; transition: var(--t); border-bottom: 1px solid var(--border);
     border-left: 3px solid transparent;
   }
+  .vue-sr-item {
+    width: 100%; border-top: 0; border-right: 0; border-bottom: 1px solid var(--border);
+    background: transparent; color: inherit; text-align: left; font: inherit;
+  }
+  .search-message { padding: 12px 14px; color: var(--text2); font-size: 0.85rem; }
   .sr-item:hover { background: rgba(255,255,255,0.04); }
   .sr-item.selected { background: rgba(212,168,83,0.12); border-left-color: var(--gold); }
   .sr-item:last-child { border-bottom: none; }

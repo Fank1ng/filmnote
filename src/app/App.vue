@@ -4,7 +4,7 @@ import FeatureArchitectureRoot from './FeatureArchitectureRoot.vue';
 import { requireLegacyBridge, switchLegacyTab } from './legacy-bridge.js';
 import { installLegacyStateSync } from './legacy-state-sync.js';
 import { AccountModals, AuthOverlay } from '../features/auth/index.js';
-import { QuickRateModal } from '../features/ratings/index.js';
+import { QuickRateModal, RatingsSearchPanel } from '../features/ratings/index.js';
 import { AppHeader, AppToast, ImportExportToolbar, TabShell } from '../shared/components/index.js';
 import { mainTabs, type MainTab, useUiStore } from '../stores/ui.js';
 
@@ -61,6 +61,9 @@ onUnmounted(() => {
       @export-json="requireLegacyBridge().importExport?.exportJson?.()"
       @import-json="requireLegacyBridge().importExport?.importJson?.()"
     />
+  </Teleport>
+  <Teleport to="#filmnoteVueRatingsSearch">
+    <RatingsSearchPanel />
   </Teleport>
   <AppToast :message="ui.toastMessage" :open="ui.toastOpen" />
   <AccountModals />

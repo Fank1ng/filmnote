@@ -60,7 +60,9 @@ export type WatchlistItem = {
   media_type: MediaType;
   tmdb_id: number;
   title?: string;
+  year?: number | null;
   poster_path?: string;
+  release_date?: string;
   created_at?: string;
 };
 

@@ -34,7 +34,7 @@ Auth is partially migrated: login, register, password reset, recovery password, 
 
 Ratings is partially migrated: the search panel and Quick Rate add/edit are now Vue-rendered. Search uses typed TMDB API helpers, selected-result actions call Vue Quick Rate and legacy list/Couple adapters, and Quick Rate writes through typed entry API helpers. Legacy `openQuickRate` / `openQuickEdit` first delegate to `window.FilmNoteVueRatings`, then fall back to the old modal if Vue is unavailable. The old full search form and detail-entry edit flows are still legacy-backed and hidden for compatibility.
 
-List is partially migrated: the visible list mode tabs, media subtabs, search, sort, owner, score filters, and entries card list are now Vue-rendered. Vue writes control changes through the legacy list adapter and uses Pinia entries/profiles/season ratings for card rendering. Detail, edit, delete, add-my-rating actions, legacy pagination state, and the watchlist grid still call the legacy adapter while their surfaces are migrated.
+List is partially migrated: the visible list mode tabs, media subtabs, search, sort, owner, score filters, entries card list, and watchlist grid are now Vue-rendered. Vue writes control changes through the legacy list adapter and uses Pinia entries/profiles/season ratings/watchlist state for rendering. Detail, edit, delete, add-my-rating, watchlist removal, and list-item detail actions still call the legacy adapter while those behaviors are migrated.
 
 ## Module Direction
 

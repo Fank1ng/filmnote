@@ -1,6 +1,7 @@
 export { default as ListFeature } from './ListFeature.vue';
 export { default as ListBody } from './ListBody.vue';
 export { default as ListControls } from './ListControls.vue';
+export { default as WatchlistGrid } from './WatchlistGrid.vue';
 export { listFeature, renderList, showDetail, showList } from './feature.js';
 
 export function initListFeature() {

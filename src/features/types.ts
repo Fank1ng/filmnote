@@ -66,6 +66,7 @@ export type LegacyBridge = {
     renderCouple?: () => void;
     loadCoupleState?: () => Promise<void>;
     loadCoupleQueue?: () => Promise<void>;
+    loadCoupleRecommendations?: (force?: boolean) => Promise<unknown>;
     addToCoupleQueue?: (movie: unknown) => Promise<void>;
     getControls?: () => unknown;
     updateControls?: (patch: unknown) => void;

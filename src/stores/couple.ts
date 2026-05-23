@@ -7,6 +7,7 @@ type CoupleState = {
   partnerProfileId: string | null;
   queue: CoupleQueueItem[];
   recommendations: TmdbMedia[];
+  recommendationState: string;
   loading: boolean;
 };
 
@@ -17,6 +18,7 @@ export const useCoupleStore = defineStore('couple', {
     partnerProfileId: null,
     queue: [],
     recommendations: [],
+    recommendationState: 'idle',
     loading: false,
   }),
   actions: {
@@ -34,6 +36,9 @@ export const useCoupleStore = defineStore('couple', {
     },
     setRecommendations(recommendations: TmdbMedia[]) {
       this.recommendations = recommendations;
+    },
+    setRecommendationState(recommendationState: string) {
+      this.recommendationState = recommendationState;
     },
     setLoading(loading: boolean) {
       this.loading = loading;

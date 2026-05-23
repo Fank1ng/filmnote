@@ -6,8 +6,9 @@ import EmptyState from '../../shared/components/EmptyState.vue';
 import { getEntryScore } from '../../shared/scoring.js';
 import { useCoupleStore } from '../../stores/couple.js';
 import { useEntriesStore } from '../../stores/entries.js';
+import { useListsStore } from '../../stores/lists.js';
 import { useSessionStore } from '../../stores/session.js';
-import type { Couple, CoupleQueueItem, MediaType, Profile } from '../../types/domain.js';
+import type { Couple, CoupleQueueItem, MediaType, Profile, TmdbMedia } from '../../types/domain.js';
 
 defineOptions({ name: 'CouplePanel' });
 
@@ -25,6 +26,7 @@ type UserColor = {
 
 const couple = useCoupleStore();
 const entries = useEntriesStore();
+const lists = useListsStore();
 const session = useSessionStore();
 
 const tab = ref<CoupleTab>('archive');
@@ -45,6 +47,8 @@ const partnerProfile = computed<Profile | null>(() => partnerId.value ? entries.
 const partnerName = computed(() => partnerProfile.value?.display_name || '对方');
 const myColor = computed(() => userColor(currentUserId.value));
 const partnerColor = computed(() => userColor(partnerId.value));
+const watchlistIds = computed(() => lists.watchlistIds);
+const queueIds = computed(() => new Set(couple.queue.map(item => `${mediaType(item.media_type)}:${item.tmdb_id}`)));
 const pendingReceived = computed(() => couple.pendingCouples.filter(item => item.requested_by !== currentUserId.value));
 const pendingSent = computed(() => couple.pendingCouples.filter(item => item.requested_by === currentUserId.value));
 const unavailableUserIds = computed(() => {
@@ -100,6 +104,7 @@ const disconnectByMe = computed(() => !!disconnectRequester.value && disconnectR
 const disconnectByPartner = computed(() => !!disconnectRequester.value && !disconnectByMe.value);
 const disconnectText = computed(() => disconnectByMe.value ? '撤销解除申请' : (disconnectByPartner.value ? '同意解除 Couple' : '申请解除 Couple'));
 const disconnectClass = computed(() => disconnectByPartner.value ? 'btn-primary' : (disconnectByMe.value ? 'btn-secondary' : 'btn-danger'));
+const recommendationLoading = computed(() => couple.loading || couple.recommendationState === 'loading');
 
 function asControls(input: unknown): CoupleControls {
   return (input || {}) as CoupleControls;
@@ -121,6 +126,18 @@ function mediaType(value: unknown): MediaType {
 
 function mediaTypeLabel(value: unknown): string {
   return mediaType(value) === 'series' ? '剧集' : '电影';
+}
+
+function tmdbId(movie: Partial<TmdbMedia>): number {
+  return Number(movie.id || movie.tmdb_id || 0);
+}
+
+function movieTitle(movie: TmdbMedia): string {
+  return movie.title || movie.name || `TMDB #${tmdbId(movie)}`;
+}
+
+function movieYear(movie: TmdbMedia): string {
+  return String(movie.year || movie.release_date || movie.first_air_date || '').slice(0, 4) || '未知';
 }
 
 function posterUrl(path: string | null | undefined): string {
@@ -145,6 +162,11 @@ function otherUserId(item: Couple): string {
 function setTab(nextTab: CoupleTab): void {
   tab.value = nextTab;
   getLegacyBridge()?.couple?.updateControls?.({ tab: nextTab });
+  if (nextTab === 'recommend' && couple.recommendationState === 'idle') void loadRecommendations(false);
+}
+
+async function loadRecommendations(force = false): Promise<void> {
+  await getLegacyBridge()?.couple?.loadCoupleRecommendations?.(force);
 }
 
 async function bindUser(userId: string): Promise<void> {
@@ -174,6 +196,31 @@ function rateQueue(item: CoupleQueueItem): void {
 
 async function openQueue(item: CoupleQueueItem): Promise<void> {
   await getLegacyBridge()?.couple?.showQueueItemDetail?.(item.id);
+}
+
+function listKey(movie: TmdbMedia): string {
+  return `${mediaType(movie.media_type || movie.type)}:${tmdbId(movie)}`;
+}
+
+function isRated(movie: TmdbMedia): boolean {
+  const id = tmdbId(movie);
+  return entries.entries.some(entry => entry.user_id === currentUserId.value && Number(entry.tmdb_id) === id && mediaType(entry.type || entry.media_type) === mediaType(movie.media_type || movie.type));
+}
+
+function rateMovie(movie: TmdbMedia): void {
+  getLegacyBridge()?.ratings?.openQuickRate?.({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie.media_type || movie.type) });
+}
+
+async function toggleWatch(movie: TmdbMedia): Promise<void> {
+  await getLegacyBridge()?.list?.toggleWatchlist?.(tmdbId(movie), { ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie.media_type || movie.type) });
+}
+
+async function addNext(movie: TmdbMedia): Promise<void> {
+  await getLegacyBridge()?.couple?.addToCoupleQueue?.({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie.media_type || movie.type) });
+}
+
+async function openRecommendation(movie: TmdbMedia): Promise<void> {
+  await getLegacyBridge()?.discover?.showMovieDetail?.(tmdbId(movie));
 }
 
 function ratingState(item: CoupleQueueItem): string {
@@ -272,8 +319,58 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-else-if="tab === 'recommend'" class="couple-section">
-        <div class="couple-section-title">双人推荐</div>
-        <EmptyState title="双人推荐卡片迁移中" detail="推荐数据和卡片动作下一步会从 legacy renderer 迁到 Vue。" />
+        <div class="couple-section-head">
+          <div class="couple-section-title">双人推荐</div>
+          <button class="btn btn-xs btn-secondary" type="button" :disabled="recommendationLoading" @click="loadRecommendations(true)">换一批</button>
+        </div>
+        <div v-if="recommendationLoading" class="discover-spinner"><div class="spinner"></div></div>
+        <EmptyState v-else-if="couple.recommendationState === 'insufficient'" title="双方各评价 5 部、合计 25 部电影后生成双人推荐" />
+        <EmptyState v-else-if="couple.recommendationState === 'error'" title="双人推荐加载失败" detail="稍后可再换一批。" />
+        <div v-else-if="couple.recommendations.length" class="discover-grid">
+          <article
+            v-for="movie in couple.recommendations.slice(0, 8)"
+            :key="tmdbId(movie)"
+            class="discover-card"
+            :data-tmdb-id="tmdbId(movie)"
+            :data-media-type="mediaType(movie.media_type || movie.type)"
+            @click="openRecommendation(movie)"
+          >
+            <div class="dc-poster-wrap">
+              <img v-if="posterUrl(movie.poster_path)" :src="posterUrl(movie.poster_path)" :alt="movieTitle(movie)" loading="lazy">
+              <div v-else class="dc-no-poster">🎬</div>
+              <span v-if="movie.vote_average" class="dc-tmdb-score">⭐ {{ Number(movie.vote_average).toFixed(1) }}</span>
+            </div>
+            <div class="dc-info">
+              <div class="dc-title">{{ movieTitle(movie) }}</div>
+              <div class="dc-meta">{{ movieYear(movie) }}{{ movie.original_language ? ` · ${movie.original_language.toUpperCase()}` : '' }}</div>
+              <div class="dc-action" @click.stop>
+                <div v-if="isRated(movie)" class="dc-rated-badge">已评价 ✓</div>
+                <div v-else class="dc-action-row">
+                  <button class="btn btn-sm btn-secondary dc-rate-btn" type="button" @click="rateMovie(movie)">＋我的评分</button>
+                  <button
+                    class="btn btn-xs dc-watch-btn"
+                    type="button"
+                    :class="{ active: watchlistIds.has(listKey(movie)) }"
+                    :title="watchlistIds.has(listKey(movie)) ? '移出想看' : '加入想看'"
+                    @click="toggleWatch(movie)"
+                  >
+                    {{ watchlistIds.has(listKey(movie)) ? '★' : '☆' }}
+                  </button>
+                  <button
+                    class="btn btn-xs dc-next-btn"
+                    type="button"
+                    :class="{ active: queueIds.has(listKey(movie)) }"
+                    :title="queueIds.has(listKey(movie)) ? '已在下次看' : '加入下次看'"
+                    @click="addNext(movie)"
+                  >
+                    ▶
+                  </button>
+                </div>
+              </div>
+            </div>
+          </article>
+        </div>
+        <EmptyState v-else title="暂时没有可用的双人推荐" />
       </div>
 
       <div v-else class="couple-section">

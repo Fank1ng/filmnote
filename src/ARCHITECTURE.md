@@ -40,7 +40,7 @@ Stats is partially migrated: the visible media type, scope tabs, comparison user
 
 Discover is partially migrated: the visible recommendation tabs, top bars, movie cards, Top Rated pagination, watchlist/next-watch/rating/block actions, and recommendation refresh UI are now Vue-rendered. Vue still calls the legacy discover adapter for recommendation/trending/top-rated data loading and detail/block actions until those API paths move into `src/api`.
 
-Couple is partially migrated: binding management, pending requests, relationship header, Couple subtabs, archive summary metrics, and the next-watch queue are now Vue-rendered. Vue uses the legacy Couple adapter for database mutations, queue movement/removal, queue rating/detail actions, and disconnect/confirm flows while the richer archive chart and double-recommendation cards are migrated.
+Couple is partially migrated: binding management, pending requests, relationship header, Couple subtabs, archive summary metrics, double-recommendation cards, and the next-watch queue are now Vue-rendered. Vue uses the legacy Couple adapter for database mutations, recommendation loading, queue movement/removal, queue rating/detail actions, and disconnect/confirm flows while the richer archive chart is migrated.
 
 ## Module Direction
 

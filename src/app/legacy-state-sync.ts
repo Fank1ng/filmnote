@@ -39,6 +39,9 @@ function applyLegacyState(state: Partial<AppState>): void {
   if (state.pendingCouples) couple.setPendingCouples(state.pendingCouples);
   if (state.coupleQueue) couple.setQueue(state.coupleQueue);
   if ('couplePartner' in state) couple.setPartnerProfileId(state.couplePartner?.user_id ?? null);
+  if (state.coupleRecommendations) couple.setRecommendations(state.coupleRecommendations);
+  if (state.coupleRecommendationState) couple.setRecommendationState(state.coupleRecommendationState);
+  if ('coupleRecommendationLoading' in state) couple.setLoading(!!state.coupleRecommendationLoading);
   if (isMainTab(state.activeTab)) ui.setActiveTab(state.activeTab);
 }
 

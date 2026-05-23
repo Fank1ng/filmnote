@@ -288,6 +288,9 @@ function getLegacyStateSnapshot() {
     pendingCouples,
     couplePartner,
     coupleQueue,
+    coupleRecommendations: coupleRecommendations || [],
+    coupleRecommendationState,
+    coupleRecommendationLoading,
     watchlist,
     blockedMovies,
     activeTab: getActiveTab()
@@ -5075,6 +5078,7 @@ async function loadCoupleRecommendations(force = false) {
   if (!force && (coupleRecommendationState === 'ready' || coupleRecommendationState === 'insufficient' || coupleRecommendationState === 'error')) return;
   coupleRecommendationLoading = true;
   coupleRecommendationState = 'loading';
+  syncLegacyState('couple-recommendations-loading');
   try {
     const partnerId = getCouplePartnerId();
     const res = await fetch(TMDB_PROXY + '/recommend', {
@@ -5109,7 +5113,10 @@ async function loadCoupleRecommendations(force = false) {
     toast('双人推荐失败: ' + (e.message || e));
   } finally {
     coupleRecommendationLoading = false;
+    syncLegacyState('couple-recommendations-loaded');
+    notifyCoupleControlsChanged();
   }
+  return coupleRecommendations;
 }
 
 function renderCoupleRecommendationsHTML() {
@@ -6438,6 +6445,7 @@ window.FilmNoteLegacy = {
     loadCoupleState,
     loadCoupleQueue,
     addToCoupleQueue,
+    loadCoupleRecommendations,
     getControls: getCoupleControlsSnapshot,
     updateControls: updateCoupleControls,
     bindCoupleWith,

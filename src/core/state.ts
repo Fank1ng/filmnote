@@ -1,4 +1,4 @@
-import type { BlockedMovie, Couple, CoupleQueueItem, Entry, Profile, SeasonRating, WatchlistItem } from '../types/domain.js';
+import type { BlockedMovie, Couple, CoupleQueueItem, Entry, Profile, SeasonRating, TmdbMedia, WatchlistItem } from '../types/domain.js';
 
 export type AppState = {
   currentUser: unknown;
@@ -10,6 +10,9 @@ export type AppState = {
   pendingCouples: Couple[];
   couplePartner: Profile | null;
   coupleQueue: CoupleQueueItem[];
+  coupleRecommendations: TmdbMedia[];
+  coupleRecommendationState: string;
+  coupleRecommendationLoading: boolean;
   watchlist: WatchlistItem[];
   blockedMovies: BlockedMovie[];
   activeTab: string;
@@ -25,6 +28,9 @@ const state = {
   pendingCouples: [],
   couplePartner: null,
   coupleQueue: [],
+  coupleRecommendations: [],
+  coupleRecommendationState: 'idle',
+  coupleRecommendationLoading: false,
   watchlist: [],
   blockedMovies: [],
   activeTab: 'rate',

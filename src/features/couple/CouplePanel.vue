@@ -6,11 +6,13 @@ import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
 import { getCurrentUserId } from '../../app/user-context.js';
 import { DIM_LABELS, TMDB_IMG, TMDB_PROXY, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
+import { useMediaActions } from '../../shared/composables/useMediaActions.js';
 import { getEntryScore } from '../../shared/scoring.js';
 import { useCoupleStore } from '../../stores/couple.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useListsStore } from '../../stores/lists.js';
 import { useSessionStore } from '../../stores/session.js';
+import { useUiStore } from '../../stores/ui.js';
 import type { Couple, CoupleQueueItem, Entry, MediaType, Profile, TmdbMedia } from '../../types/domain.js';
 
 defineOptions({ name: 'CouplePanel' });
@@ -63,6 +65,8 @@ const couple = useCoupleStore();
 const entries = useEntriesStore();
 const lists = useListsStore();
 const session = useSessionStore();
+const mediaActions = useMediaActions();
+const ui = useUiStore();
 
 const tab = ref<CoupleTab>('archive');
 const search = ref('');
@@ -283,21 +287,14 @@ function otherUserId(item: Couple): string {
 
 function setTab(nextTab: CoupleTab): void {
   tab.value = nextTab;
-  getLegacyBridge()?.couple?.updateControls?.({ tab: nextTab });
   if (nextTab === 'recommend' && couple.recommendationState === 'idle') void loadRecommendations(false);
 }
 
 function setChartMode(nextMode: 'score' | 'type'): void {
   chartMode.value = nextMode;
-  getLegacyBridge()?.couple?.updateControls?.({ archiveChart: nextMode });
 }
 
 async function loadRecommendations(force = false): Promise<void> {
-  const bridge = getLegacyBridge();
-  if (bridge?.couple?.loadCoupleRecommendations) {
-    await bridge.couple.loadCoupleRecommendations(force);
-    return;
-  }
   if (!activeCouple.value || !currentUserId.value || recommendationLoading.value) return;
   couple.setLoading(true);
   couple.setRecommendationState('loading');
@@ -318,7 +315,10 @@ async function loadRecommendations(force = false): Promise<void> {
         partnerUserId: partnerId.value,
         blockedIds: [...lists.blockedMovieIds],
         blockedMovies: [...lists.blockedMovieIds].map(tmdbId => ({ tmdb_id: tmdbId, reason: '' })),
-        excludeIds: couple.queue.map(item => item.tmdb_id),
+        excludeIds: [
+          ...couple.queue.map(item => Number(item.tmdb_id || 0)),
+          ...(force ? couple.recommendations.map(item => tmdbId(item)) : []),
+        ].filter(Boolean),
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -330,9 +330,10 @@ async function loadRecommendations(force = false): Promise<void> {
       couple.setRecommendations((data.movies || []).map((movie: TmdbMedia) => ({ ...movie, media_type: 'movie' })));
       couple.setRecommendationState('ready');
     }
-  } catch {
+  } catch (error) {
     couple.setRecommendations([]);
     couple.setRecommendationState('error');
+    ui.showToast(`双人推荐加载失败: ${error instanceof Error ? error.message : String(error)}`);
   } finally {
     couple.setLoading(false);
   }
@@ -352,11 +353,6 @@ async function disconnect(coupleId: string | number): Promise<void> {
 }
 
 async function moveQueue(item: CoupleQueueItem, direction: number): Promise<void> {
-  const bridge = getLegacyBridge();
-  if (bridge?.couple?.moveQueueItem) {
-    await bridge.couple.moveQueueItem(item.id, direction);
-    return;
-  }
   const index = couple.queue.findIndex(row => String(row.id) === String(item.id));
   const nextIndex = index + direction;
   if (index < 0 || nextIndex < 0 || nextIndex >= couple.queue.length) return;
@@ -364,26 +360,32 @@ async function moveQueue(item: CoupleQueueItem, direction: number): Promise<void
   [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
   const normalized = next.map((row, rowIndex) => ({ ...row, position: rowIndex + 1 }));
   couple.setQueue(normalized);
-  await Promise.all([
-    updateCoupleQueueItem(normalized[index].id, { position: normalized[index].position }),
-    updateCoupleQueueItem(normalized[nextIndex].id, { position: normalized[nextIndex].position }),
-  ]);
-  await refreshVueData();
+  try {
+    await Promise.all([
+      updateCoupleQueueItem(normalized[index].id, { position: normalized[index].position }),
+      updateCoupleQueueItem(normalized[nextIndex].id, { position: normalized[nextIndex].position }),
+    ]);
+    await refreshVueData();
+  } catch (error) {
+    ui.showToast(`调整顺序失败: ${error instanceof Error ? error.message : String(error)}`);
+    await refreshVueData();
+  }
 }
 
 async function removeQueue(item: CoupleQueueItem): Promise<void> {
-  const bridge = getLegacyBridge();
-  if (bridge?.couple?.removeQueueItem) {
-    await bridge.couple.removeQueueItem(item.id);
-  } else {
+  try {
     couple.setQueue(couple.queue.filter(row => String(row.id) !== String(item.id)));
-    await removeCoupleQueueItem(item.id);
+    const { error } = await removeCoupleQueueItem(item.id);
+    if (error) throw error;
+    ui.showToast('已从下次看移除');
+  } catch (error) {
+    ui.showToast(`移除失败: ${error instanceof Error ? error.message : String(error)}`);
   }
   await refreshVueData();
 }
 
 function rateQueue(item: CoupleQueueItem): void {
-  if (!window.FilmNoteVueRatings?.openQuickRate?.({
+  mediaActions.rateMedia({
     id: item.tmdb_id,
     tmdb_id: item.tmdb_id,
     media_type: mediaType(item.media_type),
@@ -391,15 +393,11 @@ function rateQueue(item: CoupleQueueItem): void {
     title: item.title || `TMDB #${item.tmdb_id}`,
     year: item.year || null,
     poster_path: item.poster_path || '',
-  })) {
-    getLegacyBridge()?.couple?.rateQueueItem?.(item.id);
-  }
+  });
 }
 
 async function openQueue(item: CoupleQueueItem): Promise<void> {
-  if (!window.FilmNoteVueMediaDetail?.openListItem?.(item)) {
-    await getLegacyBridge()?.couple?.showQueueItemDetail?.(item.id);
-  }
+  mediaActions.openMediaDetail(item);
 }
 
 function listKey(movie: TmdbMedia): string {
@@ -412,21 +410,19 @@ function isRated(movie: TmdbMedia): boolean {
 }
 
 function rateMovie(movie: TmdbMedia): void {
-  getLegacyBridge()?.ratings?.openQuickRate?.({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie.media_type || movie.type) });
+  mediaActions.rateMedia({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie.media_type || movie.type) });
 }
 
 async function toggleWatch(movie: TmdbMedia): Promise<void> {
-  await getLegacyBridge()?.list?.toggleWatchlist?.(tmdbId(movie), { ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie.media_type || movie.type) });
+  await mediaActions.toggleWatchlist({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie.media_type || movie.type) });
 }
 
 async function addNext(movie: TmdbMedia): Promise<void> {
-  await getLegacyBridge()?.couple?.addToCoupleQueue?.({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie.media_type || movie.type) });
+  await mediaActions.addToNextWatch({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie.media_type || movie.type) });
 }
 
 async function openRecommendation(movie: TmdbMedia): Promise<void> {
-  if (!window.FilmNoteVueMediaDetail?.openMovie?.({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie.media_type || movie.type) })) {
-    await getLegacyBridge()?.discover?.showMovieDetail?.(tmdbId(movie));
-  }
+  mediaActions.openMediaDetail({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie.media_type || movie.type) });
 }
 
 function averageDims(source: Entry[]): Record<RatingDim, number> {
@@ -785,7 +781,7 @@ onBeforeUnmount(() => {
       <div v-else-if="tab === 'recommend'" class="couple-section">
         <div class="couple-section-head">
           <div class="couple-section-title">双人推荐</div>
-          <button class="btn btn-xs btn-secondary" type="button" :disabled="recommendationLoading" @click="loadRecommendations(true)">换一批</button>
+          <button class="btn btn-xs btn-secondary" type="button" :disabled="recommendationLoading" @click.stop="loadRecommendations(true)">换一批</button>
         </div>
         <div v-if="recommendationLoading" class="discover-spinner"><div class="spinner"></div></div>
         <EmptyState v-else-if="couple.recommendationState === 'insufficient'" title="双方各评价 5 部、合计 25 部电影后生成双人推荐" />
@@ -810,13 +806,13 @@ onBeforeUnmount(() => {
               <div class="dc-action" @click.stop>
                 <div v-if="isRated(movie)" class="dc-rated-badge">已评价 ✓</div>
                 <div v-else class="dc-action-row">
-                  <button class="btn btn-sm btn-secondary dc-rate-btn" type="button" @click="rateMovie(movie)">＋我的评分</button>
+                  <button class="btn btn-sm btn-secondary dc-rate-btn" type="button" @click.stop="rateMovie(movie)">＋我的评分</button>
                   <button
                     class="btn btn-xs dc-watch-btn"
                     type="button"
                     :class="{ active: watchlistIds.has(listKey(movie)) }"
                     :title="watchlistIds.has(listKey(movie)) ? '移出想看' : '加入想看'"
-                    @click="toggleWatch(movie)"
+                    @click.stop="toggleWatch(movie)"
                   >
                     {{ watchlistIds.has(listKey(movie)) ? '★' : '☆' }}
                   </button>
@@ -825,7 +821,7 @@ onBeforeUnmount(() => {
                     type="button"
                     :class="{ active: queueIds.has(listKey(movie)) }"
                     :title="queueIds.has(listKey(movie)) ? '已在下次看' : '加入下次看'"
-                    @click="addNext(movie)"
+                    @click.stop="addNext(movie)"
                   >
                     ▶
                   </button>
@@ -857,11 +853,11 @@ onBeforeUnmount(() => {
               <span>{{ item.year || '未知' }} · {{ mediaTypeLabel(item.media_type) }} · <em :style="{ color: userColor(item.added_by || '').main }">{{ displayName(item.added_by, '未知') }}</em> 加入</span>
             </div>
             <div class="queue-actions" @click.stop>
-              <button class="btn btn-xs btn-secondary" type="button" :disabled="index === 0" @click="moveQueue(item, -1)">上移</button>
-              <button class="btn btn-xs btn-secondary" type="button" :disabled="index === couple.queue.length - 1" @click="moveQueue(item, 1)">下移</button>
+              <button class="btn btn-xs btn-secondary" type="button" :disabled="index === 0" @click.stop="moveQueue(item, -1)">上移</button>
+              <button class="btn btn-xs btn-secondary" type="button" :disabled="index === couple.queue.length - 1" @click.stop="moveQueue(item, 1)">下移</button>
               <span v-if="ratingState(item) && ratingState(item) !== '对方已评分 · 等你评分'" class="queue-rating-state">{{ ratingState(item) }}</span>
-              <button v-else class="btn btn-xs btn-secondary" type="button" @click="rateQueue(item)">评分</button>
-              <button class="btn btn-xs btn-danger" type="button" @click="removeQueue(item)">移除</button>
+              <button v-else class="btn btn-xs btn-secondary" type="button" @click.stop="rateQueue(item)">评分</button>
+              <button class="btn btn-xs btn-danger" type="button" @click.stop="removeQueue(item)">移除</button>
             </div>
           </div>
         </div>

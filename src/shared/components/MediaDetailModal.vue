@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { getLegacyBridge } from '../../app/legacy-bridge.js';
 import { getCurrentUserId } from '../../app/user-context.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useSessionStore } from '../../stores/session.js';
+import { useUiStore } from '../../stores/ui.js';
 import type { MediaType, TmdbDetail, TmdbMedia } from '../../types/domain.js';
 import { posterUrl } from '../tmdb.js';
 import {
@@ -24,6 +24,7 @@ type RatingMode = 'total' | 'season';
 
 const entries = useEntriesStore();
 const session = useSessionStore();
+const ui = useUiStore();
 const open = ref(false);
 const media = ref<TmdbMedia | null>(null);
 const detail = ref<TmdbDetail | null>(null);
@@ -131,9 +132,7 @@ function ratingPayload(mode?: RatingMode): TmdbMedia & Record<string, unknown> {
 function rate(mode?: RatingMode): void {
   const payload = ratingPayload(mode);
   close();
-  if (!window.FilmNoteVueRatings?.openQuickRate?.(payload)) {
-    getLegacyBridge()?.ratings?.openQuickRate?.(payload);
-  }
+  if (!window.FilmNoteVueRatings?.openQuickRate?.(payload)) ui.showToast('评分面板还未就绪，请刷新后重试');
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -141,6 +140,8 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 const api = { openMovie, openListItem, close };
+
+window.FilmNoteVueMediaDetail = api;
 
 onMounted(() => {
   window.FilmNoteVueMediaDetail = api;

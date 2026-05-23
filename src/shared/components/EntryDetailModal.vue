@@ -2,23 +2,36 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { deleteEntry as deleteEntryApi } from '../../api/entries-api.js';
 import { refreshVueData } from '../../app/data-sync.js';
-import { getLegacyBridge } from '../../app/legacy-bridge.js';
 import { getCurrentUserId } from '../../app/user-context.js';
 import { DIM_LABELS, WEIGHTS, type RatingDim } from '../../config/constants.js';
+import { useMediaActions } from '../composables/useMediaActions.js';
 import { getEntryScore } from '../scoring.js';
 import { posterUrl } from '../tmdb.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useSessionStore } from '../../stores/session.js';
-import type { Entry } from '../../types/domain.js';
+import { useUiStore } from '../../stores/ui.js';
+import type { Entry, SeasonRating } from '../../types/domain.js';
 import BaseModal from './BaseModal.vue';
 
 defineOptions({ name: 'EntryDetailModal' });
 
 type UserColor = { main: string; dim: string };
-type DetailCache = { overview?: string };
+type DetailCache = {
+  overview?: string;
+  seasons?: Array<Record<string, unknown>>;
+  number_of_seasons?: number;
+};
+type SeasonRecord = {
+  number: number;
+  title: string;
+  local: SeasonRating | null;
+  tmdb: Record<string, unknown> | null;
+};
 
 const entries = useEntriesStore();
 const session = useSessionStore();
+const ui = useUiStore();
+const mediaActions = useMediaActions();
 const open = ref(false);
 const entryId = ref<Entry['id'] | null>(null);
 
@@ -38,6 +51,34 @@ const friendEntries = computed(() => {
   return entries.entries.filter(item => String(item.id) !== String(target.id) && groupKey(item) === key);
 });
 const detail = computed(() => entry.value ? cachedDetail(entry.value) : null);
+const isSeries = computed(() => (entry.value?.type || entry.value?.media_type) === 'series');
+const tmdbSeasons = computed(() => (Array.isArray(detail.value?.seasons) ? detail.value?.seasons || [] : []) as Array<Record<string, unknown>>);
+const seasonRecords = computed<SeasonRecord[]>(() => {
+  const byNumber = new Map<number, SeasonRecord>();
+  entrySeasons.value.forEach(local => {
+    const number = Number(local.season_number || 0);
+    if (!number) return;
+    byNumber.set(number, {
+      number,
+      title: local.season_title || '',
+      local,
+      tmdb: null,
+    });
+  });
+  tmdbSeasons.value.forEach(tmdb => {
+    const number = Number(tmdb.season_number || 0);
+    if (!number) return;
+    const existing = byNumber.get(number);
+    const title = String(tmdb.name || tmdb.season_title || existing?.title || '');
+    byNumber.set(number, {
+      number,
+      title,
+      local: existing?.local || null,
+      tmdb,
+    });
+  });
+  return [...byNumber.values()].sort((a, b) => a.number - b.number);
+});
 
 function displayName(userId: string): string {
   return entries.profiles[userId]?.display_name || '未知';
@@ -83,13 +124,11 @@ function close(): void {
   open.value = false;
 }
 
-function editEntry(): void {
+function editEntry(opts: { targetSeasonNumber?: number; enableTargetSeason?: boolean } = {}): void {
   const target = entry.value;
   if (!target) return;
   close();
-  if (!window.FilmNoteVueRatings?.openQuickEdit?.(target.id)) {
-    getLegacyBridge()?.ratings?.openQuickEdit?.(target.id);
-  }
+  if (!window.FilmNoteVueRatings?.openQuickEdit?.(target.id, opts)) ui.showToast('评分面板还未就绪，请刷新后重试');
 }
 
 async function deleteEntry(): Promise<void> {
@@ -98,15 +137,19 @@ async function deleteEntry(): Promise<void> {
   if (!window.confirm('确定删除这条评价？此操作不可恢复。')) return;
   close();
   const { error } = await deleteEntryApi(target.id);
-  if (error) void getLegacyBridge()?.ratings?.deleteEntry?.(target.id);
+  if (error) {
+    ui.showToast(`删除失败: ${error.message || '请稍后重试'}`);
+    return;
+  }
   await refreshVueData();
+  ui.showToast('评价已删除');
 }
 
 function addMyRating(): void {
   const target = entry.value;
   if (!target) return;
   close();
-  if (!window.FilmNoteVueRatings?.openQuickRate?.({
+  mediaActions.rateMedia({
     id: target.tmdb_id,
     tmdb_id: target.tmdb_id,
     media_type: target.type || target.media_type || 'movie',
@@ -115,9 +158,19 @@ function addMyRating(): void {
     year: target.year || null,
     poster_path: target.poster_path || '',
     director: target.director || '',
-  })) {
-    getLegacyBridge()?.list?.addMyRating?.(target.id);
-  }
+  });
+}
+
+function editSeason(seasonNumber: number): void {
+  editEntry({ targetSeasonNumber: seasonNumber, enableTargetSeason: true });
+}
+
+function seasonMeta(season: SeasonRecord): string {
+  const pieces = [
+    season.tmdb?.episode_count ? `${season.tmdb.episode_count} 集` : '',
+    season.tmdb?.air_date ? String(season.tmdb.air_date).slice(0, 10) : '',
+  ].filter(Boolean);
+  return pieces.join(' · ');
 }
 
 function onKeydown(event: KeyboardEvent): void {
@@ -125,6 +178,8 @@ function onKeydown(event: KeyboardEvent): void {
 }
 
 const api = { openEntry, close };
+
+window.FilmNoteVueDetail = api;
 
 onMounted(() => {
   window.FilmNoteVueDetail = api;
@@ -153,7 +208,7 @@ onBeforeUnmount(() => {
         <img v-if="entry.poster_path" :src="posterUrl(entry.poster_path)" style="width:80px;border-radius:8px" alt="">
         <div>
           <p v-if="entry.director" style="color:var(--text2);font-size:0.85rem">{{ entry.director }}</p>
-          <p style="color:var(--text2);font-size:0.8rem">{{ ownerName }} · {{ formatDate(entry.created_at) }} <span v-if="entry.type === 'series'">· 剧集</span></p>
+          <p style="color:var(--text2);font-size:0.8rem">{{ ownerName }} · {{ formatDate(entry.created_at) }} <span v-if="isSeries">· 剧集</span></p>
           <p :style="{ color: userColor(entry.user_id).main }" style="font-size:1.8rem;font-weight:800;margin-top:4px">{{ getEntryScore(entry).toFixed(1) }} / 10</p>
         </div>
       </div>
@@ -167,14 +222,19 @@ onBeforeUnmount(() => {
 
       <p v-if="entry.comment" style="font-style:italic;color:var(--text2);margin-bottom:12px">"{{ entry.comment }}"</p>
 
-      <div v-if="entrySeasons.length" class="friend-section">
+      <div v-if="seasonRecords.length" class="friend-section">
         <h4>分季评分</h4>
-        <div v-for="season in entrySeasons" :key="season.id || season.season_number" class="friend-rating">
+        <div v-for="season in seasonRecords" :key="season.number" class="friend-rating">
           <div class="fr-header">
-            <span class="fr-name">S{{ season.season_number }} {{ season.season_title || '' }}</span>
-            <span class="fr-score">{{ getEntryScore(season).toFixed(1) }} / 10</span>
+            <span class="fr-name">S{{ season.number }} {{ season.title || '' }}</span>
+            <span v-if="season.local" class="fr-score">{{ getEntryScore(season.local).toFixed(1) }} / 10</span>
+            <span v-else-if="season.tmdb?.vote_average" class="fr-score">TMDB {{ Number(season.tmdb.vote_average).toFixed(1) }}</span>
           </div>
-          <p v-if="season.comment" style="font-size:0.8rem;color:var(--text2);font-style:italic;margin-top:4px">"{{ season.comment }}"</p>
+          <p v-if="seasonMeta(season)" style="font-size:0.78rem;color:var(--text2);margin-top:4px">{{ seasonMeta(season) }}</p>
+          <p v-if="season.local?.comment" style="font-size:0.8rem;color:var(--text2);font-style:italic;margin-top:4px">"{{ season.local.comment }}"</p>
+          <div v-if="isMine" class="btn-group" style="justify-content:flex-end;margin-top:8px">
+            <button class="btn btn-xs btn-secondary" type="button" @click="editSeason(season.number)">{{ season.local ? '编辑本季' : '评价本季' }}</button>
+          </div>
         </div>
       </div>
 
@@ -201,7 +261,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="btn-group" style="justify-content:flex-end">
-        <button v-if="isMine && entry.type !== 'series'" class="btn btn-secondary btn-sm" type="button" @click="editEntry">编辑</button>
+        <button v-if="isMine" class="btn btn-secondary btn-sm" type="button" @click="editEntry()">编辑</button>
         <button v-if="isMine" class="btn btn-danger btn-sm" type="button" @click="deleteEntry">删除</button>
         <button v-if="!isMine" class="btn btn-secondary btn-sm" type="button" @click="addMyRating">＋我的评分</button>
         <button class="btn btn-secondary btn-sm" type="button" @click="close">关闭</button>

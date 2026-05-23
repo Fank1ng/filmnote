@@ -21,6 +21,10 @@ const session = useSessionStore();
 let stopLegacyStateSync: (() => void) | null = null;
 let stopLegacyReadySync: (() => void) | null = null;
 
+window.FilmNoteVueUi = {
+  toast: (message: string) => ui.showToast(message),
+};
+
 function activateTabPanel(tab: MainTab): void {
   document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
   document.getElementById(`panel-${tab}`)?.classList.add('active');
@@ -46,9 +50,6 @@ watch(() => session.currentUser, user => {
 }, { flush: 'post' });
 
 onMounted(() => {
-  window.FilmNoteVueUi = {
-    toast: (message: string) => ui.showToast(message),
-  };
   activateTabPanel(ui.activeTab);
   stopLegacyStateSync = installLegacyStateSync();
   stopLegacyReadySync = onLegacyReady(bridge => {

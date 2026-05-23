@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { deleteEntry as deleteEntryApi } from '../../api/entries-api.js';
 import { refreshVueData } from '../../app/data-sync.js';
 import { getCurrentUser } from '../../app/user-context.js';
 import { DIM_LABELS, WEIGHTS, type RatingDim } from '../../config/constants.js';
-import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
+import { onLegacyReady } from '../../app/legacy-bridge.js';
 import { PaginationControls } from '../../shared/components/index.js';
+import { useMediaActions } from '../../shared/composables/useMediaActions.js';
 import { getEntryScore } from '../../shared/scoring.js';
 import { posterUrl } from '../../shared/tmdb.js';
 import { fetchTmdbDetail, getCachedTmdbDetail, needsTmdbDetailFetch } from '../../shared/tmdb-detail.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useSessionStore } from '../../stores/session.js';
+import { useUiStore } from '../../stores/ui.js';
 import type { Entry, MediaType, RatingDims } from '../../types/domain.js';
 
 defineOptions({ name: 'ListBody' });
@@ -61,6 +63,8 @@ const searchIndexBatchSize = 20;
 
 const entries = useEntriesStore();
 const session = useSessionStore();
+const ui = useUiStore();
+const mediaActions = useMediaActions();
 
 const mode = ref<ListMode>('entries');
 const type = ref<MediaType>('movie');
@@ -369,30 +373,26 @@ function rowActionEntry(group: EntryGroup): Entry | null {
 }
 
 function showDetail(entry: Entry): void {
-  if (!window.FilmNoteVueDetail?.openEntry?.(entry.id)) {
-    getLegacyBridge()?.list?.showDetail?.(entry.id);
-  }
+  mediaActions.openEntryDetail(entry.id);
 }
 
 function editEntry(entry: Entry): void {
-  if (!window.FilmNoteVueRatings?.openQuickEdit?.(entry.id)) {
-    getLegacyBridge()?.ratings?.openQuickEdit?.(entry.id);
-  }
+  if (!window.FilmNoteVueRatings?.openQuickEdit?.(entry.id)) ui.showToast('评分面板还未就绪，请刷新后重试');
 }
 
 async function deleteEntry(entry: Entry): Promise<void> {
   if (!window.confirm('确定删除这条评价？此操作不可恢复。')) return;
   const { error } = await deleteEntryApi(entry.id);
   if (error) {
-    getLegacyBridge()?.ratings?.deleteEntry?.(entry.id);
+    ui.showToast(`删除失败: ${error.message || '请稍后重试'}`);
     return;
   }
   await refreshVueData();
-  getLegacyBridge()?.state?.sync?.('vue-entry-deleted');
+  ui.showToast('评价已删除');
 }
 
 function addMyRating(entry: Entry): void {
-  if (!window.FilmNoteVueRatings?.openQuickRate?.({
+  mediaActions.rateMedia({
     id: entry.tmdb_id,
     tmdb_id: entry.tmdb_id,
     media_type: mediaType(entry),
@@ -401,14 +401,12 @@ function addMyRating(entry: Entry): void {
     year: entry.year || null,
     poster_path: entry.poster_path || '',
     director: entry.director || '',
-  })) {
-    getLegacyBridge()?.list?.addMyRating?.(entry.id);
-  }
+  });
 }
 
 function changePage(nextPage: number): void {
   page.value = nextPage;
-  getLegacyBridge()?.list?.updateControls?.({ page: nextPage });
+  window.dispatchEvent(new CustomEvent('filmnote:list-controls', { detail: { page: nextPage } }));
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -445,6 +443,18 @@ watch(() => entries.entries.map(entry => `${mediaType(entry)}:${entry.tmdb_id ||
   void warmDetailCache();
   void warmMediaSearchCache();
 });
+
+watch([pageGroups, () => ui.highlightEntryId], async () => {
+  const id = ui.highlightEntryId;
+  if (!id) return;
+  await nextTick();
+  const element = document.getElementById(`entry-${id}`);
+  if (!element) return;
+  element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  element.classList.add('entry-highlight');
+  window.setTimeout(() => element.classList.remove('entry-highlight'), 1800);
+  ui.clearHighlightEntry();
+}, { flush: 'post' });
 
 onBeforeUnmount(() => {
   stopLegacyReady?.();

@@ -352,6 +352,10 @@
     content-visibility: auto; contain-intrinsic-size: auto 90px;
   }
   .movie-card:hover { border-color: var(--gold); }
+  .movie-card.entry-highlight {
+    border-color: var(--gold);
+    box-shadow: 0 0 0 2px rgba(212, 168, 83, 0.35), 0 12px 32px rgba(0, 0, 0, 0.28);
+  }
   .mc-poster { width: 44px; height: 66px; border-radius: 6px; object-fit: cover; background: var(--border); flex-shrink: 0; }
   .mc-score {
     width: 52px; height: 52px; border-radius: 10px; flex-shrink: 0;

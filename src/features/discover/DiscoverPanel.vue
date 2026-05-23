@@ -1,12 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { addCoupleQueueItem } from '../../api/couple-api.js';
-import { addBlockedMovie, addWatchlistItem, removeWatchlistItem } from '../../api/list-api.js';
-import { refreshVueData } from '../../app/data-sync.js';
-import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
 import { getCurrentUserId } from '../../app/user-context.js';
 import { TMDB_IMG, TMDB_PROXY } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
+import { useMediaActions } from '../../shared/composables/useMediaActions.js';
 import { useCoupleStore } from '../../stores/couple.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useListsStore } from '../../stores/lists.js';
@@ -42,6 +39,7 @@ const entries = useEntriesStore();
 const lists = useListsStore();
 const couple = useCoupleStore();
 const session = useSessionStore();
+const mediaActions = useMediaActions();
 const activeTab = ref<DiscoverTab>('recommend');
 const pages = ref<Record<DiscoverTab, number>>({ recommend: 1, week: 1, toprated: 1 });
 const topRatedUnwatched = ref(false);
@@ -51,7 +49,6 @@ const loading = ref(false);
 const errorMessage = ref('');
 const movies = ref<TmdbMedia[] | null>([]);
 const nowTick = ref(Date.now());
-let stopLegacyReady: (() => void) | null = null;
 let loadSeq = 0;
 let timer = 0;
 
@@ -98,6 +95,7 @@ const pageMovies = computed(() => {
   return filteredMovies.value.slice(start, start + pageSize.value);
 });
 const paginationItems = computed<Array<number | '...'>>(() => {
+  if (activeTab.value !== 'toprated') return [];
   const total = totalPages.value;
   const page = currentPage.value;
   if (total <= 1) return [];
@@ -169,7 +167,7 @@ function recommendationEntries() {
   }));
 }
 
-async function loadRecommendationsDirect(): Promise<TmdbMedia[] | null> {
+async function loadRecommendationsDirect(excludeIds: number[] = []): Promise<TmdbMedia[] | null> {
   if (!currentUserId.value || ratedCount.value < 25) return null;
   const response = await fetch(`${TMDB_PROXY}/recommend`, {
     method: 'POST',
@@ -179,7 +177,7 @@ async function loadRecommendationsDirect(): Promise<TmdbMedia[] | null> {
       userId: currentUserId.value,
       blockedIds: [...blockedIds.value],
       blockedMovies: [...blockedIds.value].map(tmdbId => ({ tmdb_id: tmdbId, reason: '' })),
-      excludeIds: [],
+      excludeIds,
     }),
   });
   const data = await response.json().catch(() => ({}));
@@ -205,27 +203,13 @@ function tabLabel(tab: DiscoverTab): string {
   return tabs.find(item => item.key === tab)?.fallback || tab;
 }
 
-function syncControls(): void {
-  getLegacyBridge()?.discover?.updateControls?.({
-    tab: activeTab.value,
-    page: pages.value[activeTab.value],
-    pages: pages.value,
-    topratedFilterUnwatched: topRatedUnwatched.value,
-  });
-}
-
 async function loadActiveTab(): Promise<void> {
-  const bridge = getLegacyBridge();
   const seq = ++loadSeq;
   loading.value = true;
   errorMessage.value = '';
   try {
     let result: unknown;
-    if (bridge?.discover) {
-      if (activeTab.value === 'recommend') result = await bridge.discover.loadRecommendations?.();
-      else if (activeTab.value === 'week') result = await bridge.discover.loadTrending?.();
-      else result = await bridge.discover.loadTopRated?.();
-    } else if (activeTab.value === 'recommend') {
+    if (activeTab.value === 'recommend') {
       result = await loadRecommendationsDirect();
     } else if (activeTab.value === 'week' || activeTab.value === 'toprated') {
       const endpoint = activeTab.value === 'week' ? 'trending' : 'toprated';
@@ -248,33 +232,29 @@ async function loadActiveTab(): Promise<void> {
 async function setTab(tab: DiscoverTab): Promise<void> {
   if (activeTab.value === tab) return;
   activeTab.value = tab;
-  syncControls();
   await loadActiveTab();
 }
 
 function setPage(page: number): void {
   pages.value[activeTab.value] = Math.min(Math.max(1, page), totalPages.value);
-  syncControls();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 async function toggleTopRatedUnwatched(): Promise<void> {
   topRatedUnwatched.value = !topRatedUnwatched.value;
   pages.value.toprated = 1;
-  syncControls();
 }
 
 async function refreshRecommendations(): Promise<void> {
   if (cooldownRemaining.value > 0 || loading.value) return;
-  const bridge = getLegacyBridge();
+  const excludeIds = pageMovies.value.map(tmdbId).filter(Boolean);
   loading.value = true;
   errorMessage.value = '';
+  lastRefresh.value = Date.now();
+  pages.value.recommend = 1;
   try {
-    const result = bridge?.discover?.refreshRecommendations
-      ? await bridge.discover.refreshRecommendations()
-      : await loadRecommendationsDirect();
+    const result = await loadRecommendationsDirect(excludeIds);
     movies.value = result === null ? null : (Array.isArray(result) ? result as TmdbMedia[] : []);
-    applyControls(asControls(bridge?.discover?.getControls?.()));
   } catch (error) {
     movies.value = [];
     errorMessage.value = error instanceof Error ? error.message : '网络或接口异常';
@@ -284,71 +264,25 @@ async function refreshRecommendations(): Promise<void> {
 }
 
 function rateMovie(movie: TmdbMedia): void {
-  if (!window.FilmNoteVueRatings?.openQuickRate?.({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) })) {
-    getLegacyBridge()?.ratings?.openQuickRate?.({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) });
-  }
+  mediaActions.rateMedia({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) });
 }
 
 async function toggleWatch(movie: TmdbMedia): Promise<void> {
-  const bridge = getLegacyBridge();
-  const normalized = { ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) };
-  if (bridge?.list?.toggleWatchlist) {
-    await bridge.list.toggleWatchlist(tmdbId(movie), normalized);
-  } else if (currentUserId.value) {
-    if (watchlistIds.value.has(listKey(normalized))) {
-      await removeWatchlistItem(currentUserId.value, mediaType(movie), tmdbId(movie));
-    } else {
-      await addWatchlistItem({
-        user_id: currentUserId.value,
-        media_type: mediaType(movie),
-        tmdb_id: tmdbId(movie),
-        title: titleOf(movie),
-        year: Number(yearOf(movie)) || null,
-        poster_path: movie.poster_path || '',
-        release_date: movie.release_date || movie.first_air_date || '',
-      });
-    }
-  }
-  await refreshVueData();
+  await mediaActions.toggleWatchlist({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) });
 }
 
 async function addNext(movie: TmdbMedia): Promise<void> {
-  const bridge = getLegacyBridge();
-  const normalized = { ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) };
-  if (bridge?.couple?.addToCoupleQueue) {
-    await bridge.couple.addToCoupleQueue(normalized);
-  } else if (currentUserId.value && couple.activeCouple && !queueIds.value.has(listKey(normalized))) {
-    const maxPosition = couple.queue.reduce((max, item) => Math.max(max, Number(item.position || 0)), 0);
-    await addCoupleQueueItem({
-      couple_id: couple.activeCouple.id,
-      media_type: mediaType(movie),
-      tmdb_id: tmdbId(movie),
-      title: titleOf(movie),
-      year: Number(yearOf(movie)) || null,
-      poster_path: movie.poster_path || '',
-      position: maxPosition + 1,
-      added_by: currentUserId.value,
-    });
-  }
-  await refreshVueData();
+  await mediaActions.addToNextWatch({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) });
 }
 
 async function block(movie: TmdbMedia): Promise<void> {
-  const bridge = getLegacyBridge();
-  if (bridge?.discover?.blockMovie) {
-    await bridge.discover.blockMovie(tmdbId(movie));
-  } else if (currentUserId.value) {
-    await addBlockedMovie({ user_id: currentUserId.value, tmdb_id: tmdbId(movie), reason: '' });
-  }
-  await refreshVueData();
-  movies.value = (movies.value || []).filter(item => tmdbId(item) !== tmdbId(movie));
+  const ok = await mediaActions.blockMedia({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) });
+  if (ok) movies.value = (movies.value || []).filter(item => tmdbId(item) !== tmdbId(movie));
 }
 
 async function openDetail(movie: TmdbMedia): Promise<void> {
   if (!tmdbId(movie)) return;
-  if (!window.FilmNoteVueMediaDetail?.openMovie?.({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) })) {
-    await getLegacyBridge()?.discover?.showMovieDetail?.(tmdbId(movie));
-  }
+  mediaActions.openMediaDetail({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) });
 }
 
 function onControls(event: Event): void {
@@ -356,10 +290,6 @@ function onControls(event: Event): void {
   applyControls(asControls((event as CustomEvent<DiscoverControls>).detail));
   if (activeTab.value !== previousTab) void loadActiveTab();
 }
-
-watch([activeTab, () => movies.value, pageMovies], () => {
-  if (activeTab.value === 'recommend') getLegacyBridge()?.discover?.setLastShownIds?.(pageMovies.value.map(tmdbId));
-});
 
 watch(currentUserId, userId => {
   if (userId) void loadActiveTab();
@@ -371,15 +301,11 @@ watch(() => entries.entries.length, () => {
 
 onMounted(() => {
   timer = window.setInterval(() => { nowTick.value = Date.now(); }, 1000);
-  stopLegacyReady = onLegacyReady(bridge => {
-    applyControls(asControls(bridge.discover?.getControls?.()));
-    void loadActiveTab();
-  });
   window.addEventListener('filmnote:discover-controls', onControls);
+  void loadActiveTab();
 });
 
 onBeforeUnmount(() => {
-  stopLegacyReady?.();
   window.removeEventListener('filmnote:discover-controls', onControls);
   if (timer) window.clearInterval(timer);
 });
@@ -412,7 +338,7 @@ onBeforeUnmount(() => {
     <template v-else>
       <div class="discover-topbar">
         <template v-if="activeTab === 'recommend'">
-          <button class="btn btn-sm btn-secondary" type="button" :disabled="cooldownRemaining > 0" @click="refreshRecommendations">刷新推荐</button>
+          <button class="btn btn-sm btn-secondary" type="button" :disabled="cooldownRemaining > 0" @click.stop="refreshRecommendations">刷新推荐</button>
           <span id="discoverRefreshHint" class="topbar-count">{{ refreshHint }}</span>
         </template>
         <template v-else>
@@ -455,13 +381,13 @@ onBeforeUnmount(() => {
             <div class="dc-action" @click.stop>
               <div v-if="isRated(movie)" class="dc-rated-badge">已评价 ✓</div>
               <div v-else class="dc-action-row">
-                <button class="btn btn-sm btn-secondary dc-rate-btn" type="button" @click="rateMovie(movie)">＋我的评分</button>
+                <button class="btn btn-sm btn-secondary dc-rate-btn" type="button" @click.stop="rateMovie(movie)">＋我的评分</button>
                 <button
                   class="btn btn-xs dc-watch-btn"
                   type="button"
                   :class="{ active: watchlistIds.has(listKey(movie)) }"
                   :title="watchlistIds.has(listKey(movie)) ? '移出想看' : '加入想看'"
-                  @click="toggleWatch(movie)"
+                  @click.stop="toggleWatch(movie)"
                 >
                   {{ watchlistIds.has(listKey(movie)) ? '★' : '☆' }}
                 </button>
@@ -471,18 +397,18 @@ onBeforeUnmount(() => {
                   type="button"
                   :class="{ active: queueIds.has(listKey(movie)) }"
                   :title="queueIds.has(listKey(movie)) ? '已在下次看' : '加入下次看'"
-                  @click="addNext(movie)"
+                  @click.stop="addNext(movie)"
                 >
                   ▶
                 </button>
-                <button v-if="activeTab === 'recommend'" class="btn btn-xs dc-block-btn" type="button" title="不再推荐" @click="block(movie)">🚫</button>
+                <button v-if="activeTab === 'recommend'" class="btn btn-xs dc-block-btn" type="button" title="不再推荐" @click.stop="block(movie)">🚫</button>
               </div>
             </div>
           </div>
         </article>
       </div>
 
-      <div v-if="paginationItems.length" class="discover-pages">
+      <div v-if="activeTab === 'toprated' && paginationItems.length" class="discover-pages">
         <button type="button" :disabled="currentPage <= 1" aria-label="上一页" @click="setPage(currentPage - 1)">‹</button>
         <template v-for="(item, index) in paginationItems" :key="`${item}-${index}`">
           <span v-if="item === '...'" class="pagination-ellipsis" aria-hidden="true">…</span>

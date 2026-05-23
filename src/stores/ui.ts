@@ -6,6 +6,7 @@ type AccountModal = 'changePassword' | 'invites' | 'blocked' | null;
 type UiState = {
   activeTab: MainTab;
   accountModal: AccountModal;
+  highlightEntryId: string | number | null;
   toastMessage: string;
   toastOpen: boolean;
   toastTimer: number | null;
@@ -23,6 +24,7 @@ export const useUiStore = defineStore('ui', {
   state: (): UiState => ({
     activeTab: 'rate',
     accountModal: null,
+    highlightEntryId: null,
     toastMessage: '',
     toastOpen: false,
     toastTimer: null,
@@ -36,6 +38,12 @@ export const useUiStore = defineStore('ui', {
     },
     closeAccountModal() {
       this.accountModal = null;
+    },
+    setHighlightEntry(id: string | number | null) {
+      this.highlightEntryId = id;
+    },
+    clearHighlightEntry() {
+      this.highlightEntryId = null;
     },
     showToast(message: string) {
       if (this.toastTimer) window.clearTimeout(this.toastTimer);

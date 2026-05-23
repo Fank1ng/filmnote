@@ -6,7 +6,6 @@ import {
   saveSeasonRatings,
   updateEntry,
 } from '../../api/entries-api.js';
-import { getLegacyBridge, switchLegacyTab } from '../../app/legacy-bridge.js';
 import { refreshVueData } from '../../app/data-sync.js';
 import { getCurrentUser } from '../../app/user-context.js';
 import { BaseModal, RatingSliders } from '../../shared/components/index.js';
@@ -49,6 +48,10 @@ type SeasonDraft = {
 };
 
 type Mode = 'total' | 'season';
+type QuickEditOptions = {
+  targetSeasonNumber?: number;
+  enableTargetSeason?: boolean;
+};
 
 const defaultRatings = (): RatingDims => ({
   story: 5,
@@ -115,6 +118,14 @@ function normalizeMedia(input: unknown): MediaLike | null {
   };
 }
 
+function normalizeQuickEditOptions(opts: unknown): QuickEditOptions {
+  const record = (opts || {}) as Record<string, unknown>;
+  return {
+    targetSeasonNumber: Number(record.targetSeasonNumber || 0) || undefined,
+    enableTargetSeason: !!record.enableTargetSeason,
+  };
+}
+
 function findEntry(id: Entry['id']): Entry | null {
   return entries.entries.find(entry => String(entry.id) === String(id)) ?? null;
 }
@@ -144,6 +155,19 @@ function addSeason(): void {
   });
 }
 
+function addOrFocusSeason(seasonNumber: number): void {
+  const normalized = Math.max(1, Number(seasonNumber || 1));
+  const exists = seasons.value.some(row => Number(row.season_number) === normalized);
+  if (exists) return;
+  seasons.value.push({
+    key: seasonKey++,
+    season_number: normalized,
+    season_title: '',
+    ratings: defaultRatings(),
+    comment: '',
+  });
+}
+
 function removeSeason(key: number): void {
   seasons.value = seasons.value.filter(row => row.key !== key);
 }
@@ -159,12 +183,19 @@ function openQuickRate(input: unknown): boolean {
   errorMessage.value = '';
   busy.value = false;
   setSeasonRows([]);
-  if (mode.value === 'season') addSeason();
+  if (mode.value === 'season') {
+    if (normalized.fillSeasonPlaceholders && normalized.number_of_seasons) {
+      for (let index = 1; index <= Number(normalized.number_of_seasons); index++) addOrFocusSeason(index);
+    } else {
+      addSeason();
+    }
+  }
   open.value = true;
   return true;
 }
 
-function openQuickEdit(id: Entry['id']): boolean {
+function openQuickEdit(id: Entry['id'], rawOpts?: unknown): boolean {
+  const opts = normalizeQuickEditOptions(rawOpts);
   const entry = findEntry(id);
   if (!entry) return false;
   editEntryId.value = entry.id;
@@ -182,7 +213,10 @@ function openQuickEdit(id: Entry['id']): boolean {
   busy.value = false;
   const entrySeasons = entries.seasonRatings.filter(row => String(row.entry_id) === String(entry.id));
   setSeasonRows(entrySeasons);
-  mode.value = normalizeMediaType(entry.type || entry.media_type || 'movie') === 'series' && entrySeasons.length ? 'season' : 'total';
+  if (opts.targetSeasonNumber && opts.enableTargetSeason) {
+    addOrFocusSeason(opts.targetSeasonNumber);
+  }
+  mode.value = normalizeMediaType(entry.type || entry.media_type || 'movie') === 'series' && (entrySeasons.length || opts.enableTargetSeason) ? 'season' : 'total';
   open.value = true;
   return true;
 }
@@ -211,18 +245,23 @@ function averageSeasonDims(): RatingDims {
   return result;
 }
 
-async function refreshLegacyAfterSave(entryId: Entry['id'] | null, wasNew: boolean): Promise<void> {
-  const bridge = getLegacyBridge();
-  await bridge?.shell?.loadAllData?.();
-  bridge?.state?.sync?.('vue-rating-saved');
+async function refreshAfterSave(entryId: Entry['id'] | null, wasNew: boolean, savedMediaType: MediaType): Promise<void> {
   await refreshVueData();
-  const activeTab = bridge?.shell?.getActiveTab?.();
-  if (wasNew && activeTab === 'rate' && entryId) {
-    bridge?.list?.locateAndGoToList?.(entryId);
-    switchLegacyTab('list');
-    return;
+  if (wasNew && entryId) {
+    window.dispatchEvent(new CustomEvent('filmnote:list-controls', {
+      detail: {
+        mode: 'entries',
+        type: savedMediaType,
+        owner: 'all',
+        search: '',
+        sort: 'date-desc',
+        score: 'all',
+        page: 1,
+      },
+    }));
+    ui.setHighlightEntry(entryId);
+    ui.setActiveTab('list');
   }
-  bridge?.shell?.renderActiveTab?.();
 }
 
 async function submit(): Promise<void> {
@@ -301,7 +340,7 @@ async function submit(): Promise<void> {
 
     ui.showToast(isEdit.value ? '评价已更新！' : '评价已保存！');
     close();
-    await refreshLegacyAfterSave(savedEntryId, !isEdit.value);
+    await refreshAfterSave(savedEntryId, !isEdit.value, mediaType.value);
   } catch (error) {
     errorMessage.value = '保存失败: ' + (error instanceof Error ? error.message : String(error));
   } finally {
@@ -313,6 +352,8 @@ const api = reactive({
   openQuickRate,
   openQuickEdit,
 });
+
+window.FilmNoteVueRatings = api;
 
 onMounted(() => {
   window.FilmNoteVueRatings = api;

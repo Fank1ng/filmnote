@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { removeWatchlistItem } from '../../api/list-api.js';
-import { refreshVueData } from '../../app/data-sync.js';
-import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
+import { onLegacyReady } from '../../app/legacy-bridge.js';
 import { PaginationControls } from '../../shared/components/index.js';
+import { useMediaActions } from '../../shared/composables/useMediaActions.js';
 import { posterUrl } from '../../shared/tmdb.js';
 import { useListsStore } from '../../stores/lists.js';
 import type { MediaType, WatchlistItem } from '../../types/domain.js';
@@ -18,6 +17,7 @@ type ListControlState = {
 const pageSize = 12;
 
 const lists = useListsStore();
+const mediaActions = useMediaActions();
 const mode = ref<'entries' | 'watchlist'>('entries');
 const page = ref(1);
 let stopLegacyReady: (() => void) | null = null;
@@ -38,18 +38,7 @@ function itemYear(item: WatchlistItem): string {
 }
 
 function rateItem(item: WatchlistItem): void {
-  if (item.media_type === 'movie') {
-    window.FilmNoteVueRatings?.openQuickRate?.({
-      id: item.tmdb_id,
-      tmdb_id: item.tmdb_id,
-      media_type: item.media_type,
-      title: item.title || `TMDB #${item.tmdb_id}`,
-      year: item.year || null,
-      poster_path: item.poster_path || '',
-    });
-    return;
-  }
-  getLegacyBridge()?.ratings?.openQuickRate?.({
+  mediaActions.rateMedia({
     id: item.tmdb_id,
     tmdb_id: item.tmdb_id,
     media_type: item.media_type,
@@ -60,24 +49,16 @@ function rateItem(item: WatchlistItem): void {
 }
 
 async function removeItem(item: WatchlistItem): Promise<void> {
-  const bridge = getLegacyBridge();
-  if (bridge?.list?.toggleWatchlist) {
-    await bridge.list.toggleWatchlist(item.tmdb_id, item);
-  } else {
-    await removeWatchlistItem(item.user_id, item.media_type, item.tmdb_id);
-  }
-  await refreshVueData();
+  await mediaActions.toggleWatchlist(item);
 }
 
 async function showDetail(item: WatchlistItem): Promise<void> {
-  if (!window.FilmNoteVueMediaDetail?.openListItem?.(item)) {
-    await getLegacyBridge()?.list?.showListItemDetail?.(item);
-  }
+  mediaActions.openMediaDetail(item);
 }
 
 function changePage(nextPage: number): void {
   page.value = nextPage;
-  getLegacyBridge()?.list?.updateControls?.({ watchlistPage: nextPage });
+  window.dispatchEvent(new CustomEvent('filmnote:list-controls', { detail: { watchlistPage: nextPage } }));
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, watch } from 'vue';
+import { refreshVueData } from './data-sync.js';
 import FeatureArchitectureRoot from './FeatureArchitectureRoot.vue';
 import { getLegacyBridge, onLegacyReady, requireLegacyBridge } from './legacy-bridge.js';
 import { installLegacyStateSync } from './legacy-state-sync.js';
@@ -10,11 +11,13 @@ import { ListBody, ListControls, WatchlistGrid } from '../features/list/index.js
 import { QuickRateModal, RatingsSearchPanel } from '../features/ratings/index.js';
 import { StatsContent, StatsControls } from '../features/stats/index.js';
 import { AppHeader, AppToast, EntryDetailModal, ImportExportToolbar, MediaDetailModal, TabShell } from '../shared/components/index.js';
+import { useSessionStore } from '../stores/session.js';
 import { mainTabs, type MainTab, useUiStore } from '../stores/ui.js';
 
 defineOptions({ name: 'FilmNoteApp' });
 
 const ui = useUiStore();
+const session = useSessionStore();
 let stopLegacyStateSync: (() => void) | null = null;
 let stopLegacyReadySync: (() => void) | null = null;
 
@@ -38,6 +41,9 @@ function changeTab(tab: MainTab): void {
 }
 
 watch(() => ui.activeTab, tab => activateTabPanel(tab), { flush: 'post' });
+watch(() => session.currentUser, user => {
+  if (user) void refreshVueData();
+}, { flush: 'post' });
 
 onMounted(() => {
   window.FilmNoteVueUi = {
@@ -48,6 +54,7 @@ onMounted(() => {
   stopLegacyReadySync = onLegacyReady(bridge => {
     bridge.shell?.switchTab?.(ui.activeTab);
     bridge.state?.sync?.('vue-legacy-ready');
+    void refreshVueData();
   });
   window.addEventListener('filmnote:tab-change', onTabChange);
 });

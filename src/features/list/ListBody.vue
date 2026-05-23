@@ -54,6 +54,7 @@ const search = ref('');
 const sort = ref<SortBy>('date-desc');
 const score = ref<ScoreFilter>('all');
 const page = ref(1);
+const detailCache = ref<Record<string, Record<string, unknown>>>({});
 let stopLegacyReady: (() => void) | null = null;
 
 const currentUser = computed(() => session.currentUser as UserLike | null);
@@ -81,8 +82,17 @@ function searchTokens(value: string): string[] {
 }
 
 function entrySearchText(entry: Entry): string {
+  const detail = detailFor(entry);
   return normalizeText([
     entry.title,
+    (entry as Entry & { original_title?: string }).original_title,
+    detail?.title,
+    detail?.original_title,
+    detail?.original_name,
+    detail?.overview,
+    ...(Array.isArray(detail?.cast) ? detail.cast : []),
+    ...(Array.isArray(detail?.genres) ? detail.genres : []),
+    ...(Array.isArray(detail?.keyword_names) ? detail.keyword_names : []),
     entry.director,
     entry.year,
     entries.profiles[entry.user_id]?.display_name,
@@ -97,6 +107,21 @@ function groupKey(entry: Entry): string {
   return entry.tmdb_id
     ? `tmdb_${entry.tmdb_id}`
     : `title_${entry.title.toLowerCase().trim()}_${entry.year || 0}`;
+}
+
+function loadDetailCache(): void {
+  try {
+    detailCache.value = JSON.parse(localStorage.getItem('filmnote_movie_cache') || '{}') || {};
+  } catch {
+    detailCache.value = {};
+  }
+}
+
+function detailFor(entry: Entry): Record<string, unknown> | null {
+  const tmdbId = Number(entry.tmdb_id || 0);
+  if (!tmdbId) return null;
+  const key = `${mediaType(entry)}:${tmdbId}`;
+  return detailCache.value[key] || detailCache.value[String(tmdbId)] || null;
 }
 
 function displayName(userId: string): string {
@@ -270,6 +295,7 @@ function onLegacyControls(event: Event): void {
 }
 
 onMounted(() => {
+  loadDetailCache();
   stopLegacyReady = onLegacyReady(bridge => applyControls(asControlState(bridge.list?.getControls?.())));
   window.addEventListener('filmnote:list-controls', onLegacyControls);
 });

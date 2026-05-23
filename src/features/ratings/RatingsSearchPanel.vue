@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { addCoupleQueueItem } from '../../api/couple-api.js';
+import { addWatchlistItem, removeWatchlistItem } from '../../api/list-api.js';
 import { searchTmdbMedia, loadTmdbMediaDetail, type NormalizedSearchMedia } from '../../api/tmdb-api.js';
+import { refreshVueData } from '../../app/data-sync.js';
 import { getLegacyBridge } from '../../app/legacy-bridge.js';
 import { posterUrl } from '../../shared/tmdb.js';
+import { useCoupleStore } from '../../stores/couple.js';
 import { useEntriesStore } from '../../stores/entries.js';
+import { useListsStore } from '../../stores/lists.js';
 import { useSessionStore } from '../../stores/session.js';
 import { useUiStore } from '../../stores/ui.js';
 import type { MediaType } from '../../types/domain.js';
@@ -15,6 +20,8 @@ type UserLike = {
 };
 
 const entries = useEntriesStore();
+const lists = useListsStore();
+const couple = useCoupleStore();
 const session = useSessionStore();
 const ui = useUiStore();
 
@@ -47,6 +54,9 @@ const selectedFacts = computed(() => {
 });
 const selectedOverview = computed(() => selected.value?.overview || (detailLoading.value ? '正在加载简介...' : '暂无简介'));
 const canRunActions = computed(() => !!selected.value);
+const selectedKey = computed(() => selected.value ? `${selected.value.media_type}:${selected.value.tmdb_id}` : '');
+const isWatchlisted = computed(() => !!selectedKey.value && lists.watchlistIds.has(selectedKey.value));
+const isQueued = computed(() => !!selectedKey.value && couple.queue.some(item => `${item.media_type}:${item.tmdb_id}` === selectedKey.value));
 
 function setMediaType(nextType: MediaType): void {
   mediaType.value = nextType;
@@ -123,23 +133,55 @@ async function addReview(): Promise<void> {
 }
 
 async function addWatchlist(): Promise<void> {
-  if (!selected.value) return;
+  const movie = selected.value;
+  const userId = currentUser.value?.id;
+  if (!movie || !userId) return;
   const bridge = getLegacyBridge();
-  if (!bridge?.list?.addToWatchlist) {
-    ui.showToast('想看清单初始化中，请稍后再试');
-    return;
+  if (bridge?.list?.toggleWatchlist) {
+    await bridge.list.toggleWatchlist(movie.tmdb_id, movie);
+  } else if (isWatchlisted.value) {
+    await removeWatchlistItem(userId, movie.media_type, movie.tmdb_id);
+    ui.showToast('已移出想看');
+  } else {
+    await addWatchlistItem({
+      user_id: userId,
+      media_type: movie.media_type,
+      tmdb_id: movie.tmdb_id,
+      title: movie.title,
+      year: movie.year,
+      poster_path: movie.poster_path || '',
+      release_date: movie.release_date || '',
+    });
+    ui.showToast('已加入想看');
   }
-  await bridge.list.addToWatchlist(selected.value);
+  await refreshVueData();
 }
 
 async function addNext(): Promise<void> {
-  if (!selected.value) return;
-  const bridge = getLegacyBridge();
-  if (!bridge?.couple?.addToCoupleQueue) {
-    ui.showToast('下次看初始化中，请稍后再试');
+  const movie = selected.value;
+  const userId = currentUser.value?.id;
+  if (!movie || !userId || !couple.activeCouple) {
+    ui.showToast('请先绑定 Couple');
     return;
   }
-  await bridge.couple.addToCoupleQueue(selected.value);
+  const bridge = getLegacyBridge();
+  if (bridge?.couple?.addToCoupleQueue) {
+    await bridge.couple.addToCoupleQueue(movie);
+  } else if (!isQueued.value) {
+    const maxPosition = couple.queue.reduce((max, item) => Math.max(max, Number(item.position || 0)), 0);
+    await addCoupleQueueItem({
+      couple_id: couple.activeCouple.id,
+      media_type: movie.media_type,
+      tmdb_id: movie.tmdb_id,
+      title: movie.title,
+      year: movie.year,
+      poster_path: movie.poster_path || '',
+      position: maxPosition + 1,
+      added_by: userId,
+    });
+    ui.showToast('已加入下次看');
+  }
+  await refreshVueData();
 }
 
 watch(query, value => {
@@ -213,8 +255,8 @@ onBeforeUnmount(() => {
             {{ expanded ? '收起简介' : '展开简介' }}
           </button>
           <div class="search-actions" aria-label="搜索结果操作">
-            <button type="button" class="btn btn-secondary" :disabled="!canRunActions" @click="addWatchlist">加入想看</button>
-            <button type="button" class="btn btn-secondary" :disabled="!canRunActions" @click="addNext">加入下次看</button>
+            <button type="button" class="btn btn-secondary" :disabled="!canRunActions" @click="addWatchlist">{{ isWatchlisted ? '移出想看' : '加入想看' }}</button>
+            <button type="button" class="btn btn-secondary" :disabled="!canRunActions" @click="addNext">{{ isQueued ? '已在下次看' : '加入下次看' }}</button>
             <button type="button" class="btn btn-primary" :disabled="!canRunActions" @click="addReview">添加评价</button>
           </div>
         </div>

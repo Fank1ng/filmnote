@@ -5,6 +5,7 @@ import { addWatchlistItem, removeWatchlistItem } from '../../api/list-api.js';
 import { searchTmdbMedia, loadTmdbMediaDetail, type NormalizedSearchMedia } from '../../api/tmdb-api.js';
 import { refreshVueData } from '../../app/data-sync.js';
 import { getLegacyBridge } from '../../app/legacy-bridge.js';
+import { getCurrentUser } from '../../app/user-context.js';
 import { posterUrl } from '../../shared/tmdb.js';
 import { useCoupleStore } from '../../stores/couple.js';
 import { useEntriesStore } from '../../stores/entries.js';
@@ -37,7 +38,7 @@ let searchTimer: number | null = null;
 let abortController: AbortController | null = null;
 let detailSeq = 0;
 
-const currentUser = computed(() => session.currentUser as UserLike | null);
+const currentUser = computed(() => getCurrentUser<UserLike>(session.currentUser));
 const placeholder = computed(() => mediaType.value === 'series'
   ? '搜索剧集，选择后添加评价或加入清单...'
   : '搜索电影，选择后添加评价或加入清单...');

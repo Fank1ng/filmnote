@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { removeCoupleQueueItem, updateCoupleQueueItem } from '../../api/couple-api.js';
 import { refreshVueData } from '../../app/data-sync.js';
 import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
+import { getCurrentUserId } from '../../app/user-context.js';
 import { DIM_LABELS, TMDB_IMG, TMDB_PROXY, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
 import { getEntryScore } from '../../shared/scoring.js';
@@ -15,7 +16,6 @@ import type { Couple, CoupleQueueItem, Entry, MediaType, Profile, TmdbMedia } fr
 defineOptions({ name: 'CouplePanel' });
 
 type CoupleTab = 'archive' | 'recommend' | 'queue';
-type UserLike = { id?: string };
 type CoupleControls = {
   tab?: CoupleTab;
   queueAvailable?: boolean;
@@ -73,7 +73,7 @@ const wheelPickId = ref<string | number | null>(null);
 const detailCache = ref<Record<string, CacheDetail>>({});
 let stopLegacyReady: (() => void) | null = null;
 
-const currentUserId = computed(() => (session.currentUser as UserLike | null)?.id || '');
+const currentUserId = computed(() => getCurrentUserId(session.currentUser));
 const activeCouple = computed(() => couple.activeCouple as Couple | null);
 const currentProfile = computed(() => session.currentProfile);
 const partnerId = computed(() => {

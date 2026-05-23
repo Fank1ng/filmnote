@@ -82,8 +82,8 @@ function changePage(nextPage: number): void {
 }
 
 function applyControls(state: ListControlState = {}): void {
-  mode.value = state.mode === 'watchlist' ? 'watchlist' : 'entries';
-  page.value = Math.max(1, Number(state.watchlistPage || 1));
+  if ('mode' in state) mode.value = state.mode === 'watchlist' ? 'watchlist' : 'entries';
+  if ('watchlistPage' in state) page.value = Math.max(1, Number(state.watchlistPage || 1));
 }
 
 function onLegacyControls(event: Event): void {

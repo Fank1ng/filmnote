@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { getLegacyBridge } from '../../app/legacy-bridge.js';
+import { getCurrentUserId } from '../../app/user-context.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useSessionStore } from '../../stores/session.js';
 import type { MediaType, TmdbDetail, TmdbMedia } from '../../types/domain.js';
@@ -19,7 +20,6 @@ import BaseModal from './BaseModal.vue';
 
 defineOptions({ name: 'MediaDetailModal' });
 
-type UserLike = { id?: string };
 type RatingMode = 'total' | 'season';
 
 const entries = useEntriesStore();
@@ -32,7 +32,7 @@ const errorMessage = ref('');
 const expanded = ref(false);
 let requestSeq = 0;
 
-const currentUserId = computed(() => (session.currentUser as UserLike | null)?.id || '');
+const currentUserId = computed(() => getCurrentUserId(session.currentUser));
 const mediaType = computed<MediaType>(() => normalizeMediaType(media.value?.media_type || media.value?.type || detail.value?.media_type || 'movie'));
 const tmdbId = computed(() => tmdbIdOf(media.value || detail.value));
 const title = computed(() => detail.value?.title || media.value?.title || media.value?.name || (tmdbId.value ? `TMDB #${tmdbId.value}` : '详情'));

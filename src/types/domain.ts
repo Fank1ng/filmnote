@@ -99,6 +99,8 @@ export type TmdbMedia = {
   type?: MediaType;
   title?: string;
   name?: string;
+  original_title?: string;
+  original_name?: string;
   release_date?: string;
   first_air_date?: string;
   year?: number | null;

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { deleteEntry as deleteEntryApi } from '../../api/entries-api.js';
 import { refreshVueData } from '../../app/data-sync.js';
 import { getLegacyBridge } from '../../app/legacy-bridge.js';
+import { getCurrentUserId } from '../../app/user-context.js';
 import { DIM_LABELS, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import { getEntryScore } from '../scoring.js';
 import { posterUrl } from '../tmdb.js';
@@ -13,7 +14,6 @@ import BaseModal from './BaseModal.vue';
 
 defineOptions({ name: 'EntryDetailModal' });
 
-type UserLike = { id?: string };
 type UserColor = { main: string; dim: string };
 type DetailCache = { overview?: string };
 
@@ -23,7 +23,7 @@ const open = ref(false);
 const entryId = ref<Entry['id'] | null>(null);
 
 const dims = Object.keys(WEIGHTS) as RatingDim[];
-const currentUserId = computed(() => (session.currentUser as UserLike | null)?.id || '');
+const currentUserId = computed(() => getCurrentUserId(session.currentUser));
 const entry = computed(() => entries.entries.find(item => String(item.id) === String(entryId.value)) || null);
 const isMine = computed(() => !!entry.value && entry.value.user_id === currentUserId.value);
 const ownerName = computed(() => entry.value ? displayName(entry.value.user_id) : '未知');

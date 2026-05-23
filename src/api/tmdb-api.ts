@@ -27,6 +27,8 @@ export type NormalizedSearchMedia = {
   tmdb_id: number;
   media_type: MediaType;
   title: string;
+  original_title?: string;
+  original_name?: string;
   year: number | null;
   release_date: string;
   poster_path: string;
@@ -43,14 +45,17 @@ function mediaTypeToTmdbType(mediaType: MediaType): 'movie' | 'tv' {
 }
 
 export function normalizeSearchMedia(item: TmdbMedia, mediaType: MediaType): NormalizedSearchMedia | null {
-  const title = item.title || item.name || '';
-  if (!item.id || !title) return null;
+  const id = Number(item.tmdb_id || item.id || 0);
+  const title = item.title || item.name || (item as { original_title?: string; original_name?: string }).original_title || (item as { original_title?: string; original_name?: string }).original_name || '';
+  if (!id || !title) return null;
   const releaseDate = item.release_date || item.first_air_date || '';
   return {
-    id: Number(item.id),
-    tmdb_id: Number(item.id),
+    id,
+    tmdb_id: id,
     media_type: mediaType,
     title,
+    original_title: (item as { original_title?: string }).original_title || '',
+    original_name: (item as { original_name?: string }).original_name || '',
     year: Number(String(releaseDate).slice(0, 4)) || null,
     release_date: releaseDate,
     poster_path: item.poster_path || '',
@@ -62,10 +67,20 @@ export function normalizeSearchMedia(item: TmdbMedia, mediaType: MediaType): Nor
 
 export async function searchTmdbMedia(query: string, mediaType: MediaType, signal?: AbortSignal): Promise<NormalizedSearchMedia[]> {
   const type = mediaTypeToTmdbType(mediaType);
-  const response = await fetch(`${TMDB_PROXY}/search?q=${encodeURIComponent(query)}&type=${type}`, { signal });
-  const data = await response.json().catch(() => ({})) as TmdbSearchResponse;
-  if (!response.ok || data.success === false || data.error || data.status_code) {
-    throw new Error(data.error || data.status_message || `TMDB 搜索接口异常 (${response.status})`);
+  let data: TmdbSearchResponse | null = null;
+  try {
+    const response = await fetch(`${TMDB_PROXY}/search?q=${encodeURIComponent(query)}&type=${type}`, { signal });
+    data = await response.json().catch(() => ({})) as TmdbSearchResponse;
+    if (!response.ok || data.success === false || data.error || data.status_code) {
+      throw new Error(data.error || data.status_message || `TMDB 搜索接口异常 (${response.status})`);
+    }
+  } catch (error) {
+    if ((error as Error).name === 'AbortError') throw error;
+    const fallbackResponse = await tmdbFetch(`/search/${type}?query=${encodeURIComponent(query)}&language=zh-CN`, { signal });
+    data = await fallbackResponse.json().catch(() => ({})) as TmdbSearchResponse;
+    if (!fallbackResponse.ok || data.success === false || data.error || data.status_code) {
+      throw new Error(data.error || data.status_message || `TMDB 搜索接口异常 (${fallbackResponse.status})`);
+    }
   }
   return (data.results || [])
     .map(item => normalizeSearchMedia(item, mediaType))

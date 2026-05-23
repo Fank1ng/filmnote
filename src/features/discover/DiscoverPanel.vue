@@ -4,6 +4,7 @@ import { addCoupleQueueItem } from '../../api/couple-api.js';
 import { addBlockedMovie, addWatchlistItem, removeWatchlistItem } from '../../api/list-api.js';
 import { refreshVueData } from '../../app/data-sync.js';
 import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
+import { getCurrentUserId } from '../../app/user-context.js';
 import { TMDB_IMG, TMDB_PROXY } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
 import { useCoupleStore } from '../../stores/couple.js';
@@ -14,10 +15,6 @@ import type { MediaType, TmdbMedia } from '../../types/domain.js';
 import type { DiscoverTab } from '../../stores/discover.js';
 
 defineOptions({ name: 'DiscoverPanel' });
-
-type UserLike = {
-  id?: string;
-};
 
 type DiscoverControls = {
   tab?: DiscoverTab;
@@ -58,7 +55,7 @@ let stopLegacyReady: (() => void) | null = null;
 let loadSeq = 0;
 let timer = 0;
 
-const currentUserId = computed(() => (session.currentUser as UserLike | null)?.id || '');
+const currentUserId = computed(() => getCurrentUserId(session.currentUser));
 const ratedCount = computed(() => entries.entries.filter(entry => entry.user_id === currentUserId.value && mediaType(entry) === 'movie').length);
 const ratedTmdbIds = computed(() => new Set(entries.entries
   .filter(entry => entry.user_id === currentUserId.value && entry.tmdb_id)

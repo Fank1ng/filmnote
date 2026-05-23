@@ -40,12 +40,13 @@ function asControlState(input: unknown): ListControlState {
 
 function applyState(state: ListControlState): void {
   suppressSync = true;
-  mode.value = state.mode === 'watchlist' ? 'watchlist' : 'entries';
-  type.value = state.type === 'series' ? 'series' : 'movie';
-  owner.value = state.owner === 'me' ? 'me' : 'all';
-  search.value = state.search || '';
-  sort.value = state.sort || 'date-desc';
-  score.value = state.score || 'all';
+  if ('mode' in state) mode.value = state.mode === 'watchlist' ? 'watchlist' : 'entries';
+  if ('type' in state) type.value = state.type === 'series' ? 'series' : 'movie';
+  if ('owner' in state) owner.value = state.owner === 'me' ? 'me' : 'all';
+  if ('search' in state) search.value = state.search || '';
+  if ('sort' in state) sort.value = state.sort || 'date-desc';
+  if ('score' in state) score.value = state.score || 'all';
+  syncListViewVisibility(mode.value);
   queueMicrotask(() => {
     suppressSync = false;
   });
@@ -72,6 +73,11 @@ function notifyControlsChanged(): void {
   window.dispatchEvent(new CustomEvent('filmnote:list-controls', { detail: currentControls() }));
 }
 
+function syncListViewVisibility(nextMode: ListMode): void {
+  document.getElementById('listEntriesView')?.classList.toggle('hidden', nextMode === 'watchlist');
+  document.getElementById('listWatchlistView')?.classList.toggle('hidden', nextMode !== 'watchlist');
+}
+
 function syncAllToLegacy(): void {
   syncToLegacy(currentControls());
 }
@@ -88,7 +94,10 @@ function onLegacyControls(event: Event): void {
   applyState(asControlState((event as CustomEvent<ListControlState>).detail));
 }
 
-watch(mode, value => syncToLegacy({ mode: value }));
+watch(mode, value => {
+  syncListViewVisibility(value);
+  syncToLegacy({ mode: value });
+});
 watch(type, value => syncToLegacy({ type: value }));
 watch(owner, value => syncToLegacy({ owner: value }));
 watch(sort, value => syncToLegacy({ sort: value }));
@@ -100,6 +109,7 @@ watch(search, value => {
 });
 
 onMounted(() => {
+  syncListViewVisibility(mode.value);
   stopLegacyReady = onLegacyReady(bridge => {
     applyState(asControlState(bridge.list?.getControls?.()));
     queueMicrotask(syncAllToLegacy);

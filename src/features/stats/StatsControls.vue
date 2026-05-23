@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
+import { getCurrentUser } from '../../app/user-context.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useSessionStore } from '../../stores/session.js';
 import type { MediaType } from '../../types/domain.js';
@@ -21,7 +22,7 @@ const otherUser = ref('');
 let suppressSync = false;
 let stopLegacyReady: (() => void) | null = null;
 
-const currentUser = computed(() => session.currentUser as UserLike | null);
+const currentUser = computed(() => getCurrentUser<UserLike>(session.currentUser));
 const otherUsers = computed(() => {
   const currentId = currentUser.value?.id;
   const ids = [...new Set(entries.entries.filter(entry => entry.user_id !== currentId).map(entry => entry.user_id))];

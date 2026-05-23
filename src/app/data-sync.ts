@@ -7,11 +7,10 @@ import { useEntriesStore } from '../stores/entries.js';
 import { useListsStore } from '../stores/lists.js';
 import { useSessionStore } from '../stores/session.js';
 import type { BlockedMovie, Couple, CoupleQueueItem, Entry, Profile, SeasonRating, WatchlistItem } from '../types/domain.js';
-
-type UserLike = { id?: string };
+import { getCurrentUserId } from './user-context.js';
 
 function currentUserId(): string {
-  return ((useSessionStore().currentUser as UserLike | null)?.id || '');
+  return getCurrentUserId(useSessionStore().currentUser);
 }
 
 function profilesById(profiles: Profile[] = []): Record<string, Profile> {

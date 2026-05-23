@@ -8,6 +8,7 @@ import {
 } from '../../api/entries-api.js';
 import { getLegacyBridge, switchLegacyTab } from '../../app/legacy-bridge.js';
 import { refreshVueData } from '../../app/data-sync.js';
+import { getCurrentUser } from '../../app/user-context.js';
 import { BaseModal, RatingSliders } from '../../shared/components/index.js';
 import { posterUrl } from '../../shared/tmdb.js';
 import { calcTotal } from '../../shared/scoring.js';
@@ -73,7 +74,7 @@ const comment = ref('');
 const seasons = ref<SeasonDraft[]>([]);
 let seasonKey = 1;
 
-const currentUser = computed(() => session.currentUser as UserLike | null);
+const currentUser = computed(() => getCurrentUser<UserLike>(session.currentUser));
 const isEdit = computed(() => editEntryId.value !== null);
 const mediaType = computed<MediaType>(() => normalizeMediaType(media.value?.media_type || media.value?.type || 'movie'));
 const isSeries = computed(() => mediaType.value === 'series');

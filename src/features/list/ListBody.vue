@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { deleteEntry as deleteEntryApi } from '../../api/entries-api.js';
 import { refreshVueData } from '../../app/data-sync.js';
+import { getCurrentUser } from '../../app/user-context.js';
 import { DIM_LABELS, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
 import { PaginationControls } from '../../shared/components/index.js';
 import { getEntryScore } from '../../shared/scoring.js';
 import { posterUrl } from '../../shared/tmdb.js';
+import { fetchTmdbDetail, getCachedTmdbDetail, needsTmdbDetailFetch } from '../../shared/tmdb-detail.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useSessionStore } from '../../stores/session.js';
 import type { Entry, MediaType, RatingDims } from '../../types/domain.js';
@@ -56,8 +58,9 @@ const score = ref<ScoreFilter>('all');
 const page = ref(1);
 const detailCache = ref<Record<string, Record<string, unknown>>>({});
 let stopLegacyReady: (() => void) | null = null;
+let warmingDetails = false;
 
-const currentUser = computed(() => session.currentUser as UserLike | null);
+const currentUser = computed(() => getCurrentUser<UserLike>(session.currentUser));
 const currentUserId = computed(() => currentUser.value?.id || '');
 
 function fmtDate(value?: string): string {
@@ -67,13 +70,28 @@ function fmtDate(value?: string): string {
 }
 
 function normalizeText(value: unknown): string {
-  const raw = Array.isArray(value) ? value.join(' ') : String(value || '');
+  const raw = stringifySearchValue(value);
   const normalized = raw.normalize ? raw.normalize('NFKC') : raw;
   return normalized
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function stringifySearchValue(value: unknown): string {
+  if (Array.isArray(value)) return value.map(stringifySearchValue).filter(Boolean).join(' ');
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return [
+      record.name,
+      record.title,
+      record.original_title,
+      record.original_name,
+      record.character,
+    ].map(stringifySearchValue).filter(Boolean).join(' ');
+  }
+  return String(value || '');
 }
 
 function searchTokens(value: string): string[] {
@@ -114,6 +132,24 @@ function loadDetailCache(): void {
     detailCache.value = JSON.parse(localStorage.getItem('filmnote_movie_cache') || '{}') || {};
   } catch {
     detailCache.value = {};
+  }
+}
+
+async function warmDetailCache(): Promise<void> {
+  if (warmingDetails) return;
+  const targets = entries.entries
+    .map(entry => ({ type: mediaType(entry), tmdbId: Number(entry.tmdb_id || 0) }))
+    .filter(item => item.tmdbId && needsTmdbDetailFetch(getCachedTmdbDetail(item.type, item.tmdbId)));
+  const uniqueTargets = Array.from(new Map(targets.map(item => [`${item.type}:${item.tmdbId}`, item])).values()).slice(0, 60);
+  if (!uniqueTargets.length) return;
+  warmingDetails = true;
+  try {
+    for (const item of uniqueTargets) {
+      await fetchTmdbDetail(item.type, item.tmdbId).catch(() => null);
+    }
+    loadDetailCache();
+  } finally {
+    warmingDetails = false;
   }
 }
 
@@ -281,13 +317,13 @@ function asControlState(input: unknown): ListControlState {
 }
 
 function applyControls(state: ListControlState): void {
-  mode.value = state.mode === 'watchlist' ? 'watchlist' : 'entries';
-  type.value = state.type === 'series' ? 'series' : 'movie';
-  owner.value = state.owner === 'me' ? 'me' : 'all';
-  search.value = state.search || '';
-  sort.value = state.sort || 'date-desc';
-  score.value = state.score || 'all';
-  page.value = Math.max(1, Number(state.page || 1));
+  if ('mode' in state) mode.value = state.mode === 'watchlist' ? 'watchlist' : 'entries';
+  if ('type' in state) type.value = state.type === 'series' ? 'series' : 'movie';
+  if ('owner' in state) owner.value = state.owner === 'me' ? 'me' : 'all';
+  if ('search' in state) search.value = state.search || '';
+  if ('sort' in state) sort.value = state.sort || 'date-desc';
+  if ('score' in state) score.value = state.score || 'all';
+  if ('page' in state) page.value = Math.max(1, Number(state.page || 1));
 }
 
 function onLegacyControls(event: Event): void {
@@ -296,8 +332,14 @@ function onLegacyControls(event: Event): void {
 
 onMounted(() => {
   loadDetailCache();
+  void warmDetailCache();
   stopLegacyReady = onLegacyReady(bridge => applyControls(asControlState(bridge.list?.getControls?.())));
   window.addEventListener('filmnote:list-controls', onLegacyControls);
+});
+
+watch(() => entries.entries.map(entry => `${mediaType(entry)}:${entry.tmdb_id || entry.id}`).join('|'), () => {
+  loadDetailCache();
+  void warmDetailCache();
 });
 
 onBeforeUnmount(() => {

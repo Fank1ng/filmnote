@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
+import { getCurrentUserId } from '../../app/user-context.js';
 import { DIM_LABELS, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
 import { getEntryScore } from '../../shared/scoring.js';
@@ -10,10 +11,6 @@ import type { Entry, MediaType, SeasonRating } from '../../types/domain.js';
 import { asStatsControlState, type StatsControlState, type StatsFilter, type UserColor } from './state.js';
 
 defineOptions({ name: 'StatsContent' });
-
-type UserLike = {
-  id?: string;
-};
 
 type CachedSeasonDetail = {
   season_number?: number;
@@ -71,7 +68,7 @@ const radarLevels = [0.2, 0.4, 0.6, 0.8, 1];
 const radarCx = 210;
 const radarCy = 210;
 const radarRadius = 136;
-const currentUserId = computed(() => (session.currentUser as UserLike | null)?.id || '');
+const currentUserId = computed(() => getCurrentUserId(session.currentUser));
 const typeLabel = computed(() => (type.value === 'series' ? '剧集' : '电影'));
 const typeSuffix = computed(() => ` · ${typeLabel.value}`);
 

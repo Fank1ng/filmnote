@@ -5433,13 +5433,13 @@ function buildPaginationHTML(cp, total, attr, cls) {
     nums.push(total);
   }
   let html = `<div class="${cls}">`;
-  html += `<button ${attr}="${cp-1}" ${cp<=1?'disabled':''}>‹</button>`;
+  html += `<button type="button" ${attr}="${cp-1}" ${cp<=1?'disabled':''} aria-label="上一页">‹</button>`;
   nums.forEach(n=>{
-    if (n==='...') html += '<span style="color:var(--text2);padding:0 4px">…</span>';
-    else if (n===cp) html += `<button class="active" disabled>${n}</button>`;
-    else html += `<button ${attr}="${n}">${n}</button>`;
+    if (n==='...') html += '<span class="pagination-ellipsis" aria-hidden="true">…</span>';
+    else if (n===cp) html += `<button type="button" class="active" ${attr}="${n}" aria-current="page">${n}</button>`;
+    else html += `<button type="button" ${attr}="${n}" aria-label="第 ${n} 页">${n}</button>`;
   });
-  html += `<button ${attr}="${cp+1}" ${cp>=total?'disabled':''}>›</button>`;
+  html += `<button type="button" ${attr}="${cp+1}" ${cp>=total?'disabled':''} aria-label="下一页">›</button>`;
   html += '</div>';
   return html;
 }

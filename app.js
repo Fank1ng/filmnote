@@ -6278,6 +6278,7 @@ window.FilmNoteLegacy = {
     addToWatchlist,
     getControls: getListControlsSnapshot,
     updateControls: updateListControls,
+    addMyRating,
   },
   stats: {
     renderStats,

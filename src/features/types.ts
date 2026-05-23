@@ -41,6 +41,7 @@ export type LegacyBridge = {
     addToWatchlist?: (movie: unknown) => Promise<void>;
     getControls?: () => unknown;
     updateControls?: (patch: unknown) => void;
+    addMyRating?: (id: string | number) => void;
   };
   stats?: {
     renderStats?: () => void;

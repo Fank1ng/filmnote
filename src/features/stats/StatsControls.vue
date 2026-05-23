@@ -4,15 +4,9 @@ import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useSessionStore } from '../../stores/session.js';
 import type { MediaType } from '../../types/domain.js';
+import { asStatsControlState, type StatsControlState, type StatsFilter } from './state.js';
 
 defineOptions({ name: 'StatsControls' });
-
-type StatsFilter = 'me' | 'others' | 'compare';
-type StatsControlState = {
-  filter?: StatsFilter;
-  type?: MediaType;
-  otherUser?: string | null;
-};
 
 type UserLike = {
   id?: string;
@@ -37,10 +31,6 @@ const otherUsers = computed(() => {
   }));
 });
 const showUserPicker = computed(() => (filter.value === 'others' || filter.value === 'compare') && otherUsers.value.length > 0);
-
-function asState(input: unknown): StatsControlState {
-  return (input || {}) as StatsControlState;
-}
 
 function applyState(state: StatsControlState): void {
   suppressSync = true;
@@ -67,7 +57,7 @@ function setFilter(nextFilter: StatsFilter): void {
 }
 
 function onLegacyControls(event: Event): void {
-  applyState(asState((event as CustomEvent<StatsControlState>).detail));
+  applyState(asStatsControlState((event as CustomEvent<StatsControlState>).detail));
 }
 
 watch(type, value => syncToLegacy({ type: value }));
@@ -77,7 +67,7 @@ watch(otherUser, value => {
 });
 
 onMounted(() => {
-  stopLegacyReady = onLegacyReady(bridge => applyState(asState(bridge.stats?.getControls?.())));
+  stopLegacyReady = onLegacyReady(bridge => applyState(asStatsControlState(bridge.stats?.getControls?.())));
   window.addEventListener('filmnote:stats-controls', onLegacyControls);
 });
 

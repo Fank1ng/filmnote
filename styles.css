@@ -474,6 +474,12 @@
     color: var(--text); border-radius: 8px; font-size: 0.85rem;
   }
   .stats-user-row select:focus { border-color: var(--gold); outline: none; }
+  .vue-stats-content { margin-top: 8px; }
+  .stats-section-title { margin: 0 0 10px; font-size: 0.9rem; color: var(--text2); }
+  .stats-section-title-spaced { margin-top: 20px; }
+  .stats-dist-legend { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; font-size: 0.65rem; color: var(--text2); }
+  .stats-dist-legend span { display: inline-flex; align-items: center; gap: 5px; }
+  .stats-dist-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; }
   .invite-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
   .invite-toolbar span { font-size: 0.75rem; color: var(--text2); }
   .invite-list { max-height: 240px; overflow-y: auto; }

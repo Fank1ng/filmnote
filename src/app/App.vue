@@ -6,7 +6,7 @@ import { installLegacyStateSync } from './legacy-state-sync.js';
 import { AccountModals, AuthOverlay } from '../features/auth/index.js';
 import { ListBody, ListControls, WatchlistGrid } from '../features/list/index.js';
 import { QuickRateModal, RatingsSearchPanel } from '../features/ratings/index.js';
-import { StatsControls } from '../features/stats/index.js';
+import { StatsContent, StatsControls } from '../features/stats/index.js';
 import { AppHeader, AppToast, ImportExportToolbar, TabShell } from '../shared/components/index.js';
 import { mainTabs, type MainTab, useUiStore } from '../stores/ui.js';
 
@@ -78,6 +78,9 @@ onUnmounted(() => {
   </Teleport>
   <Teleport to="#filmnoteVueStatsControls">
     <StatsControls />
+  </Teleport>
+  <Teleport to="#filmnoteVueStatsContent">
+    <StatsContent />
   </Teleport>
   <AppToast :message="ui.toastMessage" :open="ui.toastOpen" />
   <AccountModals />

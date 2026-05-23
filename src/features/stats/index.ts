@@ -1,4 +1,5 @@
 export { default as StatsFeature } from './StatsFeature.vue';
+export { default as StatsContent } from './StatsContent.vue';
 export { default as StatsControls } from './StatsControls.vue';
 export { renderStats, showStats, statsFeature } from './feature.js';
 

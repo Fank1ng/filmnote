@@ -1,9 +1,11 @@
 import { defineStore } from 'pinia';
 
 type MainTab = 'rate' | 'list' | 'discover' | 'couple' | 'stats';
+type AccountModal = 'changePassword' | 'invites' | 'blocked' | null;
 
 type UiState = {
   activeTab: MainTab;
+  accountModal: AccountModal;
   toastMessage: string;
   toastOpen: boolean;
   toastTimer: number | null;
@@ -20,6 +22,7 @@ export const mainTabs: Array<{ name: MainTab; label: string; ariaLabel: string }
 export const useUiStore = defineStore('ui', {
   state: (): UiState => ({
     activeTab: 'rate',
+    accountModal: null,
     toastMessage: '',
     toastOpen: false,
     toastTimer: null,
@@ -27,6 +30,12 @@ export const useUiStore = defineStore('ui', {
   actions: {
     setActiveTab(activeTab: MainTab) {
       this.activeTab = activeTab;
+    },
+    openAccountModal(accountModal: Exclude<AccountModal, null>) {
+      this.accountModal = accountModal;
+    },
+    closeAccountModal() {
+      this.accountModal = null;
     },
     showToast(message: string) {
       if (this.toastTimer) window.clearTimeout(this.toastTimer);
@@ -40,4 +49,4 @@ export const useUiStore = defineStore('ui', {
   },
 });
 
-export type { MainTab };
+export type { AccountModal, MainTab };

@@ -28,7 +28,9 @@ Vite is now the development and production build path:
 
 GitHub Pages deploys the generated `dist/` artifact.
 
-The main header, tab shell, and toast are now Vue-native. Legacy `app.js` publishes state snapshots through `window.FilmNoteState` and `filmnote:legacy-state`; `src/app/legacy-state-sync.ts` hydrates Pinia stores from those snapshots so each feature can be migrated without reading legacy globals directly.
+The main header, tab shell, toast, auth overlay, account modals, and import/export toolbar are now Vue-native. Legacy `app.js` publishes state snapshots through `window.FilmNoteState` and `filmnote:legacy-state`; `src/app/legacy-state-sync.ts` hydrates Pinia stores from those snapshots so each feature can be migrated without reading legacy globals directly.
+
+Auth is partially migrated: login, register, password reset, recovery password, display-name setup, password change, invite management, and blocked-list management are rendered by Vue. Session bootstrapping, logout, profile finalization, and the broad data load still flow through the legacy bridge until ratings/list/discover/couple are migrated.
 
 ## Module Direction
 

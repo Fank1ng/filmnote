@@ -9,7 +9,8 @@
 <body>
 
 <!-- ═══ Auth Overlay ═══ -->
-<div id="authOverlay">
+<div id="filmnoteVueAuth"></div>
+<div id="authOverlay" hidden>
   <div class="auth-box">
     <h1><span class="fd">FD</span>&amp;<span class="ce">Ceci</span></h1>
 
@@ -60,7 +61,7 @@
 </div>
 
 <!-- ═══ Name Setup ═══ -->
-<div id="nameOverlay" class="modal-overlay">
+<div id="nameOverlay" class="modal-overlay" hidden>
   <div class="modal" style="max-width:380px">
     <h3>设置显示名称</h3>
     <p style="color:var(--text2);font-size:0.85rem;margin-bottom:12px">你的名称将对朋友可见</p>
@@ -70,7 +71,7 @@
 </div>
 
 <!-- ═══ Change Password Modal ═══ -->
-<div id="changePwOverlay" class="modal-overlay">
+<div id="changePwOverlay" class="modal-overlay" hidden>
   <div class="modal" style="max-width:380px">
     <h3>修改密码</h3>
     <p style="color:var(--text2);font-size:0.8rem;margin-bottom:12px">输入新密码（至少6位）</p>
@@ -83,7 +84,7 @@
 </div>
 
 <!-- ═══ Invite Code Modal ═══ -->
-<div id="inviteCodeOverlay" class="modal-overlay">
+<div id="inviteCodeOverlay" class="modal-overlay" hidden>
   <div class="modal" style="max-width:420px">
     <h3>邀请码管理</h3>
     <div style="margin-bottom:12px">
@@ -353,7 +354,7 @@
 </div>
 
 <!-- Blocked Movies Modal -->
-<div class="modal-overlay" id="blockedModal">
+<div class="modal-overlay" id="blockedModal" hidden>
   <div class="modal" style="max-width:680px">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
       <h3 style="margin:0;color:var(--text2)">不再推荐的电影 (<span id="blockedCount">0</span>)</h3>

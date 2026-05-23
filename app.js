@@ -464,13 +464,13 @@ $['inviteCodeOverlay'].addEventListener('click', (e) => {
   if (e.target === e.currentTarget) $['inviteCodeOverlay'].classList.remove('open');
 });
 
-// Name setup
-$['nameSaveBtn'].addEventListener('click', async ()=>{
-  const name = $['nameInput'].value.trim();
-  if (!name) return;
-  if (!/^[a-zA-Z0-9]{1,6}$/.test(name)) { toast('用户名仅支持英文和数字，最多6位'); return; }
+async function saveDisplayName(name) {
+  name = (name || '').trim();
+  if (!name) throw new Error('请输入显示名称');
+  if (!/^[a-zA-Z0-9]{1,6}$/.test(name)) throw new Error('用户名仅支持英文和数字，最多6位');
+  if (!currentUser?.id) throw new Error('请先登录');
   const {data: dup} = await db.from('user_preferences').select('user_id').eq('display_name', name).maybeSingle();
-  if (dup && dup.user_id !== currentUser.id) { toast('该用户名已被使用'); return; }
+  if (dup && dup.user_id !== currentUser.id) throw new Error('该用户名已被使用');
   let sessionToken = sessionStorage.getItem(SESSION_KEY);
   if (!sessionToken) { sessionToken = crypto.randomUUID(); sessionStorage.setItem(SESSION_KEY, sessionToken); }
   await db.from('user_preferences').upsert({ user_id: currentUser.id, display_name: name, session_token: sessionToken });
@@ -482,6 +482,16 @@ $['nameSaveBtn'].addEventListener('click', async ()=>{
   await loadAllData();
   subscribeToRealtime();
   $['inviteMenuBtn'].classList.toggle('hidden', name.toLowerCase() !== 'fank1ng' && name.toLowerCase() !== 'ceci');
+  return currentProfile;
+}
+
+// Name setup
+$['nameSaveBtn'].addEventListener('click', async ()=>{
+  try {
+    await saveDisplayName($['nameInput'].value);
+  } catch (error) {
+    toast(error.message || String(error));
+  }
 });
 
 // ===== APP INIT =====
@@ -5227,19 +5237,7 @@ $['blockedModal'].addEventListener('click', e => {
   if (unblockBtn) {
     e.stopPropagation();
     const tmdbId = parseInt(unblockBtn.dataset.tmdbId);
-    if (!tmdbId || !currentUser) return;
-    db.from('blocked_movies').delete().eq('user_id', currentUser.id).eq('tmdb_id', tmdbId).then(({error}) => {
-      if (!error) {
-        blockedMovieIds.delete(tmdbId);
-        delete blockedMovieReasons[tmdbId];
-        discoverCache.recommend = null;
-        const idsRemaining = blockedMovieIds.size;
-        const totalPages = Math.ceil(idsRemaining / 12);
-        if (blockedPage > totalPages) blockedPage = Math.max(1, totalPages);
-        renderBlockedPanel();
-        toast('已恢复推荐');
-      }
-    });
+    removeBlockedMovie(tmdbId).catch(error => toast('操作失败: ' + (error.message || String(error))));
     return;
   }
   // Pagination
@@ -5252,6 +5250,21 @@ $['blockedModal'].addEventListener('click', e => {
     }
   }
 });
+
+async function removeBlockedMovie(tmdbId) {
+  if (!tmdbId || !currentUser) return;
+  const {error} = await db.from('blocked_movies').delete().eq('user_id', currentUser.id).eq('tmdb_id', tmdbId);
+  if (error) throw error;
+  blockedMovieIds.delete(tmdbId);
+  delete blockedMovieReasons[tmdbId];
+  discoverCache.recommend = null;
+  const idsRemaining = blockedMovieIds.size;
+  const totalPages = Math.ceil(idsRemaining / 12);
+  if (blockedPage > totalPages) blockedPage = Math.max(1, totalPages);
+  renderBlockedPanel();
+  syncLegacyState('blocked-removed');
+  toast('已恢复推荐');
+}
 
 // Discover sub-tab renderers
 function renderWeekDiscover(container, movies, ratedTmdbIds) {
@@ -6184,6 +6197,7 @@ window.FilmNoteLegacy = {
     showRegisterView,
     doLogout,
     initApp,
+    saveDisplayName,
   },
   ratings: {
     openQuickRate,
@@ -6227,6 +6241,9 @@ window.FilmNoteLegacy = {
     openInviteCodeModal,
     openBlockedMoviesModal,
     logoutCurrentUser,
+  },
+  lists: {
+    removeBlockedMovie,
   },
   state: {
     getSnapshot: getLegacyStateSnapshot,

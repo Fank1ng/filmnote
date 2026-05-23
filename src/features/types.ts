@@ -25,6 +25,7 @@ export type LegacyBridge = {
     showRegisterView?: () => void;
     doLogout?: () => void;
     initApp?: (user: unknown) => Promise<void>;
+    saveDisplayName?: (name: string) => Promise<unknown>;
   };
   ratings?: {
     openQuickRate?: (movie: unknown) => void;
@@ -68,6 +69,9 @@ export type LegacyBridge = {
     openInviteCodeModal?: () => void;
     openBlockedMoviesModal?: () => void;
     logoutCurrentUser?: () => Promise<void>;
+  };
+  lists?: {
+    removeBlockedMovie?: (tmdbId: number) => Promise<void>;
   };
   state?: {
     getSnapshot?: () => unknown;

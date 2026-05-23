@@ -3,6 +3,7 @@ import { onMounted, onUnmounted } from 'vue';
 import FeatureArchitectureRoot from './FeatureArchitectureRoot.vue';
 import { requireLegacyBridge, switchLegacyTab } from './legacy-bridge.js';
 import { installLegacyStateSync } from './legacy-state-sync.js';
+import { AccountModals, AuthOverlay } from '../features/auth/index.js';
 import { AppHeader, AppToast, ImportExportToolbar, TabShell } from '../shared/components/index.js';
 import { mainTabs, type MainTab, useUiStore } from '../stores/ui.js';
 
@@ -40,11 +41,14 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <Teleport to="#filmnoteVueAuth">
+    <AuthOverlay />
+  </Teleport>
   <Teleport to="#filmnoteVueHeader">
     <AppHeader
-      @change-password="requireLegacyBridge().header?.openChangePasswordModal?.()"
-      @manage-invites="requireLegacyBridge().header?.openInviteCodeModal?.()"
-      @manage-blocked="requireLegacyBridge().header?.openBlockedMoviesModal?.()"
+      @change-password="ui.openAccountModal('changePassword')"
+      @manage-invites="ui.openAccountModal('invites')"
+      @manage-blocked="ui.openAccountModal('blocked')"
       @logout="requireLegacyBridge().header?.logoutCurrentUser?.()"
     />
   </Teleport>
@@ -58,6 +62,7 @@ onUnmounted(() => {
     />
   </Teleport>
   <AppToast :message="ui.toastMessage" :open="ui.toastOpen" />
+  <AccountModals />
   <div class="vue-runtime-root" hidden aria-hidden="true">
     <FeatureArchitectureRoot />
   </div>

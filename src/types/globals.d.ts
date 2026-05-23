@@ -25,6 +25,10 @@ declare global {
     FilmNoteVueUi?: {
       toast?: (message: string) => void;
     };
+    FilmNoteVueRatings?: {
+      openQuickRate?: (movie: unknown) => boolean;
+      openQuickEdit?: (id: string | number, opts?: unknown) => boolean;
+    };
     SUPABASE_URL?: string;
     SUPABASE_KEY?: string;
     TMDB_IMG?: string;

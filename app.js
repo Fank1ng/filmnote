@@ -5778,6 +5778,7 @@ function queueQuickRateSeasonDetailFetch() {
 }
 
 function openQuickRate(movie) {
+  if (window.FilmNoteVueRatings?.openQuickRate?.(movie)) return;
   const normalized = normalizeListMovie(movie) || (movie?.title ? {
     id: null,
     tmdb_id: null,
@@ -5808,6 +5809,7 @@ function openQuickRate(movie) {
 }
 
 function openQuickEdit(id, opts = {}) {
+  if (window.FilmNoteVueRatings?.openQuickEdit?.(id, opts)) return;
   const entry = allEntries.find(e=>e.id===id);
   if (!entry) return;
   quickEditEntryId = id;

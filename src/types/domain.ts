@@ -32,6 +32,7 @@ export type SeasonRating = {
   entry_id: string | number;
   user_id: string;
   season_number: number;
+  season_title?: string;
   ratings?: RatingDims;
   total_score?: number | null;
   comment?: string;

@@ -32,6 +32,8 @@ The main header, tab shell, toast, auth overlay, account modals, and import/expo
 
 Auth is partially migrated: login, register, password reset, recovery password, display-name setup, password change, invite management, and blocked-list management are rendered by Vue. Session bootstrapping, logout, profile finalization, and the broad data load still flow through the legacy bridge until ratings/list/discover/couple are migrated.
 
+Ratings is partially migrated: Quick Rate add/edit is now Vue-rendered and writes through typed API helpers. Legacy `openQuickRate` / `openQuickEdit` first delegate to `window.FilmNoteVueRatings`, then fall back to the old modal if Vue is unavailable. Search, selected-result preview, full search form, and detail-entry edit flows are still legacy-backed.
+
 ## Module Direction
 
 - `app/`: Vue root app and legacy bootstrap.

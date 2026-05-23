@@ -26,6 +26,9 @@ export const useCoupleStore = defineStore('couple', {
     setPendingCouples(pendingCouples: Couple[]) {
       this.pendingCouples = pendingCouples;
     },
+    setPartnerProfileId(partnerProfileId: string | null) {
+      this.partnerProfileId = partnerProfileId;
+    },
     setQueue(queue: CoupleQueueItem[]) {
       this.queue = queue;
     },

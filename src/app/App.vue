@@ -2,12 +2,14 @@
 import { onMounted, onUnmounted } from 'vue';
 import FeatureArchitectureRoot from './FeatureArchitectureRoot.vue';
 import { switchLegacyTab } from './legacy-bridge.js';
+import { installLegacyStateSync } from './legacy-state-sync.js';
 import { AppToast, TabShell } from '../shared/components/index.js';
 import { mainTabs, type MainTab, useUiStore } from '../stores/ui.js';
 
 defineOptions({ name: 'FilmNoteApp' });
 
 const ui = useUiStore();
+let stopLegacyStateSync: (() => void) | null = null;
 
 function onTabChange(event: Event): void {
   const tab = (event as CustomEvent<{ tab?: MainTab }>).detail?.tab;
@@ -25,11 +27,14 @@ onMounted(() => {
   window.FilmNoteVueUi = {
     toast: (message: string) => ui.showToast(message),
   };
+  stopLegacyStateSync = installLegacyStateSync();
   window.addEventListener('filmnote:tab-change', onTabChange);
 });
 
 onUnmounted(() => {
   window.removeEventListener('filmnote:tab-change', onTabChange);
+  stopLegacyStateSync?.();
+  stopLegacyStateSync = null;
   delete window.FilmNoteVueUi;
 });
 </script>

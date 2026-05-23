@@ -63,4 +63,8 @@ export type LegacyBridge = {
     loadAllData?: () => Promise<void>;
     getActiveTab?: () => string;
   };
+  state?: {
+    getSnapshot?: () => unknown;
+    sync?: (reason?: string) => void;
+  };
 };

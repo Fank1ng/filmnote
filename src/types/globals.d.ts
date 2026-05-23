@@ -1,5 +1,12 @@
 import type { SupabaseClient, SupabaseFactory } from './supabase';
 import type { LegacyBridge } from '../features/types';
+import type { AppState } from '../core/state';
+
+type FilmNoteStateApi = {
+  getState?: () => AppState;
+  setState?: (patch: Partial<AppState>) => AppState;
+  subscribe?: (listener: (state: AppState) => void) => () => void;
+};
 
 declare global {
   interface Window {
@@ -10,7 +17,7 @@ declare global {
     FilmNoteDOM?: Record<string, unknown>;
     FilmNoteRecommendUI?: Record<string, unknown>;
     FilmNoteScoring?: Record<string, unknown>;
-    FilmNoteState?: Record<string, unknown>;
+    FilmNoteState?: FilmNoteStateApi;
     FilmNoteTmdb?: Record<string, unknown>;
     FilmNoteTmdbCache?: Record<string, unknown>;
     FilmNoteUtils?: Record<string, unknown>;

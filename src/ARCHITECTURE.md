@@ -28,6 +28,8 @@ Vite is now the development and production build path:
 
 GitHub Pages deploys the generated `dist/` artifact.
 
+The main tab shell and toast are now Vue-native. Legacy `app.js` publishes state snapshots through `window.FilmNoteState` and `filmnote:legacy-state`; `src/app/legacy-state-sync.ts` hydrates Pinia stores from those snapshots so each feature can be migrated without reading legacy globals directly.
+
 ## Module Direction
 
 - `app/`: Vue root app and legacy bootstrap.
@@ -43,6 +45,7 @@ GitHub Pages deploys the generated `dist/` artifact.
 - Each feature exports a `FeatureDefinition` from `src/features/*/feature.ts`.
 - `src/features/registry.ts` is the complete list of app features.
 - `src/app/FeatureArchitectureRoot.vue` mounts all feature boundaries after `window.FilmNoteLegacy` is ready.
+- `src/app/legacy-state-sync.ts` keeps Pinia synchronized with the current legacy runtime state.
 - A feature starts as `legacy-backed`, meaning Vue owns the boundary and state destination while legacy `app.js` still owns the behavior.
 - When a feature is migrated to Vue, change its status to `vue-native` and remove the matching legacy render/event code.
 

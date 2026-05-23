@@ -241,6 +241,45 @@ let coupleTab = 'archive';
 let coupleArchiveChart = 'score';
 let coupleWheelPick = null;
 
+function getLegacyStateSnapshot() {
+  let watchlist = [];
+  let blockedMovies = [];
+  try {
+    watchlist = Object.values(watchlistMovies || {});
+  } catch (_) {
+    watchlist = [];
+  }
+  try {
+    blockedMovies = [...blockedMovieIds].map(tmdbId => ({
+      user_id: currentUser?.id || '',
+      tmdb_id: Number(tmdbId),
+      reason: blockedMovieReasons[tmdbId] || ''
+    }));
+  } catch (_) {
+    blockedMovies = [];
+  }
+  return {
+    currentUser,
+    currentProfile,
+    allEntries,
+    allSeasonRatings,
+    allProfiles,
+    activeCouple,
+    pendingCouples,
+    couplePartner,
+    coupleQueue,
+    watchlist,
+    blockedMovies,
+    activeTab: getActiveTab()
+  };
+}
+
+function syncLegacyState(reason = 'state') {
+  const state = getLegacyStateSnapshot();
+  window.FilmNoteState?.setState?.(state);
+  window.dispatchEvent(new CustomEvent('filmnote:legacy-state', { detail: { reason, state } }));
+}
+
 const authOverlay = $['authOverlay'];
 const mainApp = $['mainApp'];
 const nameOverlay = $['nameOverlay'];
@@ -433,6 +472,7 @@ $['nameSaveBtn'].addEventListener('click', async ()=>{
   if (!sessionToken) { sessionToken = crypto.randomUUID(); sessionStorage.setItem(SESSION_KEY, sessionToken); }
   await db.from('user_preferences').upsert({ user_id: currentUser.id, display_name: name, session_token: sessionToken });
   currentProfile = { user_id: currentUser.id, display_name: name };
+  syncLegacyState('profile-updated');
   nameOverlay.classList.remove('open');
   $['headerUser'].textContent = name;
   $['headerUser'].style.color = getUserColor(currentUser.id).main;
@@ -444,6 +484,7 @@ $['nameSaveBtn'].addEventListener('click', async ()=>{
 // ===== APP INIT =====
 async function initApp(user) {
   currentUser = user;
+  syncLegacyState('auth-user');
   authOverlay.classList.add('hidden');
   mainApp.classList.remove('hidden');
 
@@ -466,6 +507,7 @@ async function initApp(user) {
       return;
     }
     currentProfile = pref;
+    syncLegacyState('profile-loaded');
     $['headerUser'].textContent = pref.display_name;
     $['headerUser'].style.color = getUserColor(user.id).main;
     nameOverlay.classList.remove('open');
@@ -496,6 +538,8 @@ function doLogout() {
   currentProfile = null;
   allEntries = [];
   allSeasonRatings = [];
+  allProfiles = {};
+  syncLegacyState('logout');
   authOverlay.classList.remove('hidden');
   mainApp.classList.add('hidden');
   nameOverlay.classList.remove('open');
@@ -775,6 +819,7 @@ async function loadAllData() {
     allSeasonRatings = cachedSeasons || [];
     allProfiles = cachedPrefs || {};
     buildSearchIndex();
+    syncLegacyState('cache-loaded');
     updateHeaderCount();
     renderActiveTab();
     warmSearchIndexCache();
@@ -799,6 +844,7 @@ async function loadAllData() {
     allSeasonRatings = seasons || [];
     allProfiles = {};
     (prefs||[]).forEach(p=>{ allProfiles[p.user_id]=p; });
+    syncLegacyState('data-loaded');
 
     const myToken = sessionStorage.getItem(SESSION_KEY);
     const dbToken = allProfiles[currentUser.id]?.session_token;
@@ -826,6 +872,7 @@ async function loadAllData() {
     await loadCoupleState();
     await loadCoupleBlockedMovies();
     await loadCoupleQueue();
+    syncLegacyState('secondary-data-loaded');
     const listsChanged = await reconcileListsAfterRatings();
     if (listsChanged) renderActiveTab();
     if (getActiveTab() === 'couple') renderCouple();
@@ -3468,6 +3515,7 @@ async function loadWatchlist() {
       };
     }
   });
+  syncLegacyState('watchlist-loaded');
   if (getActiveTab() === 'list' && listMode === 'watchlist') renderWatchlistPanel();
   if (getActiveTab() === 'discover') renderDiscover();
 }
@@ -3488,6 +3536,7 @@ async function loadBlockedMovies() {
     blockedMovieIds = new Set(data.map(r => r.tmdb_id));
     blockedMovieReasons = {};
     data.forEach(r => { if (r.reason) blockedMovieReasons[r.tmdb_id] = r.reason; });
+    syncLegacyState('blocked-loaded');
   }
 }
 
@@ -4006,6 +4055,7 @@ async function loadCoupleState() {
     coupleQueue = [];
   }
   invalidateCoupleRecommendations();
+  syncLegacyState('couple-loaded');
 }
 
 async function loadCoupleQueue() {
@@ -4040,6 +4090,7 @@ async function loadCoupleQueue() {
       poster_path: m.poster_path || ''
     };
   });
+  syncLegacyState('couple-queue-loaded');
 }
 
 async function bindCoupleWith(userId) {
@@ -6034,7 +6085,7 @@ function locateAndGoToList(entryId) {
   listPageNum = groupIndex >= 0 ? Math.ceil((groupIndex+1)/listPageSize) : 1;
   highlightEntryId = entryId;
 }
-document.querySelectorAll('nav button').forEach(btn=>{ btn.addEventListener('click', ()=>switchTab(btn.dataset.tab)); });
+document.querySelectorAll('#legacyMainNav button').forEach(btn=>{ btn.addEventListener('click', ()=>switchTab(btn.dataset.tab)); });
 
 // ===== EXPORT / IMPORT =====
 $['exportBtn'].addEventListener('click', async ()=>{
@@ -6166,5 +6217,9 @@ window.FilmNoteLegacy = {
     closeModal,
     loadAllData,
     getActiveTab,
+  },
+  state: {
+    getSnapshot: getLegacyStateSnapshot,
+    sync: syncLegacyState,
   },
 };

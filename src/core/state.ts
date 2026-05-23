@@ -1,4 +1,4 @@
-import type { Couple, Entry, Profile, SeasonRating } from '../types/domain.js';
+import type { BlockedMovie, Couple, CoupleQueueItem, Entry, Profile, SeasonRating, WatchlistItem } from '../types/domain.js';
 
 export type AppState = {
   currentUser: unknown;
@@ -7,6 +7,12 @@ export type AppState = {
   allSeasonRatings: SeasonRating[];
   allProfiles: Record<string, Profile>;
   activeCouple: Couple | null;
+  pendingCouples: Couple[];
+  couplePartner: Profile | null;
+  coupleQueue: CoupleQueueItem[];
+  watchlist: WatchlistItem[];
+  blockedMovies: BlockedMovie[];
+  activeTab: string;
 };
 
 const state = {
@@ -16,6 +22,12 @@ const state = {
   allSeasonRatings: [],
   allProfiles: {},
   activeCouple: null,
+  pendingCouples: [],
+  couplePartner: null,
+  coupleQueue: [],
+  watchlist: [],
+  blockedMovies: [],
+  activeTab: 'rate',
 } satisfies AppState;
 
 type StateListener = (state: AppState) => void;

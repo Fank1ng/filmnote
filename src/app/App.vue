@@ -3,7 +3,7 @@ import { onMounted, onUnmounted } from 'vue';
 import FeatureArchitectureRoot from './FeatureArchitectureRoot.vue';
 import { requireLegacyBridge, switchLegacyTab } from './legacy-bridge.js';
 import { installLegacyStateSync } from './legacy-state-sync.js';
-import { AppHeader, AppToast, TabShell } from '../shared/components/index.js';
+import { AppHeader, AppToast, ImportExportToolbar, TabShell } from '../shared/components/index.js';
 import { mainTabs, type MainTab, useUiStore } from '../stores/ui.js';
 
 defineOptions({ name: 'FilmNoteApp' });
@@ -50,6 +50,12 @@ onUnmounted(() => {
   </Teleport>
   <Teleport to="#filmnoteVueShell">
     <TabShell :tabs="mainTabs" :active="ui.activeTab" @change="changeTab" />
+  </Teleport>
+  <Teleport to="#filmnoteVueImportExport">
+    <ImportExportToolbar
+      @export-json="requireLegacyBridge().importExport?.exportJson?.()"
+      @import-json="requireLegacyBridge().importExport?.importJson?.()"
+    />
   </Teleport>
   <AppToast :message="ui.toastMessage" :open="ui.toastOpen" />
   <div class="vue-runtime-root" hidden aria-hidden="true">

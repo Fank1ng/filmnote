@@ -2,7 +2,7 @@
 
 ## 项目概况
 
-Fank1ng 与 ceci 共用的电影+剧集评分系统。纯 HTML 单页应用 + Supabase BaaS + GitHub Pages 部署 + Cloudflare Worker 后端。
+Fank1ng 与 ceci 共用的电影+剧集评分系统。Vite + TypeScript 前端入口 + legacy 单页应用兼容层 + Supabase BaaS + GitHub Pages 部署 + Cloudflare Worker 后端。
 
 | 角色 | 颜色 |
 |------|------|
@@ -16,8 +16,10 @@ Fank1ng 与 ceci 共用的电影+剧集评分系统。纯 HTML 单页应用 + Su
 ## 架构
 
 ```
-index.html              — 前端单页 (~3300行)：影单/发现/统计/添加评价/设置
-worker/src/index.js     — Cloudflare Worker (~980行)：推荐算法/TMDB代理/KV缓存
+src/main.ts             — Vite/TypeScript 前端入口，安装兼容全局并加载 legacy 脚本
+src/                    — 新模块化架构层：config/api/core/shared/features/types
+app.js                  — legacy 前端业务脚本，逐步迁移到 src/features/*
+worker/src/index.js     — Cloudflare Worker：推荐算法/TMDB代理/KV缓存
 supabase_constraints.sql— 数据库约束：去重/blocked_movies表及RLS
 ```
 
@@ -40,8 +42,10 @@ supabase_constraints.sql— 数据库约束：去重/blocked_movies表及RLS
 ## 关键注意事项
 
 - **Worker 部署**: 修改 `worker/src/index.js` 后需 `cd worker && npx wrangler deploy`
+- **前端开发**: 使用 `npm run dev`，生产构建使用 `npm run build`
+- **Pages 部署**: workflow 会执行 `npm ci && npm run build` 并发布 `dist/`
 - **GitHub Pages 并发锁**: workflow 有 `concurrency: group: pages; cancel-in-progress: true`，新 push 会取消正在运行的部署
-- **编辑 index.html 注意**: 文件 3300+ 行，Edit 工具经常因空格/tab 不匹配失败，可用 Bash + Python 脚本做复杂替换
+- **legacy 迁移**: 新功能优先进入 `src/features/*`，避免继续扩大 `app.js`
 - **TMDb API**: 中国网络需 VPN，Worker 端不受影响
 - **Auth 状态管理**: 完全手动控制 `initApp()` / `doLogout()`，不使用 `onAuthStateChange`（历史原因：与手动 init 冲突导致 session 丢失）
 

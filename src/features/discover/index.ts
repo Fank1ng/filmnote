@@ -1,4 +1,5 @@
 export { default as DiscoverFeature } from './DiscoverFeature.vue';
+export { default as DiscoverPanel } from './DiscoverPanel.vue';
 export { discoverFeature, renderDiscover, showDiscover } from './feature.js';
 
 export function initDiscoverFeature() {

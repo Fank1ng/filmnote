@@ -55,6 +55,12 @@ export type LegacyBridge = {
     loadRecommendations?: () => Promise<unknown>;
     loadTrending?: () => Promise<unknown>;
     loadTopRated?: () => Promise<unknown>;
+    getControls?: () => unknown;
+    updateControls?: (patch: unknown) => void;
+    refreshRecommendations?: () => Promise<unknown>;
+    setLastShownIds?: (ids: unknown) => void;
+    showMovieDetail?: (tmdbId: number) => Promise<void>;
+    blockMovie?: (tmdbId: number) => Promise<void>;
   };
   couple?: {
     renderCouple?: () => void;

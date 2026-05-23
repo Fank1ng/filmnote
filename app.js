@@ -3766,12 +3766,68 @@ function updateRefreshUI() {
   }
 }
 
+function getDiscoverControlsSnapshot() {
+  return {
+    tab: discoverTab,
+    page: discoverPage[discoverTab] || 1,
+    pages: { ...discoverPage },
+    topratedFilterUnwatched,
+    lastRefresh: discoverLastRefresh,
+    ratedCount: allEntries.filter(e => e.user_id === currentUser?.id && e.type === 'movie').length,
+    recTabLabel: document.getElementById('discoverRecTab')?.textContent || 'Ceci推荐'
+  };
+}
+
+function notifyDiscoverControlsChanged() {
+  window.dispatchEvent(new CustomEvent('filmnote:discover-controls', { detail: getDiscoverControlsSnapshot() }));
+}
+
+function syncLegacyDiscoverControlDom() {
+  document.querySelectorAll('#discoverSubtabs button').forEach(b => b.classList.toggle('active', b.dataset.dt === discoverTab));
+}
+
+function updateDiscoverControls(patch = {}) {
+  if (patch.tab && ['recommend', 'week', 'toprated'].includes(patch.tab)) discoverTab = patch.tab;
+  if (patch.pages && typeof patch.pages === 'object') {
+    discoverPage = { ...discoverPage, ...patch.pages };
+  }
+  if (patch.page) discoverPage[discoverTab] = Math.max(1, Number(patch.page) || 1);
+  if ('topratedFilterUnwatched' in patch) topratedFilterUnwatched = !!patch.topratedFilterUnwatched;
+  syncLegacyDiscoverControlDom();
+  notifyDiscoverControlsChanged();
+}
+
+async function refreshDiscoverRecommendations() {
+  if (!currentUser) return [];
+  const currentCount = allEntries.filter(e=>e.user_id===currentUser.id && e.type==='movie').length;
+  if (currentCount === discoverRatedCount) {
+    discoverRefreshStreak++;
+  } else {
+    discoverRatedCount = currentCount;
+    discoverRefreshStreak = 0;
+    discoverLastShownIds = [];
+  }
+  if (discoverRefreshStreak >= 3) {
+    discoverRefreshStreak = 0;
+    discoverLastShownIds = [];
+  }
+  discoverCache.recommend = null;
+  discoverLastRefresh = Date.now();
+  notifyDiscoverControlsChanged();
+  return loadRecommendations();
+}
+
+function setDiscoverLastShownIds(ids) {
+  discoverLastShownIds = Array.isArray(ids) ? ids.map(Number).filter(Boolean) : [];
+}
+
 document.querySelectorAll('#discoverSubtabs button').forEach(btn=>{
   btn.addEventListener('click', ()=>{
     document.querySelectorAll('#discoverSubtabs button').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
     discoverTab = btn.dataset.dt;
     renderDiscover();
+    notifyDiscoverControlsChanged();
   });
 });
 
@@ -5489,6 +5545,7 @@ async function blockMovie(tmdbId, cardEl) {
   blockedMovieIds.add(tmdbId);
   if (reason.trim()) blockedMovieReasons[tmdbId] = reason.trim().slice(0, 40);
   discoverCache.recommend = null;
+  syncLegacyState('blocked-added');
   if (cardEl) {
     cardEl.classList.add('blocked-removing');
     setTimeout(() => {
@@ -5500,6 +5557,7 @@ async function blockMovie(tmdbId, cardEl) {
     }, 300);
   }
   toast('已加入不再推荐列表');
+  notifyDiscoverControlsChanged();
 }
 
 function renderBlockedPanel(shouldHydrate = true) {
@@ -5671,6 +5729,7 @@ const genreMap = {
 };
 
 async function loadRecommendations() {
+  if (!currentUser) return [];
   if (discoverCache.recommend) return discoverCache.recommend;
 
   const myMovies = allEntries.filter(e=>e.user_id===currentUser.id && e.tmdb_id && e.type==='movie');
@@ -6327,6 +6386,12 @@ window.FilmNoteLegacy = {
     loadRecommendations,
     loadTrending,
     loadTopRated,
+    getControls: getDiscoverControlsSnapshot,
+    updateControls: updateDiscoverControls,
+    refreshRecommendations,
+    setLastShownIds: setDiscoverLastShownIds,
+    showMovieDetail,
+    blockMovie,
   },
   couple: {
     renderCouple,

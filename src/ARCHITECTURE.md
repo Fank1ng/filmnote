@@ -38,6 +38,8 @@ List is partially migrated: the visible list mode tabs, media subtabs, search, s
 
 Stats is partially migrated: the visible media type, scope tabs, comparison user picker, metric cards, radar chart, and score distribution views are now Vue-rendered. Vue writes control changes through the legacy stats adapter, and the hidden legacy stats renderer remains only as a compatibility layer for detail-cache refreshes while the remaining data-fetch path is moved into `src/`.
 
+Discover is partially migrated: the visible recommendation tabs, top bars, movie cards, Top Rated pagination, watchlist/next-watch/rating/block actions, and recommendation refresh UI are now Vue-rendered. Vue still calls the legacy discover adapter for recommendation/trending/top-rated data loading and detail/block actions until those API paths move into `src/api`.
+
 ## Module Direction
 
 - `app/`: Vue root app and legacy bootstrap.

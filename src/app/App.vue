@@ -4,6 +4,7 @@ import FeatureArchitectureRoot from './FeatureArchitectureRoot.vue';
 import { requireLegacyBridge, switchLegacyTab } from './legacy-bridge.js';
 import { installLegacyStateSync } from './legacy-state-sync.js';
 import { AccountModals, AuthOverlay } from '../features/auth/index.js';
+import { DiscoverPanel } from '../features/discover/index.js';
 import { ListBody, ListControls, WatchlistGrid } from '../features/list/index.js';
 import { QuickRateModal, RatingsSearchPanel } from '../features/ratings/index.js';
 import { StatsContent, StatsControls } from '../features/stats/index.js';
@@ -81,6 +82,9 @@ onUnmounted(() => {
   </Teleport>
   <Teleport to="#filmnoteVueStatsContent">
     <StatsContent />
+  </Teleport>
+  <Teleport to="#filmnoteVueDiscover">
+    <DiscoverPanel />
   </Teleport>
   <AppToast :message="ui.toastMessage" :open="ui.toastOpen" />
   <AccountModals />

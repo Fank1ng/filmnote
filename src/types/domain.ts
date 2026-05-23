@@ -86,13 +86,21 @@ export type CoupleQueueItem = {
 
 export type TmdbMedia = {
   id: number;
+  tmdb_id?: number;
   media_type?: MediaType | 'tv';
+  type?: MediaType;
   title?: string;
   name?: string;
   release_date?: string;
   first_air_date?: string;
+  year?: number | null;
   poster_path?: string | null;
   overview?: string;
+  original_language?: string;
+  vote_average?: number;
+  genre_ids?: number[];
+  genres?: Array<string | { id?: number; name?: string }>;
+  reasons?: string[];
 };
 
 export type TmdbDetail = TmdbMedia & {

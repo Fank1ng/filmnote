@@ -194,11 +194,12 @@ $['updatePwBtn'].addEventListener('click', async ()=>{
 });
 
 // Change password (logged in)
-$['changePwBtn'].addEventListener('click', ()=>{
+function openChangePasswordModal() {
   $['userMenu'].classList.remove('open');
   $['changePwInput'].value = '';
   $['changePwOverlay'].classList.add('open');
-});
+}
+$['changePwBtn'].addEventListener('click', openChangePasswordModal);
 $['changePwCancel'].addEventListener('click', ()=>{
   $['changePwOverlay'].classList.remove('open');
 });
@@ -392,11 +393,12 @@ $['loginBtn'].addEventListener('click', async ()=>{
   }
 });
 
-$['logoutBtn'].addEventListener('click', async ()=>{
+async function logoutCurrentUser() {
   $['userMenu'].classList.remove('open');
   await db.auth.signOut();
   doLogout();
-});
+}
+$['logoutBtn'].addEventListener('click', logoutCurrentUser);
 
 // User menu dropdown toggle
 $['userMenu'].addEventListener('click', (e)=>{
@@ -448,11 +450,12 @@ $['inviteGenerateBtn'].addEventListener('click', async () => {
   btn.textContent = '生成邀请码'; btn.disabled = false;
 });
 
-$['inviteMenuBtn'].addEventListener('click', () => {
+function openInviteCodeModal() {
   $['userMenu'].classList.remove('open');
   $['inviteCodeOverlay'].classList.add('open');
   loadInviteCodes();
-});
+}
+$['inviteMenuBtn'].addEventListener('click', openInviteCodeModal);
 
 $['inviteCloseBtn'].addEventListener('click', () => {
   $['inviteCodeOverlay'].classList.remove('open');
@@ -5201,12 +5204,13 @@ $['coupleContent'].addEventListener('click', async e => {
 });
 
 // Open blocked movies modal from user dropdown
-$['blockedMgmtBtn'].addEventListener('click', () => {
+function openBlockedMoviesModal() {
   $['userMenu'].classList.remove('open');
   blockedPage = 1;
   renderBlockedPanel();
   $['blockedModal'].classList.add('open');
-});
+}
+$['blockedMgmtBtn'].addEventListener('click', openBlockedMoviesModal);
 
 // Close blocked modal
 $['blockedModalClose'].addEventListener('click', () => {
@@ -6217,6 +6221,12 @@ window.FilmNoteLegacy = {
     closeModal,
     loadAllData,
     getActiveTab,
+  },
+  header: {
+    openChangePasswordModal,
+    openInviteCodeModal,
+    openBlockedMoviesModal,
+    logoutCurrentUser,
   },
   state: {
     getSnapshot: getLegacyStateSnapshot,

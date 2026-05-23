@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue';
 import FeatureArchitectureRoot from './FeatureArchitectureRoot.vue';
-import { switchLegacyTab } from './legacy-bridge.js';
+import { requireLegacyBridge, switchLegacyTab } from './legacy-bridge.js';
 import { installLegacyStateSync } from './legacy-state-sync.js';
-import { AppToast, TabShell } from '../shared/components/index.js';
+import { AppHeader, AppToast, TabShell } from '../shared/components/index.js';
 import { mainTabs, type MainTab, useUiStore } from '../stores/ui.js';
 
 defineOptions({ name: 'FilmNoteApp' });
@@ -40,6 +40,14 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <Teleport to="#filmnoteVueHeader">
+    <AppHeader
+      @change-password="requireLegacyBridge().header?.openChangePasswordModal?.()"
+      @manage-invites="requireLegacyBridge().header?.openInviteCodeModal?.()"
+      @manage-blocked="requireLegacyBridge().header?.openBlockedMoviesModal?.()"
+      @logout="requireLegacyBridge().header?.logoutCurrentUser?.()"
+    />
+  </Teleport>
   <Teleport to="#filmnoteVueShell">
     <TabShell :tabs="mainTabs" :active="ui.activeTab" @change="changeTab" />
   </Teleport>

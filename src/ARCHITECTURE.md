@@ -28,7 +28,7 @@ Vite is now the development and production build path:
 
 GitHub Pages deploys the generated `dist/` artifact.
 
-The main tab shell and toast are now Vue-native. Legacy `app.js` publishes state snapshots through `window.FilmNoteState` and `filmnote:legacy-state`; `src/app/legacy-state-sync.ts` hydrates Pinia stores from those snapshots so each feature can be migrated without reading legacy globals directly.
+The main header, tab shell, and toast are now Vue-native. Legacy `app.js` publishes state snapshots through `window.FilmNoteState` and `filmnote:legacy-state`; `src/app/legacy-state-sync.ts` hydrates Pinia stores from those snapshots so each feature can be migrated without reading legacy globals directly.
 
 ## Module Direction
 

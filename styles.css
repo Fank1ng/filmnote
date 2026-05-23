@@ -45,6 +45,7 @@
   .logo .fd { color: var(--gold); }
   .logo .ce { color: var(--ceci); }
   .header-right { display: flex; align-items: center; gap: 12px; }
+  .header-count { font-size: 0.85rem; color: var(--text2); }
   .user-badge { font-size: 0.8rem; color: var(--gold); }
   .user-menu { position: relative; display: flex; align-items: center; gap: 2px; cursor: pointer; user-select: none; }
   .user-arrow { font-size: 0.65rem; color: var(--text2); transition: var(--t); }

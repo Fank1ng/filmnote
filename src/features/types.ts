@@ -63,6 +63,12 @@ export type LegacyBridge = {
     loadAllData?: () => Promise<void>;
     getActiveTab?: () => string;
   };
+  header?: {
+    openChangePasswordModal?: () => void;
+    openInviteCodeModal?: () => void;
+    openBlockedMoviesModal?: () => void;
+    logoutCurrentUser?: () => Promise<void>;
+  };
   state?: {
     getSnapshot?: () => unknown;
     sync?: (reason?: string) => void;

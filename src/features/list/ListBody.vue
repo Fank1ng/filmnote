@@ -44,7 +44,20 @@ type EntryGroup = Entry[] & {
   _avgScore?: number;
 };
 
+type MediaSearchRecord = Record<string, unknown> & {
+  title_zh?: string;
+  title_en?: string;
+  original_title?: string;
+  director_zh?: string;
+  director_en?: string;
+  cast_zh?: string;
+  cast_en?: string;
+  fetched_at?: number;
+  version?: number;
+};
+
 const pageSize = 20;
+const searchIndexBatchSize = 20;
 
 const entries = useEntriesStore();
 const session = useSessionStore();
@@ -57,8 +70,10 @@ const sort = ref<SortBy>('date-desc');
 const score = ref<ScoreFilter>('all');
 const page = ref(1);
 const detailCache = ref<Record<string, Record<string, unknown>>>({});
+const mediaSearchCache = ref<Record<string, MediaSearchRecord>>({});
 let stopLegacyReady: (() => void) | null = null;
 let warmingDetails = false;
+let warmingSearch = false;
 
 const currentUser = computed(() => getCurrentUser<UserLike>(session.currentUser));
 const currentUserId = computed(() => currentUser.value?.id || '');
@@ -86,8 +101,14 @@ function stringifySearchValue(value: unknown): string {
     return [
       record.name,
       record.title,
+      record.title_zh,
+      record.title_en,
       record.original_title,
       record.original_name,
+      record.director_zh,
+      record.director_en,
+      record.cast_zh,
+      record.cast_en,
       record.character,
     ].map(stringifySearchValue).filter(Boolean).join(' ');
   }
@@ -101,6 +122,7 @@ function searchTokens(value: string): string[] {
 
 function entrySearchText(entry: Entry): string {
   const detail = detailFor(entry);
+  const searchRecord = searchRecordFor(entry);
   return normalizeText([
     entry.title,
     (entry as Entry & { original_title?: string }).original_title,
@@ -111,6 +133,13 @@ function entrySearchText(entry: Entry): string {
     ...(Array.isArray(detail?.cast) ? detail.cast : []),
     ...(Array.isArray(detail?.genres) ? detail.genres : []),
     ...(Array.isArray(detail?.keyword_names) ? detail.keyword_names : []),
+    searchRecord?.title_zh,
+    searchRecord?.title_en,
+    searchRecord?.original_title,
+    searchRecord?.director_zh,
+    searchRecord?.director_en,
+    searchRecord?.cast_zh,
+    searchRecord?.cast_en,
     entry.director,
     entry.year,
     entries.profiles[entry.user_id]?.display_name,
@@ -135,6 +164,50 @@ function loadDetailCache(): void {
   }
 }
 
+function loadMediaSearchCache(): void {
+  try {
+    mediaSearchCache.value = JSON.parse(localStorage.getItem('filmnote_media_search_cache_v1') || '{}') || {};
+  } catch {
+    mediaSearchCache.value = {};
+  }
+}
+
+function searchRecordFor(entry: Entry): MediaSearchRecord | null {
+  const tmdbId = Number(entry.tmdb_id || 0);
+  if (!tmdbId) return null;
+  return mediaSearchCache.value[`${mediaType(entry)}:${tmdbId}`] || null;
+}
+
+function isSearchRecordComplete(record: MediaSearchRecord | null): boolean {
+  if (!record || Number(record.version || 0) < 2 || !record.fetched_at) return false;
+  return /[a-z]/i.test(normalizeText([
+    record.title_en,
+    record.original_title,
+    record.director_en,
+    record.cast_en,
+  ]));
+}
+
+function saveMediaSearchRecords(records: Record<string, MediaSearchRecord>): void {
+  if (!records || !Object.keys(records).length) return;
+  const next = { ...mediaSearchCache.value };
+  for (const [key, record] of Object.entries(records)) {
+    if (!record || !Object.values(record).some(value => String(value || '').trim())) continue;
+    next[key] = {
+      ...(next[key] || {}),
+      ...record,
+      version: 2,
+      fetched_at: Date.now(),
+    };
+  }
+  mediaSearchCache.value = next;
+  try {
+    localStorage.setItem('filmnote_media_search_cache_v1', JSON.stringify(next));
+  } catch {
+    // Search can still use the in-memory cache for this session.
+  }
+}
+
 async function warmDetailCache(): Promise<void> {
   if (warmingDetails) return;
   const targets = entries.entries
@@ -150,6 +223,33 @@ async function warmDetailCache(): Promise<void> {
     loadDetailCache();
   } finally {
     warmingDetails = false;
+  }
+}
+
+async function warmMediaSearchCache(): Promise<void> {
+  if (warmingSearch) return;
+  const targets = entries.entries
+    .map(entry => ({ type: mediaType(entry), tmdbId: Number(entry.tmdb_id || 0), key: `${mediaType(entry)}:${Number(entry.tmdb_id || 0)}` }))
+    .filter(item => item.tmdbId && !isSearchRecordComplete(mediaSearchCache.value[item.key] || null));
+  const uniqueTargets = Array.from(new Map(targets.map(item => [item.key, item])).values());
+  if (!uniqueTargets.length) return;
+  warmingSearch = true;
+  try {
+    for (let index = 0; index < uniqueTargets.length; index += searchIndexBatchSize) {
+      const batch = uniqueTargets.slice(index, index + searchIndexBatchSize);
+      const response = await fetch(`${window.TMDB_PROXY || 'https://filmnote.lccf1223.workers.dev'}/search-index`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: batch.map(item => ({ media_type: item.type, tmdb_id: item.tmdbId })) }),
+      });
+      if (!response.ok) continue;
+      const data = await response.json().catch(() => ({})) as { results?: Record<string, MediaSearchRecord> };
+      saveMediaSearchRecords(data.results || {});
+    }
+  } catch {
+    // English search keeps using whatever cache is already available.
+  } finally {
+    warmingSearch = false;
   }
 }
 
@@ -332,14 +432,18 @@ function onLegacyControls(event: Event): void {
 
 onMounted(() => {
   loadDetailCache();
+  loadMediaSearchCache();
   void warmDetailCache();
+  void warmMediaSearchCache();
   stopLegacyReady = onLegacyReady(bridge => applyControls(asControlState(bridge.list?.getControls?.())));
   window.addEventListener('filmnote:list-controls', onLegacyControls);
 });
 
 watch(() => entries.entries.map(entry => `${mediaType(entry)}:${entry.tmdb_id || entry.id}`).join('|'), () => {
   loadDetailCache();
+  loadMediaSearchCache();
   void warmDetailCache();
+  void warmMediaSearchCache();
 });
 
 onBeforeUnmount(() => {

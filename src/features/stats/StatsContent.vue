@@ -178,9 +178,9 @@ function calcStats(sourceEntries: Entry[], media: MediaType): StatsResult | null
 }
 
 function applyState(state: StatsControlState): void {
-  filter.value = state.filter === 'others' || state.filter === 'compare' ? state.filter : 'me';
-  type.value = state.type === 'series' ? 'series' : 'movie';
-  otherUser.value = state.otherUser || null;
+  if ('filter' in state) filter.value = state.filter === 'others' || state.filter === 'compare' ? state.filter : 'me';
+  if ('type' in state) type.value = state.type === 'series' ? 'series' : 'movie';
+  if ('otherUser' in state) otherUser.value = state.otherUser || null;
   loadDetailCache();
 }
 

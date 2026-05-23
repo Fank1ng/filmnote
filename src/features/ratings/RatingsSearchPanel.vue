@@ -86,10 +86,13 @@ function findExistingEntry(movie: NormalizedSearchMedia) {
 
 async function runSearch(value: string): Promise<void> {
   const q = value.trim();
-  clearSelection();
   errorMessage.value = '';
   results.value = [];
-  if (!q) return;
+  if (!q) {
+    loading.value = false;
+    return;
+  }
+  clearSelection();
   abortController?.abort();
   abortController = new AbortController();
   loading.value = true;

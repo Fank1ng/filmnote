@@ -3072,6 +3072,7 @@ async function fetchAndRenderTmdbDetail(mediaType, tmdbId, sectionId, ovId, onBa
 // ── Movie detail from discover page (TMDB data focused) ──
 async function showMovieDetail(tmdbId) {
   const movie = discoverMovieMap[tmdbId];
+  if (window.FilmNoteVueMediaDetail?.openMovie?.(movie || { id: tmdbId, tmdb_id: tmdbId, media_type: 'movie' })) return;
   if (!movie) return;
 
   const cached = movieCache.get(tmdbId);
@@ -3125,6 +3126,7 @@ async function showMovieDetail(tmdbId) {
 async function showListItemDetail(movieOrId) {
   const item = normalizeListMovie(movieOrId);
   if (!item) return;
+  if (window.FilmNoteVueMediaDetail?.openListItem?.(item)) return;
   if (item.media_type === 'movie') {
     discoverMovieMap[item.tmdb_id] = {
       ...(discoverMovieMap[item.tmdb_id] || {}),
@@ -3182,6 +3184,7 @@ async function showListItemDetail(movieOrId) {
 
 function closeModal() {
   window.FilmNoteVueDetail?.close?.();
+  window.FilmNoteVueMediaDetail?.close?.();
   $['detailModal'].classList.remove('open');
 }
 $['detailModal'].addEventListener('click', e=>{ if(e.target===e.currentTarget) closeModal(); });

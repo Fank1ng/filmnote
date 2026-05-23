@@ -109,12 +109,22 @@ export type TmdbMedia = {
   genre_ids?: number[];
   genres?: Array<string | { id?: number; name?: string }>;
   reasons?: string[];
+  director?: string;
+  number_of_seasons?: number;
 };
 
 export type TmdbDetail = TmdbMedia & {
   runtime?: number | null;
   episode_run_time?: number[];
-  genres?: Array<{ id: number; name: string }>;
+  original_title?: string;
+  overview_missing?: boolean;
+  genres?: Array<string | { id?: number; name?: string }>;
   credits?: unknown;
   seasons?: unknown[];
+  cast?: string[];
+  keyword_ids?: number[];
+  keyword_names?: string[];
+  vote_count?: number;
+  popularity?: number;
+  fetched_at?: number;
 };

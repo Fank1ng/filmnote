@@ -33,6 +33,11 @@ declare global {
       openEntry?: (id: string | number) => boolean;
       close?: () => void;
     };
+    FilmNoteVueMediaDetail?: {
+      openMovie?: (movie: unknown) => boolean;
+      openListItem?: (movie: unknown) => boolean;
+      close?: () => void;
+    };
     SUPABASE_URL?: string;
     SUPABASE_KEY?: string;
     TMDB_IMG?: string;

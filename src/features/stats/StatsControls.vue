@@ -44,7 +44,20 @@ function applyState(state: StatsControlState): void {
 
 function syncToLegacy(patch: StatsControlState): void {
   if (suppressSync) return;
+  notifyControlsChanged();
   getLegacyBridge()?.stats?.updateControls?.(patch);
+}
+
+function currentControls(): StatsControlState {
+  return {
+    filter: filter.value,
+    type: type.value,
+    otherUser: filter.value === 'me' ? null : otherUser.value || null,
+  };
+}
+
+function notifyControlsChanged(): void {
+  window.dispatchEvent(new CustomEvent('filmnote:stats-controls', { detail: currentControls() }));
 }
 
 function setType(nextType: MediaType): void {

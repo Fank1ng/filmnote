@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
-import { TMDB_IMG } from '../../config/constants.js';
+import { TMDB_IMG, TMDB_PROXY } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
 import { useCoupleStore } from '../../stores/couple.js';
 import { useEntriesStore } from '../../stores/entries.js';
@@ -188,15 +188,24 @@ function syncControls(): void {
 
 async function loadActiveTab(): Promise<void> {
   const bridge = getLegacyBridge();
-  if (!bridge?.discover) return;
   const seq = ++loadSeq;
   loading.value = true;
   errorMessage.value = '';
   try {
     let result: unknown;
-    if (activeTab.value === 'recommend') result = await bridge.discover.loadRecommendations?.();
-    else if (activeTab.value === 'week') result = await bridge.discover.loadTrending?.();
-    else result = await bridge.discover.loadTopRated?.();
+    if (bridge?.discover) {
+      if (activeTab.value === 'recommend') result = await bridge.discover.loadRecommendations?.();
+      else if (activeTab.value === 'week') result = await bridge.discover.loadTrending?.();
+      else result = await bridge.discover.loadTopRated?.();
+    } else if (activeTab.value === 'week' || activeTab.value === 'toprated') {
+      const endpoint = activeTab.value === 'week' ? 'trending' : 'toprated';
+      const response = await fetch(`${TMDB_PROXY}/${endpoint}`);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `接口异常 (${response.status})`);
+      result = data.results || [];
+    } else {
+      result = ratedCount.value >= 25 ? [] : null;
+    }
     if (seq !== loadSeq) return;
     movies.value = result === null ? null : (Array.isArray(result) ? result as TmdbMedia[] : []);
   } catch (error) {

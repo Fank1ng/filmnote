@@ -4405,14 +4405,14 @@ async function addToCoupleQueue(movieOrId) {
 }
 
 async function removeCoupleQueueItem(queueId) {
-  const item = coupleQueue.find(q => q.id === queueId);
+  const item = coupleQueue.find(q => String(q.id) === String(queueId));
   if (!item) return;
   const { error } = await db.from('couple_watch_queue').delete().eq('id', queueId);
   if (error) {
     toast('移除失败: ' + error.message);
     return;
   }
-  coupleQueue = coupleQueue.filter(q => q.id !== queueId);
+  coupleQueue = coupleQueue.filter(q => String(q.id) !== String(queueId));
   await normalizeCoupleQueuePositions(false);
   syncLegacyState('couple-queue-removed');
   notifyCoupleControlsChanged();
@@ -4433,7 +4433,7 @@ async function normalizeCoupleQueuePositions(shouldReload = true) {
 }
 
 async function moveCoupleQueueItem(queueId, dir) {
-  const idx = coupleQueue.findIndex(q => q.id === queueId);
+  const idx = coupleQueue.findIndex(q => String(q.id) === String(queueId));
   const nextIdx = idx + dir;
   if (idx < 0 || nextIdx < 0 || nextIdx >= coupleQueue.length) return;
   const a = coupleQueue[idx];

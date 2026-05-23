@@ -4,6 +4,7 @@ import { useSessionStore } from '../stores/session.js';
 import { useEntriesStore } from '../stores/entries.js';
 import { useListsStore } from '../stores/lists.js';
 import { useCoupleStore } from '../stores/couple.js';
+import { onLegacyReady } from './legacy-bridge.js';
 
 type LegacyStateEvent = CustomEvent<{
   reason?: string;
@@ -46,6 +47,15 @@ function applyLegacyState(state: Partial<AppState>): void {
 }
 
 export function installLegacyStateSync(): () => void {
+  let unsubscribeState: (() => void) | null = null;
+
+  const subscribeToState = (): void => {
+    if (unsubscribeState || !window.FilmNoteState) return;
+    unsubscribeState = window.FilmNoteState.subscribe?.(applyLegacyState) ?? null;
+    const snapshot = window.FilmNoteState.getState?.();
+    if (snapshot) applyLegacyState(snapshot);
+  };
+
   const onLegacyState = (event: Event): void => {
     const state = (event as LegacyStateEvent).detail?.state;
     if (state) applyLegacyState(state);
@@ -53,12 +63,12 @@ export function installLegacyStateSync(): () => void {
 
   window.addEventListener('filmnote:legacy-state', onLegacyState);
 
-  const unsubscribe = window.FilmNoteState?.subscribe?.(applyLegacyState) ?? null;
-  const snapshot = window.FilmNoteState?.getState?.();
-  if (snapshot) applyLegacyState(snapshot);
+  subscribeToState();
+  const stopLegacyReady = onLegacyReady(subscribeToState);
 
   return () => {
     window.removeEventListener('filmnote:legacy-state', onLegacyState);
-    unsubscribe?.();
+    stopLegacyReady();
+    unsubscribeState?.();
   };
 }

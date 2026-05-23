@@ -53,18 +53,27 @@ function applyState(state: ListControlState): void {
 
 function syncToLegacy(patch: ListControlState): void {
   if (suppressSync) return;
+  notifyControlsChanged();
   getLegacyBridge()?.list?.updateControls?.(patch);
 }
 
-function syncAllToLegacy(): void {
-  syncToLegacy({
+function currentControls(): ListControlState {
+  return {
     mode: mode.value,
     type: type.value,
     owner: owner.value,
     search: search.value,
     sort: sort.value,
     score: score.value,
-  });
+  };
+}
+
+function notifyControlsChanged(): void {
+  window.dispatchEvent(new CustomEvent('filmnote:list-controls', { detail: currentControls() }));
+}
+
+function syncAllToLegacy(): void {
+  syncToLegacy(currentControls());
 }
 
 function setMode(nextMode: ListMode): void {

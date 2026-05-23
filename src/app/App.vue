@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, watch } from 'vue';
 import FeatureArchitectureRoot from './FeatureArchitectureRoot.vue';
-import { getLegacyBridge, requireLegacyBridge } from './legacy-bridge.js';
+import { getLegacyBridge, onLegacyReady, requireLegacyBridge } from './legacy-bridge.js';
 import { installLegacyStateSync } from './legacy-state-sync.js';
 import { AccountModals, AuthOverlay } from '../features/auth/index.js';
 import { CouplePanel } from '../features/couple/index.js';
@@ -16,6 +16,7 @@ defineOptions({ name: 'FilmNoteApp' });
 
 const ui = useUiStore();
 let stopLegacyStateSync: (() => void) | null = null;
+let stopLegacyReadySync: (() => void) | null = null;
 
 function activateTabPanel(tab: MainTab): void {
   document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
@@ -44,13 +45,19 @@ onMounted(() => {
   };
   activateTabPanel(ui.activeTab);
   stopLegacyStateSync = installLegacyStateSync();
+  stopLegacyReadySync = onLegacyReady(bridge => {
+    bridge.shell?.switchTab?.(ui.activeTab);
+    bridge.state?.sync?.('vue-legacy-ready');
+  });
   window.addEventListener('filmnote:tab-change', onTabChange);
 });
 
 onUnmounted(() => {
   window.removeEventListener('filmnote:tab-change', onTabChange);
   stopLegacyStateSync?.();
+  stopLegacyReadySync?.();
   stopLegacyStateSync = null;
+  stopLegacyReadySync = null;
   delete window.FilmNoteVueUi;
 });
 </script>

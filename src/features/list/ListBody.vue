@@ -206,7 +206,9 @@ function rowActionEntry(group: EntryGroup): Entry | null {
 }
 
 function showDetail(entry: Entry): void {
-  getLegacyBridge()?.list?.showDetail?.(entry.id);
+  if (!window.FilmNoteVueDetail?.openEntry?.(entry.id)) {
+    getLegacyBridge()?.list?.showDetail?.(entry.id);
+  }
 }
 
 function editEntry(entry: Entry): void {

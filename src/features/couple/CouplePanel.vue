@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
-import { DIM_LABELS, TMDB_IMG, WEIGHTS, type RatingDim } from '../../config/constants.js';
+import { DIM_LABELS, TMDB_IMG, TMDB_PROXY, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
 import { getEntryScore } from '../../shared/scoring.js';
 import { useCoupleStore } from '../../stores/couple.js';
@@ -291,7 +291,49 @@ function setChartMode(nextMode: 'score' | 'type'): void {
 }
 
 async function loadRecommendations(force = false): Promise<void> {
-  await getLegacyBridge()?.couple?.loadCoupleRecommendations?.(force);
+  const bridge = getLegacyBridge();
+  if (bridge?.couple?.loadCoupleRecommendations) {
+    await bridge.couple.loadCoupleRecommendations(force);
+    return;
+  }
+  if (!activeCouple.value || !currentUserId.value || recommendationLoading.value) return;
+  couple.setLoading(true);
+  couple.setRecommendationState('loading');
+  try {
+    const response = await fetch(`${TMDB_PROXY}/recommend`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mode: 'couple',
+        entries: entries.entries.map(entry => ({
+          user_id: entry.user_id,
+          type: mediaType(entry.type || entry.media_type),
+          tmdb_id: entry.tmdb_id || null,
+          total_score: entry.total_score || null,
+          created_at: entry.created_at || '',
+        })),
+        userId: currentUserId.value,
+        partnerUserId: partnerId.value,
+        blockedIds: [...lists.blockedMovieIds],
+        blockedMovies: [...lists.blockedMovieIds].map(tmdbId => ({ tmdb_id: tmdbId, reason: '' })),
+        excludeIds: couple.queue.map(item => item.tmdb_id),
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || `双人推荐接口异常 (${response.status})`);
+    if (data.movies === null) {
+      couple.setRecommendations([]);
+      couple.setRecommendationState('insufficient');
+    } else {
+      couple.setRecommendations((data.movies || []).map((movie: TmdbMedia) => ({ ...movie, media_type: 'movie' })));
+      couple.setRecommendationState('ready');
+    }
+  } catch {
+    couple.setRecommendations([]);
+    couple.setRecommendationState('error');
+  } finally {
+    couple.setLoading(false);
+  }
 }
 
 async function bindUser(userId: string): Promise<void> {
@@ -308,7 +350,17 @@ async function disconnect(coupleId: string | number): Promise<void> {
 }
 
 async function moveQueue(item: CoupleQueueItem, direction: number): Promise<void> {
-  await getLegacyBridge()?.couple?.moveQueueItem?.(item.id, direction);
+  const bridge = getLegacyBridge();
+  if (bridge?.couple?.moveQueueItem) {
+    await bridge.couple.moveQueueItem(item.id, direction);
+    return;
+  }
+  const index = couple.queue.findIndex(row => String(row.id) === String(item.id));
+  const nextIndex = index + direction;
+  if (index < 0 || nextIndex < 0 || nextIndex >= couple.queue.length) return;
+  const next = [...couple.queue];
+  [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
+  couple.setQueue(next);
 }
 
 async function removeQueue(item: CoupleQueueItem): Promise<void> {
@@ -316,11 +368,23 @@ async function removeQueue(item: CoupleQueueItem): Promise<void> {
 }
 
 function rateQueue(item: CoupleQueueItem): void {
-  getLegacyBridge()?.couple?.rateQueueItem?.(item.id);
+  if (!window.FilmNoteVueRatings?.openQuickRate?.({
+    id: item.tmdb_id,
+    tmdb_id: item.tmdb_id,
+    media_type: mediaType(item.media_type),
+    type: mediaType(item.media_type),
+    title: item.title || `TMDB #${item.tmdb_id}`,
+    year: item.year || null,
+    poster_path: item.poster_path || '',
+  })) {
+    getLegacyBridge()?.couple?.rateQueueItem?.(item.id);
+  }
 }
 
 async function openQueue(item: CoupleQueueItem): Promise<void> {
-  await getLegacyBridge()?.couple?.showQueueItemDetail?.(item.id);
+  if (!window.FilmNoteVueMediaDetail?.openListItem?.(item)) {
+    await getLegacyBridge()?.couple?.showQueueItemDetail?.(item.id);
+  }
 }
 
 function listKey(movie: TmdbMedia): string {

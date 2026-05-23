@@ -258,6 +258,10 @@ function fmtDate(d){ if(!d) return ''; const dt=new Date(d); return dt.getFullYe
 function posterUrl(path) { return path ? TMDB_IMG+path : ''; }
 
 function toast(msg) {
+  if (window.FilmNoteVueUi?.toast) {
+    window.FilmNoteVueUi.toast(msg);
+    return;
+  }
   const t=$['toast']; t.textContent=msg; t.classList.add('show');
   setTimeout(()=>t.classList.remove('show'), 2500);
 }
@@ -5967,13 +5971,16 @@ $['qrSubmit'].addEventListener('click', async ()=>{
 function switchTab(name) {
   document.querySelectorAll('nav button').forEach(b=>{ b.classList.remove('active'); b.setAttribute('aria-selected','false'); });
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
-  const tabBtn = document.querySelector(`nav button[data-tab="${name}"]`);
-  if (tabBtn) { tabBtn.classList.add('active'); tabBtn.setAttribute('aria-selected','true'); }
+  document.querySelectorAll(`nav button[data-tab="${name}"]`).forEach(tabBtn => {
+    tabBtn.classList.add('active');
+    tabBtn.setAttribute('aria-selected','true');
+  });
   document.getElementById(`panel-${name}`)?.classList.add('active');
   if (name==='list') { if (!highlightEntryId) listPageNum = 1; renderList(); scrollToHighlight(); }
   if (name==='couple') { renderCouple(); }
   if (name==='stats') { renderStats(); }
   if (name==='discover') { renderDiscover(); }
+  window.dispatchEvent(new CustomEvent('filmnote:tab-change', { detail: { tab: name } }));
 }
 
 function scrollToHighlight() {
@@ -6112,3 +6119,52 @@ db.auth.onAuthStateChange((event, session) => {
     toast('登录状态恢复失败：' + (e.message || e));
   }
 })();
+
+// ===== LEGACY FEATURE BRIDGE =====
+// Temporary bridge for the Vue/Pinia architecture while feature implementations
+// are migrated out of this legacy bundle one at a time.
+window.FilmNoteLegacy = {
+  auth: {
+    showLoginView,
+    showRegisterView,
+    doLogout,
+    initApp,
+  },
+  ratings: {
+    openQuickRate,
+    openQuickEdit,
+    resetForm,
+    editEntry,
+    deleteEntry,
+  },
+  list: {
+    renderList,
+    showDetail,
+    locateAndGoToList,
+  },
+  stats: {
+    renderStats,
+  },
+  discover: {
+    renderDiscover,
+    loadRecommendations,
+    loadTrending,
+    loadTopRated,
+  },
+  couple: {
+    renderCouple,
+    loadCoupleState,
+    loadCoupleQueue,
+  },
+  importExport: {
+    exportJson() { $['exportBtn']?.click(); },
+    importJson() { $['importBtn']?.click(); },
+  },
+  shell: {
+    switchTab,
+    renderActiveTab,
+    closeModal,
+    loadAllData,
+    getActiveTab,
+  },
+};

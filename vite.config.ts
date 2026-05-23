@@ -1,5 +1,6 @@
 import { copyFile, mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import vue from '@vitejs/plugin-vue';
 import { defineConfig, type Plugin } from 'vite';
 
 const legacyFiles = [
@@ -29,7 +30,7 @@ function copyLegacyFiles(): Plugin {
 
 export default defineConfig({
   base: './',
-  plugins: [copyLegacyFiles()],
+  plugins: [vue(), copyLegacyFiles()],
   build: {
     outDir: 'dist',
     emptyOutDir: true,

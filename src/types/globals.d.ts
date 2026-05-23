@@ -1,4 +1,5 @@
 import type { SupabaseClient, SupabaseFactory } from './supabase';
+import type { LegacyBridge } from '../features/types';
 
 declare global {
   interface Window {
@@ -13,6 +14,10 @@ declare global {
     FilmNoteTmdb?: Record<string, unknown>;
     FilmNoteTmdbCache?: Record<string, unknown>;
     FilmNoteUtils?: Record<string, unknown>;
+    FilmNoteLegacy?: LegacyBridge;
+    FilmNoteVueUi?: {
+      toast?: (message: string) => void;
+    };
     SUPABASE_URL?: string;
     SUPABASE_KEY?: string;
     TMDB_IMG?: string;

@@ -242,6 +242,25 @@ let coupleTab = 'archive';
 let coupleArchiveChart = 'score';
 let coupleWheelPick = null;
 
+function getCoupleControlsSnapshot() {
+  return {
+    tab: coupleTab,
+    archiveChart: coupleArchiveChart,
+    queueAvailable: coupleQueueAvailable,
+    couplesAvailable,
+  };
+}
+
+function notifyCoupleControlsChanged() {
+  window.dispatchEvent(new CustomEvent('filmnote:couple-controls', { detail: getCoupleControlsSnapshot() }));
+}
+
+function updateCoupleControls(patch = {}) {
+  if (patch.tab && ['archive', 'recommend', 'queue'].includes(patch.tab)) coupleTab = patch.tab;
+  if (patch.archiveChart) coupleArchiveChart = patch.archiveChart === 'type' ? 'type' : 'score';
+  notifyCoupleControlsChanged();
+}
+
 function getLegacyStateSnapshot() {
   let watchlist = [];
   let blockedMovies = [];
@@ -4220,6 +4239,7 @@ async function loadCoupleState() {
   }
   invalidateCoupleRecommendations();
   syncLegacyState('couple-loaded');
+  notifyCoupleControlsChanged();
 }
 
 async function loadCoupleQueue() {
@@ -4255,6 +4275,7 @@ async function loadCoupleQueue() {
     };
   });
   syncLegacyState('couple-queue-loaded');
+  notifyCoupleControlsChanged();
 }
 
 async function bindCoupleWith(userId) {
@@ -4367,6 +4388,8 @@ async function addToCoupleQueue(movieOrId) {
   }
   if (data) coupleQueue.push({ ...data, media_type: normalizeMediaType(data.media_type) });
   if (movie.media_type === 'movie') discoverMovieMap[movie.tmdb_id] = movie;
+  syncLegacyState('couple-queue-added');
+  notifyCoupleControlsChanged();
   toast('已加入下次看');
   if (getActiveTab() === 'couple') renderCouple();
 }
@@ -4381,6 +4404,8 @@ async function removeCoupleQueueItem(queueId) {
   }
   coupleQueue = coupleQueue.filter(q => q.id !== queueId);
   await normalizeCoupleQueuePositions(false);
+  syncLegacyState('couple-queue-removed');
+  notifyCoupleControlsChanged();
   toast('已移出下次看');
   renderCouple();
 }
@@ -4412,7 +4437,21 @@ async function moveCoupleQueueItem(queueId, dir) {
     db.from('couple_watch_queue').update({ position: a.position }).eq('id', a.id),
     db.from('couple_watch_queue').update({ position: b.position }).eq('id', b.id)
   ]);
+  syncLegacyState('couple-queue-moved');
+  notifyCoupleControlsChanged();
   renderCouple();
+}
+
+function rateCoupleQueueItem(queueId) {
+  const item = coupleQueue.find(q => String(q.id) === String(queueId));
+  if (!item) return;
+  if (normalizeMediaType(item.media_type) === 'movie') openQuickRate({ id: item.tmdb_id, title: item.title, year: item.year, poster_path: item.poster_path });
+  else openEntryFormForListMovie(item);
+}
+
+async function showCoupleQueueItemDetail(queueId) {
+  const item = coupleQueue.find(q => String(q.id) === String(queueId));
+  if (item) await showListItemDetail(item);
 }
 
 function getCommonCouplePairs() {
@@ -5207,6 +5246,7 @@ function renderCoupleSubtabs() {
 function renderCouple() {
   const container = $['coupleContent'];
   if (!container) return;
+  notifyCoupleControlsChanged();
   if (!couplesAvailable) {
     container.innerHTML = '<div class="empty-state"><p>Couple 表尚未创建，请先执行升级 SQL</p></div>';
     return;
@@ -6398,6 +6438,15 @@ window.FilmNoteLegacy = {
     loadCoupleState,
     loadCoupleQueue,
     addToCoupleQueue,
+    getControls: getCoupleControlsSnapshot,
+    updateControls: updateCoupleControls,
+    bindCoupleWith,
+    confirmCouple,
+    disconnectCouple,
+    moveQueueItem: moveCoupleQueueItem,
+    removeQueueItem: removeCoupleQueueItem,
+    rateQueueItem: rateCoupleQueueItem,
+    showQueueItemDetail: showCoupleQueueItemDetail,
   },
   importExport: {
     exportJson() { $['exportBtn']?.click(); },

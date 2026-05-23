@@ -38,7 +38,7 @@ function applyLegacyState(state: Partial<AppState>): void {
   if ('activeCouple' in state) couple.setActiveCouple(state.activeCouple ?? null);
   if (state.pendingCouples) couple.setPendingCouples(state.pendingCouples);
   if (state.coupleQueue) couple.setQueue(state.coupleQueue);
-  if (state.couplePartner) couple.setPartnerProfileId(state.couplePartner.user_id);
+  if ('couplePartner' in state) couple.setPartnerProfileId(state.couplePartner?.user_id ?? null);
   if (isMainTab(state.activeTab)) ui.setActiveTab(state.activeTab);
 }
 

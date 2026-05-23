@@ -67,6 +67,15 @@ export type LegacyBridge = {
     loadCoupleState?: () => Promise<void>;
     loadCoupleQueue?: () => Promise<void>;
     addToCoupleQueue?: (movie: unknown) => Promise<void>;
+    getControls?: () => unknown;
+    updateControls?: (patch: unknown) => void;
+    bindCoupleWith?: (userId: string) => Promise<void>;
+    confirmCouple?: (coupleId: string | number) => Promise<void>;
+    disconnectCouple?: (coupleId: string | number) => Promise<void>;
+    moveQueueItem?: (queueId: string | number, direction: number) => Promise<void>;
+    removeQueueItem?: (queueId: string | number) => Promise<void>;
+    rateQueueItem?: (queueId: string | number) => void;
+    showQueueItemDetail?: (queueId: string | number) => Promise<void>;
   };
   importExport?: {
     exportJson?: () => void;

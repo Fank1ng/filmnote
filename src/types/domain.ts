@@ -47,10 +47,15 @@ export type Profile = {
 
 export type Couple = {
   id: string | number;
-  user1_id: string;
-  user2_id: string;
+  user1_id?: string;
+  user2_id?: string;
+  user_a?: string;
+  user_b?: string;
+  requested_by?: string;
+  disconnect_requested_by?: string | null;
   status?: string;
   created_at?: string;
+  updated_at?: string;
   [key: string]: unknown;
 };
 
@@ -81,7 +86,9 @@ export type CoupleQueueItem = {
   tmdb_id: number;
   position?: number;
   title?: string;
+  year?: number | null;
   poster_path?: string;
+  added_by?: string;
 };
 
 export type TmdbMedia = {

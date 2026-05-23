@@ -2606,6 +2606,64 @@ let ownerFilter = 'all';
 let listPageSize = 20;
 let listPageNum = 1;
 
+function getListControlsSnapshot() {
+  return {
+    mode: listMode,
+    type: listType,
+    owner: ownerFilter,
+    search: $['searchInput']?.value || '',
+    sort: $['sortBy']?.value || 'date-desc',
+    score: $['scoreFilter']?.value || 'all',
+    page: listPageNum,
+    watchlistPage,
+    watchlistCount: watchlistIds?.size || 0
+  };
+}
+
+function syncLegacyListControlDom() {
+  document.querySelectorAll('#listModeTabs button').forEach(b => b.classList.toggle('active', b.dataset.lmode === listMode));
+  document.querySelectorAll('#listSubtabs button').forEach(b => b.classList.toggle('active', b.dataset.ltype === listType));
+  if ($['ownerFilter']) $['ownerFilter'].value = ownerFilter;
+  if ($['sortBy']) $['sortBy'].value = $['sortBy'].value || 'date-desc';
+  if ($['scoreFilter']) $['scoreFilter'].value = $['scoreFilter'].value || 'all';
+}
+
+function notifyListControlsChanged() {
+  window.dispatchEvent(new CustomEvent('filmnote:list-controls', { detail: getListControlsSnapshot() }));
+}
+
+function updateListControls(patch = {}) {
+  const prevMode = listMode;
+  const prevType = listType;
+  const prevOwner = ownerFilter;
+  const prevSearch = $['searchInput']?.value || '';
+  const prevSort = $['sortBy']?.value || 'date-desc';
+  const prevScore = $['scoreFilter']?.value || 'all';
+
+  if (patch.mode) listMode = patch.mode === 'watchlist' ? 'watchlist' : 'entries';
+  if (patch.type) listType = patch.type === 'series' ? 'series' : 'movie';
+  if (patch.owner) ownerFilter = patch.owner === 'me' ? 'me' : 'all';
+  if (typeof patch.search === 'string' && $['searchInput']) $['searchInput'].value = patch.search;
+  if (patch.sort && $['sortBy']) $['sortBy'].value = patch.sort;
+  if (patch.score && $['scoreFilter']) $['scoreFilter'].value = patch.score;
+
+  const filtersChanged = prevMode !== listMode
+    || prevType !== listType
+    || prevOwner !== ownerFilter
+    || prevSearch !== ($['searchInput']?.value || '')
+    || prevSort !== ($['sortBy']?.value || 'date-desc')
+    || prevScore !== ($['scoreFilter']?.value || 'all');
+
+  if (typeof patch.page === 'number') listPageNum = Math.max(1, patch.page);
+  else if (filtersChanged && listMode === 'entries') listPageNum = 1;
+  if (typeof patch.watchlistPage === 'number') watchlistPage = Math.max(1, patch.watchlistPage);
+  else if (prevMode !== listMode && listMode === 'watchlist') watchlistPage = 1;
+
+  syncLegacyListControlDom();
+  renderList();
+  notifyListControlsChanged();
+}
+
 $['listModeTabs'].addEventListener('click', e => {
   const btn = e.target.closest('button[data-lmode]');
   if (!btn) return;
@@ -2618,6 +2676,7 @@ $['listModeTabs'].addEventListener('click', e => {
     listPageNum = 1;
   }
   renderList();
+  notifyListControlsChanged();
 });
 
 document.querySelectorAll('#listSubtabs button').forEach(btn=>{
@@ -2625,18 +2684,18 @@ document.querySelectorAll('#listSubtabs button').forEach(btn=>{
     document.querySelectorAll('#listSubtabs button').forEach(b=>b.classList.remove('active'));
     btn.classList.add('active');
     listType = btn.dataset.ltype;
-    listPageNum = 1; renderList();
+    listPageNum = 1; renderList(); notifyListControlsChanged();
   });
 });
 
 $['ownerFilter'].addEventListener('change', function(){
   ownerFilter = this.value;
-  listPageNum = 1; renderList();
+  listPageNum = 1; renderList(); notifyListControlsChanged();
 });
 
-$['searchInput'].addEventListener('input', ()=>{ listPageNum = 1; renderList(); });
-$['sortBy'].addEventListener('change', ()=>{ listPageNum = 1; renderList(); });
-$['scoreFilter'].addEventListener('change', ()=>{ listPageNum = 1; renderList(); });
+$['searchInput'].addEventListener('input', ()=>{ listPageNum = 1; renderList(); notifyListControlsChanged(); });
+$['sortBy'].addEventListener('change', ()=>{ listPageNum = 1; renderList(); notifyListControlsChanged(); });
+$['scoreFilter'].addEventListener('change', ()=>{ listPageNum = 1; renderList(); notifyListControlsChanged(); });
 
 // Shared: build filtered, grouped, scored, and sorted groups from current list controls
 function getFilteredSortedGroups() {
@@ -3961,10 +4020,11 @@ $['listWatchlistView'].addEventListener('click', e => {
   const pgBtn = e.target.closest('button[data-wl-pg]');
   if (pgBtn) {
     watchlistPage = parseInt(pgBtn.getAttribute('data-wl-pg'));
-    if (!isNaN(watchlistPage)) {
-      renderWatchlistPanel();
-      window.scrollTo({top:0, behavior:'smooth'});
-    }
+	    if (!isNaN(watchlistPage)) {
+	      renderWatchlistPanel();
+	      notifyListControlsChanged();
+	      window.scrollTo({top:0, behavior:'smooth'});
+	    }
     return;
   }
   if (e.target.closest('button')) return;
@@ -5481,10 +5541,11 @@ $['movieList'].addEventListener('click', e=>{
   if (isNaN(pg) || pg<1) return;
   if (listPageDebounce) return;
   listPageDebounce = setTimeout(()=>{ listPageDebounce = null; }, 300);
-  listPageNum = pg;
-  renderList();
-  window.scrollTo({top:0,behavior:'smooth'});
-});
+	  listPageNum = pg;
+	  renderList();
+	  notifyListControlsChanged();
+	  window.scrollTo({top:0,behavior:'smooth'});
+	});
 
 function buildPaginationHTML(cp, total, attr, cls) {
   // attr: button data attribute (e.g. 'data-lp-pg' or 'data-pg')
@@ -6101,9 +6162,11 @@ function locateAndGoToList(entryId) {
   // Use shared function — guarantees identical filtering/sorting to renderList
   const groups = getFilteredSortedGroups();
   const groupIndex = groups.findIndex(g=>g.some(e=>e.id===entryId));
-  listPageNum = groupIndex >= 0 ? Math.ceil((groupIndex+1)/listPageSize) : 1;
-  highlightEntryId = entryId;
-}
+	  listPageNum = groupIndex >= 0 ? Math.ceil((groupIndex+1)/listPageSize) : 1;
+	  highlightEntryId = entryId;
+	  syncLegacyListControlDom();
+	  notifyListControlsChanged();
+	}
 document.querySelectorAll('#legacyMainNav button').forEach(btn=>{ btn.addEventListener('click', ()=>switchTab(btn.dataset.tab)); });
 
 // ===== EXPORT / IMPORT =====
@@ -6213,6 +6276,8 @@ window.FilmNoteLegacy = {
     showDetail,
     locateAndGoToList,
     addToWatchlist,
+    getControls: getListControlsSnapshot,
+    updateControls: updateListControls,
   },
   stats: {
     renderStats,

@@ -217,16 +217,17 @@
 
     <!-- ═══ 影单 ═══ -->
     <section class="tab-panel" id="panel-list">
-      <div class="section-title-switch" id="listModeTabs" aria-label="影单视图">
+      <div id="filmnoteVueListControls"></div>
+      <div class="section-title-switch" id="listModeTabs" aria-label="影单视图" hidden>
         <button class="active" data-lmode="entries">我的影单</button>
         <button data-lmode="watchlist">想看清单 <span id="watchlistCount">0</span></button>
       </div>
       <div id="listEntriesView">
-        <div class="list-subtabs" id="listSubtabs">
+        <div class="list-subtabs" id="listSubtabs" hidden>
           <button class="active" data-ltype="movie">电影</button>
           <button data-ltype="series">剧集</button>
         </div>
-        <div class="list-controls">
+        <div class="list-controls" hidden>
           <input type="text" class="search-box" id="searchInput" placeholder="搜索片名 / 导演 / 演员...">
           <select id="sortBy">
             <option value="date-desc">最近添加</option>

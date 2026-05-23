@@ -1,4 +1,5 @@
 export { default as ListFeature } from './ListFeature.vue';
+export { default as ListControls } from './ListControls.vue';
 export { listFeature, renderList, showDetail, showList } from './feature.js';
 
 export function initListFeature() {

@@ -34,6 +34,8 @@ Auth is partially migrated: login, register, password reset, recovery password, 
 
 Ratings is partially migrated: the search panel and Quick Rate add/edit are now Vue-rendered. Search uses typed TMDB API helpers, selected-result actions call Vue Quick Rate and legacy list/Couple adapters, and Quick Rate writes through typed entry API helpers. Legacy `openQuickRate` / `openQuickEdit` first delegate to `window.FilmNoteVueRatings`, then fall back to the old modal if Vue is unavailable. The old full search form and detail-entry edit flows are still legacy-backed and hidden for compatibility.
 
+List is partially migrated: the visible list mode tabs, media subtabs, search, sort, owner, and score filters are now Vue-rendered. Vue writes control changes through the legacy list adapter so existing card rendering, pagination, detail modal, and watchlist grid behavior remain stable while the list body is migrated.
+
 ## Module Direction
 
 - `app/`: Vue root app and legacy bootstrap.

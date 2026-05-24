@@ -14,16 +14,6 @@ import type { DiscoverTab } from '../../stores/discover.js';
 
 defineOptions({ name: 'DiscoverPanel' });
 
-type DiscoverControls = {
-  tab?: DiscoverTab;
-  page?: number;
-  pages?: Partial<Record<DiscoverTab, number>>;
-  topratedFilterUnwatched?: boolean;
-  lastRefresh?: number;
-  ratedCount?: number;
-  recTabLabel?: string;
-};
-
 const genreMap: Record<number, string> = {
   28: '动作', 12: '冒险', 16: '动画', 35: '喜剧', 80: '犯罪', 99: '纪录', 18: '剧情', 10751: '家庭',
   14: '奇幻', 36: '历史', 27: '恐怖', 10402: '音乐', 9648: '悬疑', 10749: '爱情', 878: '科幻',
@@ -95,10 +85,6 @@ const pageMovies = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value;
   return filteredMovies.value.slice(start, start + pageSize.value);
 });
-function asControls(input: unknown): DiscoverControls {
-  return (input || {}) as DiscoverControls;
-}
-
 function mediaType(movie: { media_type?: unknown; type?: unknown }): MediaType {
   return normalizeMediaType(movie.media_type || movie.type || 'movie');
 }
@@ -165,15 +151,6 @@ async function loadRecommendationsDirect(excludeIds: number[] = []): Promise<Tmd
 
 function isRated(movie: TmdbMedia): boolean {
   return ratedTmdbIds.value.has(`tmdb_${tmdbId(movie)}`);
-}
-
-function applyControls(controls: DiscoverControls): void {
-  if (controls.tab === 'recommend' || controls.tab === 'week' || controls.tab === 'toprated') activeTab.value = controls.tab;
-  if (controls.pages) pages.value = { ...pages.value, ...controls.pages };
-  if (controls.page) pages.value[activeTab.value] = Math.max(1, Number(controls.page) || 1);
-  if ('topratedFilterUnwatched' in controls) topRatedUnwatched.value = !!controls.topratedFilterUnwatched;
-  if (controls.lastRefresh) lastRefresh.value = controls.lastRefresh;
-  if (controls.recTabLabel) recTabLabel.value = controls.recTabLabel;
 }
 
 function tabLabel(tab: DiscoverTab): string {
@@ -263,12 +240,6 @@ async function openDetail(movie: TmdbMedia): Promise<void> {
   mediaActions.openMediaDetail({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) });
 }
 
-function onControls(event: Event): void {
-  const previousTab = activeTab.value;
-  applyControls(asControls((event as CustomEvent<DiscoverControls>).detail));
-  if (activeTab.value !== previousTab) void loadActiveTab();
-}
-
 watch(currentUserId, userId => {
   if (userId) void loadActiveTab();
 });
@@ -279,12 +250,10 @@ watch(() => entries.entries.length, () => {
 
 onMounted(() => {
   timer = window.setInterval(() => { nowTick.value = Date.now(); }, 1000);
-  window.addEventListener('filmnote:discover-controls', onControls);
   void loadActiveTab();
 });
 
 onBeforeUnmount(() => {
-  window.removeEventListener('filmnote:discover-controls', onControls);
   if (timer) window.clearInterval(timer);
 });
 </script>

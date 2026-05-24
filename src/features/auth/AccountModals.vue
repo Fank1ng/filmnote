@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue';
 import { getSupabaseClient } from '../../api/supabase.js';
 import { generateInviteCode, loadInviteCodes } from '../../api/profile-api.js';
 import { removeBlockedMovie as removeBlockedMovieRecord } from '../../api/list-api.js';
-import { getLegacyBridge } from '../../app/legacy-bridge.js';
+import { saveDisplayName as saveDisplayNameApi } from '../../app/session.js';
 import { BaseModal, PaginationControls } from '../../shared/components/index.js';
 import { useListsStore } from '../../stores/lists.js';
 import { useSessionStore } from '../../stores/session.js';
@@ -75,9 +75,7 @@ async function saveDisplayName(): Promise<void> {
   try {
     const name = displayName.value.trim();
     if (!/^[a-zA-Z0-9]{1,6}$/.test(name)) throw new Error('用户名仅支持英文和数字，最多6位');
-    const bridge = getLegacyBridge();
-    if (!bridge?.auth?.saveDisplayName) throw new Error('初始化中，请稍后再试');
-    await bridge.auth.saveDisplayName(name);
+    await saveDisplayNameApi(name);
     ui.showToast('名称已保存');
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : String(error);
@@ -142,9 +140,7 @@ async function removeBlocked(tmdbId: number): Promise<void> {
   if (!userId) return;
   busy.value = true;
   try {
-    const bridge = getLegacyBridge();
-    if (bridge?.lists?.removeBlockedMovie) await bridge.lists.removeBlockedMovie(tmdbId);
-    else await removeBlockedMovieRecord(userId, tmdbId);
+    await removeBlockedMovieRecord(userId, tmdbId);
     lists.setBlockedMovies(lists.blockedMovies.filter(item => item.tmdb_id !== tmdbId));
     if (blockedPage.value > blockedTotalPages.value) blockedPage.value = blockedTotalPages.value;
   } catch (error) {

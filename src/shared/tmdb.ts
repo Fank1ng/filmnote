@@ -8,12 +8,3 @@ export function tmdbFetch(path: string, opts: RequestInit = {}): Promise<Respons
   if (TMDB_PROXY) return fetch(TMDB_PROXY + '/tmdb' + path, opts);
   return Promise.reject(new Error('TMDB proxy is not configured'));
 }
-
-export function installTmdbNamespace(target: Window = window): void {
-  target.tmdbFetch = tmdbFetch;
-  target.FilmNoteTmdb = {
-    posterUrl,
-    tmdbFetch,
-  };
-  target.FilmNoteTmdbCache = target.FilmNoteTmdbCache || {};
-}

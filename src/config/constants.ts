@@ -23,15 +23,3 @@ export const DIM_LABELS = {
 } as const;
 
 export type RatingDim = keyof typeof WEIGHTS;
-
-export function installConfigGlobals(target: Window = window): void {
-  Object.assign(target, {
-    SUPABASE_URL,
-    SUPABASE_KEY,
-    TMDB_IMG,
-    TMDB_PROXY,
-    SESSION_KEY,
-    WEIGHTS,
-    DIM_LABELS,
-  });
-}

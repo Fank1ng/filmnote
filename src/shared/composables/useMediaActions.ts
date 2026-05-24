@@ -5,6 +5,7 @@ import { getCurrentUserId } from '../../app/user-context.js';
 import { useCoupleStore } from '../../stores/couple.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useListsStore } from '../../stores/lists.js';
+import { useModalStore } from '../../stores/modals.js';
 import { useSessionStore } from '../../stores/session.js';
 import { useUiStore } from '../../stores/ui.js';
 import type { CoupleQueueItem, Entry, MediaType, TmdbMedia, WatchlistItem } from '../../types/domain.js';
@@ -88,6 +89,7 @@ export function useMediaActions() {
   const entries = useEntriesStore();
   const lists = useListsStore();
   const couple = useCoupleStore();
+  const modals = useModalStore();
 
   const userId = () => getCurrentUserId(session.currentUser);
 
@@ -97,9 +99,8 @@ export function useMediaActions() {
       ui.showToast('无法识别影片信息');
       return false;
     }
-    const opened = !!window.FilmNoteVueRatings?.openQuickRate?.({ ...media, ...opts });
-    if (!opened) ui.showToast('评分面板还未就绪，请刷新后重试');
-    return opened;
+    modals.openQuickRate({ ...media, ...opts });
+    return true;
   }
 
   function openMediaDetail(input: MediaActionInput): boolean {
@@ -108,15 +109,13 @@ export function useMediaActions() {
       ui.showToast('无法打开详情，影片信息不完整');
       return false;
     }
-    const opened = !!(window.FilmNoteVueMediaDetail?.openListItem?.(media) || window.FilmNoteVueMediaDetail?.openMovie?.(media));
-    if (!opened) ui.showToast('详情面板还未就绪，请刷新后重试');
-    return opened;
+    modals.openMediaDetail(media);
+    return true;
   }
 
   function openEntryDetail(id: Entry['id']): boolean {
-    const opened = !!window.FilmNoteVueDetail?.openEntry?.(id);
-    if (!opened) ui.showToast('评价详情还未就绪，请刷新后重试');
-    return opened;
+    modals.openEntryDetail(id);
+    return true;
   }
 
   async function toggleWatchlist(input: MediaActionInput): Promise<boolean> {

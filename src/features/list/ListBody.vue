@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onMounted, ref, watch } from 'vue';
+import { storeToRefs } from 'pinia';
 import { deleteEntry as deleteEntryApi } from '../../api/entries-api.js';
 import { refreshVueData } from '../../app/data-sync.js';
 import { getCurrentUser } from '../../app/user-context.js';
-import { DIM_LABELS, WEIGHTS, type RatingDim } from '../../config/constants.js';
-import { onLegacyReady } from '../../app/legacy-bridge.js';
+import { DIM_LABELS, TMDB_PROXY, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import { PaginationControls } from '../../shared/components/index.js';
 import { useMediaActions } from '../../shared/composables/useMediaActions.js';
 import { getSeasonAwareEntryScore } from '../../shared/scoring.js';
 import { posterUrl } from '../../shared/tmdb.js';
 import { fetchTmdbDetail, getCachedTmdbDetail, needsTmdbDetailFetch } from '../../shared/tmdb-detail.js';
 import { useEntriesStore } from '../../stores/entries.js';
+import { useListControlsStore } from '../../stores/list-controls.js';
+import { useModalStore } from '../../stores/modals.js';
 import { useSessionStore } from '../../stores/session.js';
 import { useUiStore } from '../../stores/ui.js';
 import type { Entry, MediaType, RatingDims } from '../../types/domain.js';
@@ -19,21 +21,6 @@ defineOptions({ name: 'ListBody' });
 
 type UserLike = {
   id?: string;
-};
-
-type ListMode = 'entries' | 'watchlist';
-type OwnerFilter = 'all' | 'me';
-type SortBy = 'date-desc' | 'date-asc' | 'score-desc' | 'score-asc' | 'count-desc' | 'title';
-type ScoreFilter = 'all' | '10' | '9' | '8' | '7' | '6' | '5' | '4' | '3' | '2' | '1';
-
-type ListControlState = {
-  mode?: ListMode;
-  type?: MediaType;
-  owner?: OwnerFilter;
-  search?: string;
-  sort?: SortBy;
-  score?: ScoreFilter;
-  page?: number;
 };
 
 type UserColor = {
@@ -62,20 +49,15 @@ const pageSize = 20;
 const searchIndexBatchSize = 20;
 
 const entries = useEntriesStore();
+const controls = useListControlsStore();
 const session = useSessionStore();
 const ui = useUiStore();
 const mediaActions = useMediaActions();
+const modals = useModalStore();
+const { mode, type, owner, search, sort, score, page } = storeToRefs(controls);
 
-const mode = ref<ListMode>('entries');
-const type = ref<MediaType>('movie');
-const owner = ref<OwnerFilter>('all');
-const search = ref('');
-const sort = ref<SortBy>('date-desc');
-const score = ref<ScoreFilter>('all');
-const page = ref(1);
 const detailCache = ref<Record<string, Record<string, unknown>>>({});
 const mediaSearchCache = ref<Record<string, MediaSearchRecord>>({});
-let stopLegacyReady: (() => void) | null = null;
 let warmingDetails = false;
 let warmingSearch = false;
 
@@ -245,7 +227,7 @@ async function warmMediaSearchCache(): Promise<void> {
   try {
     for (let index = 0; index < uniqueTargets.length; index += searchIndexBatchSize) {
       const batch = uniqueTargets.slice(index, index + searchIndexBatchSize);
-      const response = await fetch(`${window.TMDB_PROXY || 'https://filmnote.lccf1223.workers.dev'}/search-index`, {
+      const response = await fetch(`${TMDB_PROXY}/search-index`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items: batch.map(item => ({ media_type: item.type, tmdb_id: item.tmdbId })) }),
@@ -381,7 +363,7 @@ function showDetail(entry: Entry): void {
 }
 
 function editEntry(entry: Entry): void {
-  if (!window.FilmNoteVueRatings?.openQuickEdit?.(entry.id)) ui.showToast('评分面板还未就绪，请刷新后重试');
+  modals.openQuickEdit(entry.id);
 }
 
 async function deleteEntry(entry: Entry): Promise<void> {
@@ -409,27 +391,8 @@ function addMyRating(entry: Entry): void {
 }
 
 function changePage(nextPage: number): void {
-  page.value = nextPage;
-  window.dispatchEvent(new CustomEvent('filmnote:list-controls', { detail: { page: nextPage } }));
+  controls.setPage(nextPage);
   window.scrollTo({ top: 0, behavior: 'smooth' });
-}
-
-function asControlState(input: unknown): ListControlState {
-  return (input || {}) as ListControlState;
-}
-
-function applyControls(state: ListControlState): void {
-  if ('mode' in state) mode.value = state.mode === 'watchlist' ? 'watchlist' : 'entries';
-  if ('type' in state) type.value = state.type === 'series' ? 'series' : 'movie';
-  if ('owner' in state) owner.value = state.owner === 'me' ? 'me' : 'all';
-  if ('search' in state) search.value = state.search || '';
-  if ('sort' in state) sort.value = state.sort || 'date-desc';
-  if ('score' in state) score.value = state.score || 'all';
-  if ('page' in state) page.value = Math.max(1, Number(state.page || 1));
-}
-
-function onLegacyControls(event: Event): void {
-  applyControls(asControlState((event as CustomEvent<ListControlState>).detail));
 }
 
 onMounted(() => {
@@ -437,8 +400,6 @@ onMounted(() => {
   loadMediaSearchCache();
   void warmDetailCache();
   void warmMediaSearchCache();
-  stopLegacyReady = onLegacyReady(bridge => applyControls(asControlState(bridge.list?.getControls?.())));
-  window.addEventListener('filmnote:list-controls', onLegacyControls);
 });
 
 watch(() => entries.entries.map(entry => `${mediaType(entry)}:${entry.tmdb_id || entry.id}`).join('|'), () => {
@@ -460,10 +421,6 @@ watch([pageGroups, () => ui.highlightEntryId], async () => {
   ui.clearHighlightEntry();
 }, { flush: 'post' });
 
-onBeforeUnmount(() => {
-  stopLegacyReady?.();
-  window.removeEventListener('filmnote:list-controls', onLegacyControls);
-});
 </script>
 
 <template>

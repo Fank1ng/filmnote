@@ -4,11 +4,11 @@ type UserLike = {
 };
 
 export function getLegacyCurrentUser<T extends UserLike = UserLike>(): T | null {
-  return (window.FilmNoteState?.getState?.().currentUser as T | null) || null;
+  return null;
 }
 
 export function getCurrentUser<T extends UserLike = UserLike>(piniaUser: unknown): T | null {
-  return (piniaUser as T | null) || getLegacyCurrentUser<T>();
+  return (piniaUser as T | null) || null;
 }
 
 export function getCurrentUserId(piniaUser: unknown): string {

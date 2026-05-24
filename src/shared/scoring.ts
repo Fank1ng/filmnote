@@ -26,10 +26,3 @@ export function getSeasonAwareEntryScore(entry: Entry | null | undefined, season
   if (!seasons.length) return getEntryScore(entry);
   return seasons.reduce((sum, season) => sum + Number(season.total_score || 0), 0) / seasons.length;
 }
-
-export function installScoringNamespace(target: Window = window): void {
-  target.FilmNoteScoring = {
-    calcTotal,
-    getEntryScore,
-  };
-}

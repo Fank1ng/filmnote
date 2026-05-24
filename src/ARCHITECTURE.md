@@ -1,74 +1,21 @@
 # FilmNote Frontend Architecture
 
-The frontend is migrating from a single legacy script to Vue 3 + TypeScript.
+FilmNote is now a Vue 3 + TypeScript + Pinia application. The runtime entry is `src/main.ts`, which initializes app configuration and Supabase, mounts `App.vue`, and lets Vue own the full UI tree.
 
-## Current Phase
+## Runtime
 
-`src/main.ts` is the only HTML entrypoint. It mounts a Vue 3 app with Pinia, then `src/app/bootstrap.ts` installs shared globals for legacy compatibility, initializes Supabase, and loads the existing legacy scripts in their original order:
+- `index.html` contains only the Vue root, stylesheet, Supabase UMD client, and Vite module entry.
+- `src/app/bootstrap.ts` initializes frontend configuration and the Supabase client.
+- `src/app/session.ts` restores Supabase auth state, manages profile/session-token checks, and refreshes Pinia data.
+- `src/app/data-sync.ts` is the shared refresh path for entries, season ratings, profiles, watchlist, blocked movies, Couple state, and queue.
 
-1. `tmdb-cache.js`
-2. `recommend-ui.js`
-3. `app.js`
+## State And Features
 
-This keeps current behavior stable while new code gains a clear module boundary. All product areas are now represented in the Vue feature registry as `legacy-backed` features:
+- Pinia stores are the source of truth for session, entries, lists, discover, Couple, UI state, list controls, and stats controls.
+- Feature modules under `src/features/` render Vue-native search, ratings, list, discover, Couple, stats, auth, account, and import/export flows.
+- API modules under `src/api/` are the only database mutation/read layer for Supabase-backed features.
+- Shared UI, scoring, TMDB detail/cache helpers, media actions, and pagination live under `src/shared/`.
 
-1. `auth`
-2. `ratings`
-3. `list`
-4. `stats`
-5. `discover`
-6. `couple`
-7. `importExport`
+## Legacy Removal
 
-Vite is now the development and production build path:
-
-- `npm run dev`: local development server.
-- `npm run typecheck`: `vue-tsc` checks for the new `src/` architecture layer.
-- `npm run build`: typecheck plus production bundle into `dist/`.
-
-GitHub Pages deploys the generated `dist/` artifact.
-
-The main header, tab shell, toast, auth overlay, account modals, and import/export toolbar are now Vue-native. Legacy `app.js` publishes state snapshots through `window.FilmNoteState` and `filmnote:legacy-state`; `src/app/legacy-state-sync.ts` hydrates Pinia stores from those snapshots so each feature can be migrated without reading legacy globals directly.
-
-Auth is partially migrated: login, register, password reset, recovery password, display-name setup, password change, invite management, and blocked-list management are rendered by Vue. Session bootstrapping, logout, profile finalization, and the broad data load still flow through the legacy bridge until ratings/list/discover/couple are migrated.
-
-Ratings is partially migrated: the search panel and Quick Rate add/edit are now Vue-rendered. Search uses typed TMDB API helpers, selected-result actions call Vue Quick Rate and legacy list/Couple adapters, and Quick Rate writes through typed entry API helpers. Legacy `openQuickRate` / `openQuickEdit` first delegate to `window.FilmNoteVueRatings`, then fall back to the old modal if Vue is unavailable. The old full search form and detail-entry edit flows are still legacy-backed and hidden for compatibility.
-
-List is partially migrated: the visible list mode tabs, media subtabs, search, sort, owner, score filters, entries card list, watchlist grid, entry detail modal, and TMDB/list-item detail modal are now Vue-rendered. Vue writes control changes through the legacy list adapter and uses Pinia entries/profiles/season ratings/watchlist state for rendering. Edit, delete, add-my-rating, watchlist removal, and some list-item actions still call the legacy adapter while those behaviors are migrated.
-
-Stats is partially migrated: the visible media type, scope tabs, comparison user picker, metric cards, radar chart, and score distribution views are now Vue-rendered. Vue writes control changes through the legacy stats adapter, and the hidden legacy stats renderer remains only as a compatibility layer for detail-cache refreshes while the remaining data-fetch path is moved into `src/`.
-
-Discover is partially migrated: the visible recommendation tabs, top bars, movie cards, Top Rated pagination, watchlist/next-watch/rating/block actions, recommendation refresh UI, and TMDB detail modal are now Vue-rendered. Vue still calls the legacy discover adapter for recommendation/trending/top-rated data loading and block actions until those API paths move into `src/api`.
-
-Couple is partially migrated: binding management, pending requests, relationship header, Couple subtabs, richer archive dashboard/chart/wheel, double-recommendation cards, and the next-watch queue are now Vue-rendered. Vue uses the legacy Couple adapter for database mutations, recommendation loading, queue movement/removal, queue rating/detail actions, and disconnect/confirm flows.
-
-## Module Direction
-
-- `app/`: Vue root app and legacy bootstrap.
-- `stores/`: Pinia stores for session, entries, lists, discover, couple, and legacy bridge state.
-- `config/`: constants and deployment configuration.
-- `api/`: Supabase and remote API access.
-- `core/`: shared application state and cross-feature coordination.
-- `shared/`: Vue components, composables, DOM helpers, cache, scoring, TMDB helpers, pure utilities.
-- `features/`: business domains such as auth, ratings, list, discover, couple, stats, and import/export.
-
-## Feature Lifecycle
-
-- Each feature exports a `FeatureDefinition` from `src/features/*/feature.ts`.
-- `src/features/registry.ts` is the complete list of app features.
-- `src/app/FeatureArchitectureRoot.vue` mounts all feature boundaries after `window.FilmNoteLegacy` is ready.
-- `src/app/legacy-state-sync.ts` keeps Pinia synchronized with the current legacy runtime state.
-- A feature starts as `legacy-backed`, meaning Vue owns the boundary and state destination while legacy `app.js` still owns the behavior.
-- When a feature is migrated to Vue, change its status to `vue-native` and remove the matching legacy render/event code.
-
-## Migration Rules
-
-- Do not add new behavior directly to `app.js` when a suitable `src/features/*` module exists.
-- New UI should be Vue SFCs using the Composition API.
-- Cross-feature state should go into Pinia stores instead of new top-level legacy variables.
-- Feature-level commands should call the feature adapter, not raw `window.FilmNoteLegacy`.
-- Move low-risk pure functions first, then API calls, then event/render logic.
-- Keep DOM ids and CSS classes stable until the feature owning them has been fully migrated.
-- Prefer explicit imports for new code. Use `window.FilmNote*` only for temporary legacy compatibility.
-- Keep TypeScript coverage focused on `src/` until legacy behavior has been migrated out of `app.js`.
-- Remove legacy event handlers/render functions only after their Vue feature replacement passes the manual regression path.
+The former plain-script runtime, cache shim, recommendation shim, bridge, state sync, and feature adapter layer have been removed from the runtime. New behavior should be implemented with explicit imports, Pinia state, and typed API helpers.

@@ -7,7 +7,7 @@ export type FeatureKey =
   | 'couple'
   | 'importExport';
 
-export type FeatureStatus = 'legacy-backed' | 'vue-native';
+export type FeatureStatus = 'vue-native';
 
 export type FeatureDefinition = {
   key: FeatureKey;

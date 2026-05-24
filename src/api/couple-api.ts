@@ -15,6 +15,36 @@ export async function createCouple(payload: Omit<Couple, 'id'> | Partial<Couple>
     .insert(payload);
 }
 
+export async function bindCouple(userId: string, targetUserId: string) {
+  return createCouple({
+    user_a: userId,
+    user_b: targetUserId,
+    requested_by: userId,
+    status: 'pending',
+  });
+}
+
+export async function confirmCouple(coupleId: Couple['id']) {
+  return updateCouple(coupleId, {
+    status: 'active',
+    updated_at: new Date().toISOString(),
+  });
+}
+
+export async function requestCoupleDisconnect(coupleId: Couple['id'], userId: string) {
+  return updateCouple(coupleId, {
+    disconnect_requested_by: userId,
+    updated_at: new Date().toISOString(),
+  });
+}
+
+export async function cancelCoupleDisconnect(coupleId: Couple['id']) {
+  return updateCouple(coupleId, {
+    disconnect_requested_by: null,
+    updated_at: new Date().toISOString(),
+  });
+}
+
 export async function updateCouple(coupleId: Couple['id'], payload: Partial<Couple>) {
   return getSupabaseClient()
     .from('couples')

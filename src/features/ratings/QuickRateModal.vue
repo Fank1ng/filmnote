@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import {
   createEntry,
   deleteSeasonRatings,
@@ -14,6 +14,8 @@ import { posterUrl } from '../../shared/tmdb.js';
 import { calcTotal } from '../../shared/scoring.js';
 import { fetchTmdbDetail, getCachedTmdbDetail, needsTmdbDetailFetch } from '../../shared/tmdb-detail.js';
 import { useEntriesStore } from '../../stores/entries.js';
+import { useListControlsStore } from '../../stores/list-controls.js';
+import { useModalStore } from '../../stores/modals.js';
 import { useSessionStore } from '../../stores/session.js';
 import { useUiStore } from '../../stores/ui.js';
 import type { Entry, MediaType, RatingDims, SeasonRating, TmdbDetail } from '../../types/domain.js';
@@ -79,6 +81,8 @@ const defaultRatings = (): RatingDims => ({
 const ui = useUiStore();
 const session = useSessionStore();
 const entries = useEntriesStore();
+const listControls = useListControlsStore();
+const modals = useModalStore();
 const dims = Object.keys(WEIGHTS) as RatingDim[];
 
 const open = ref(false);
@@ -441,17 +445,7 @@ function validateSeasons(): string {
 async function refreshAfterSave(entryId: Entry['id'] | null, wasNew: boolean, savedMediaType: MediaType): Promise<void> {
   await refreshVueData();
   if (wasNew && entryId) {
-    window.dispatchEvent(new CustomEvent('filmnote:list-controls', {
-      detail: {
-        mode: 'entries',
-        type: savedMediaType,
-        owner: 'all',
-        search: '',
-        sort: 'date-desc',
-        score: 'all',
-        page: 1,
-      },
-    }));
+    listControls.showEntry(savedMediaType);
     ui.setHighlightEntry(entryId);
     ui.setActiveTab('list');
   }
@@ -542,28 +536,14 @@ async function submit(): Promise<void> {
   }
 }
 
-const api = reactive({
-  openQuickRate,
-  openQuickEdit,
-});
-
-window.FilmNoteVueRatings = api;
-
-function hideLegacyQuickRateModal(): void {
-  document.getElementById('quickRateModal')?.classList.remove('open');
-}
-
-onMounted(() => {
-  window.FilmNoteVueRatings = api;
-  document.documentElement.dataset.filmnoteVueRatings = 'ready';
-  hideLegacyQuickRateModal();
-});
-
-onBeforeUnmount(() => {
-  if (window.FilmNoteVueRatings === api) delete window.FilmNoteVueRatings;
-  if (document.documentElement.dataset.filmnoteVueRatings === 'ready') {
-    delete document.documentElement.dataset.filmnoteVueRatings;
+watch(() => modals.quickRateRequest?.seq, () => {
+  const request = modals.quickRateRequest;
+  if (!request) return;
+  if (request.kind === 'edit') {
+    openQuickEdit(request.id, request.opts);
+    return;
   }
+  openQuickRate({ ...(request.media as Record<string, unknown>), ...(request.opts || {}) });
 });
 </script>
 

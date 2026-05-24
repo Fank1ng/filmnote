@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { getSupabaseClient } from '../../api/supabase.js';
-import { refreshVueData } from '../../app/data-sync.js';
-import { getLegacyBridge } from '../../app/legacy-bridge.js';
+import { applyAuthenticatedUser } from '../../app/session.js';
 import { useSessionStore } from '../../stores/session.js';
 import { useUiStore } from '../../stores/ui.js';
 
@@ -64,13 +63,7 @@ function validateDisplayName(name: string): boolean {
 }
 
 async function finishLogin(user: unknown): Promise<void> {
-  const bridge = getLegacyBridge();
-  if (!bridge?.auth?.initApp) {
-    showError('初始化中，请稍后再试');
-    return;
-  }
-  await bridge.auth.initApp(user);
-  await refreshVueData();
+  await applyAuthenticatedUser(user as AuthUser);
 }
 
 async function login(): Promise<void> {

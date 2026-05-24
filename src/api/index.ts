@@ -5,5 +5,4 @@ export * as coupleApi from './couple-api.js';
 export {
   getSupabaseClient,
   initSupabaseClient,
-  installApiNamespace,
 } from './supabase.js';

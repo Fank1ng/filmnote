@@ -1,7 +1,7 @@
 import { createPinia } from 'pinia';
 import { createApp } from 'vue';
 import App from './app/App.vue';
-import { bootstrapLegacyApp, showBootstrapError } from './app/bootstrap.js';
+import { bootstrapVueApp, showBootstrapError } from './app/bootstrap.js';
 
 function ensureVueRoot(): HTMLElement {
   let root = document.getElementById('filmnoteVueRoot');
@@ -14,7 +14,11 @@ function ensureVueRoot(): HTMLElement {
 }
 
 const app = createApp(App);
-app.use(createPinia());
-app.mount(ensureVueRoot());
 
-bootstrapLegacyApp().catch(showBootstrapError);
+try {
+  bootstrapVueApp();
+  app.use(createPinia());
+  app.mount(ensureVueRoot());
+} catch (error) {
+  showBootstrapError(error);
+}

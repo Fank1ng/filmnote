@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { deleteEntry as deleteEntryApi } from '../../api/entries-api.js';
 import { refreshVueData } from '../../app/data-sync.js';
 import { getCurrentUserId } from '../../app/user-context.js';
@@ -14,6 +14,7 @@ import {
   normalizeMediaType,
 } from '../tmdb-detail.js';
 import { useEntriesStore } from '../../stores/entries.js';
+import { useModalStore } from '../../stores/modals.js';
 import { useSessionStore } from '../../stores/session.js';
 import { useUiStore } from '../../stores/ui.js';
 import type { Entry, SeasonRating, TmdbDetail } from '../../types/domain.js';
@@ -32,6 +33,7 @@ type SeasonRecord = {
 
 const entries = useEntriesStore();
 const session = useSessionStore();
+const modals = useModalStore();
 const ui = useUiStore();
 const mediaActions = useMediaActions();
 const open = ref(false);
@@ -145,7 +147,7 @@ function editEntry(opts: { targetSeasonNumber?: number; enableTargetSeason?: boo
   const target = entry.value;
   if (!target) return;
   close();
-  if (!window.FilmNoteVueRatings?.openQuickEdit?.(target.id, opts)) ui.showToast('评分面板还未就绪，请刷新后重试');
+  modals.openQuickEdit(target.id, opts);
 }
 
 async function deleteEntry(): Promise<void> {
@@ -205,22 +207,17 @@ function onKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape') close();
 }
 
-const api = { openEntry, close };
-
-window.FilmNoteVueDetail = api;
-
 onMounted(() => {
-  window.FilmNoteVueDetail = api;
-  document.documentElement.dataset.filmnoteVueDetail = 'ready';
   document.addEventListener('keydown', onKeydown);
 });
 
 onBeforeUnmount(() => {
-  if (window.FilmNoteVueDetail === api) delete window.FilmNoteVueDetail;
-  if (document.documentElement.dataset.filmnoteVueDetail === 'ready') {
-    delete document.documentElement.dataset.filmnoteVueDetail;
-  }
   document.removeEventListener('keydown', onKeydown);
+});
+
+watch(() => modals.entryDetailRequest?.seq, () => {
+  const request = modals.entryDetailRequest;
+  if (request) openEntry(request.id);
 });
 </script>
 

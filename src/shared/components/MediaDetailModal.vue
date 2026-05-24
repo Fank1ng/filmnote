@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { getCurrentUserId } from '../../app/user-context.js';
 import { useEntriesStore } from '../../stores/entries.js';
+import { useModalStore } from '../../stores/modals.js';
 import { useSessionStore } from '../../stores/session.js';
-import { useUiStore } from '../../stores/ui.js';
 import type { MediaType, TmdbDetail, TmdbMedia } from '../../types/domain.js';
 import { posterUrl } from '../tmdb.js';
 import {
@@ -25,7 +25,7 @@ type RatingMode = 'total' | 'season';
 
 const entries = useEntriesStore();
 const session = useSessionStore();
-const ui = useUiStore();
+const modals = useModalStore();
 const open = ref(false);
 const media = ref<TmdbMedia | null>(null);
 const detail = ref<TmdbDetail | null>(null);
@@ -144,29 +144,24 @@ function ratingPayload(mode?: RatingMode): TmdbMedia & Record<string, unknown> {
 function rate(mode?: RatingMode): void {
   const payload = ratingPayload(mode);
   close();
-  if (!window.FilmNoteVueRatings?.openQuickRate?.(payload)) ui.showToast('评分面板还未就绪，请刷新后重试');
+  modals.openQuickRate(payload);
 }
 
 function onKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape') close();
 }
 
-const api = { openMovie, openListItem, close };
-
-window.FilmNoteVueMediaDetail = api;
-
 onMounted(() => {
-  window.FilmNoteVueMediaDetail = api;
-  document.documentElement.dataset.filmnoteVueMediaDetail = 'ready';
   document.addEventListener('keydown', onKeydown);
 });
 
 onBeforeUnmount(() => {
-  if (window.FilmNoteVueMediaDetail === api) delete window.FilmNoteVueMediaDetail;
-  if (document.documentElement.dataset.filmnoteVueMediaDetail === 'ready') {
-    delete document.documentElement.dataset.filmnoteVueMediaDetail;
-  }
   document.removeEventListener('keydown', onKeydown);
+});
+
+watch(() => modals.mediaDetailRequest?.seq, () => {
+  const request = modals.mediaDetailRequest;
+  if (request) openListItem(request.media);
 });
 </script>
 

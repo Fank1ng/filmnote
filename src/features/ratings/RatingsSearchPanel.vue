@@ -7,8 +7,8 @@ import { posterUrl } from '../../shared/tmdb.js';
 import { useCoupleStore } from '../../stores/couple.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useListsStore } from '../../stores/lists.js';
+import { useModalStore } from '../../stores/modals.js';
 import { useSessionStore } from '../../stores/session.js';
-import { useUiStore } from '../../stores/ui.js';
 import type { MediaType } from '../../types/domain.js';
 
 defineOptions({ name: 'RatingsSearchPanel' });
@@ -21,7 +21,7 @@ const entries = useEntriesStore();
 const lists = useListsStore();
 const couple = useCoupleStore();
 const session = useSessionStore();
-const ui = useUiStore();
+const modals = useModalStore();
 const mediaActions = useMediaActions();
 
 const mediaType = ref<MediaType>('movie');
@@ -126,12 +126,9 @@ async function selectResult(movie: NormalizedSearchMedia): Promise<void> {
 async function addReview(): Promise<void> {
   const movie = selected.value;
   if (!movie) return;
-  const api = window.FilmNoteVueRatings;
   const existing = findExistingEntry(movie);
-  const handled = existing
-    ? api?.openQuickEdit?.(existing.id)
-    : api?.openQuickRate?.(movie);
-  if (!handled) ui.showToast('评分弹窗初始化中，请稍后再试');
+  if (existing) modals.openQuickEdit(existing.id);
+  else modals.openQuickRate(movie);
 }
 
 async function addWatchlist(): Promise<void> {

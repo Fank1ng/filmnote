@@ -1,30 +1,25 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { onLegacyReady } from '../../app/legacy-bridge.js';
+import { computed } from 'vue';
+import { storeToRefs } from 'pinia';
 import { PaginationControls } from '../../shared/components/index.js';
 import { useMediaActions } from '../../shared/composables/useMediaActions.js';
 import { posterUrl } from '../../shared/tmdb.js';
+import { useListControlsStore } from '../../stores/list-controls.js';
 import { useListsStore } from '../../stores/lists.js';
 import type { MediaType, WatchlistItem } from '../../types/domain.js';
 
 defineOptions({ name: 'WatchlistGrid' });
 
-type ListControlState = {
-  mode?: 'entries' | 'watchlist';
-  watchlistPage?: number;
-};
-
 const pageSize = 12;
 
 const lists = useListsStore();
+const controls = useListControlsStore();
 const mediaActions = useMediaActions();
-const mode = ref<'entries' | 'watchlist'>('entries');
-const page = ref(1);
-let stopLegacyReady: (() => void) | null = null;
+const { mode, watchlistPage } = storeToRefs(controls);
 
 const totalPages = computed(() => Math.max(1, Math.ceil(lists.watchlist.length / pageSize)));
 const pageItems = computed(() => {
-  const normalizedPage = Math.min(page.value, totalPages.value);
+  const normalizedPage = Math.min(watchlistPage.value, totalPages.value);
   const start = (normalizedPage - 1) * pageSize;
   return lists.watchlist.slice(start, start + pageSize);
 });
@@ -52,34 +47,14 @@ async function removeItem(item: WatchlistItem): Promise<void> {
   await mediaActions.toggleWatchlist(item);
 }
 
-async function showDetail(item: WatchlistItem): Promise<void> {
+function showDetail(item: WatchlistItem): void {
   mediaActions.openMediaDetail(item);
 }
 
 function changePage(nextPage: number): void {
-  page.value = nextPage;
-  window.dispatchEvent(new CustomEvent('filmnote:list-controls', { detail: { watchlistPage: nextPage } }));
+  controls.setWatchlistPage(nextPage);
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
-
-function applyControls(state: ListControlState = {}): void {
-  if ('mode' in state) mode.value = state.mode === 'watchlist' ? 'watchlist' : 'entries';
-  if ('watchlistPage' in state) page.value = Math.max(1, Number(state.watchlistPage || 1));
-}
-
-function onLegacyControls(event: Event): void {
-  applyControls((event as CustomEvent<ListControlState>).detail || {});
-}
-
-onMounted(() => {
-  stopLegacyReady = onLegacyReady(bridge => applyControls((bridge.list?.getControls?.() || {}) as ListControlState));
-  window.addEventListener('filmnote:list-controls', onLegacyControls);
-});
-
-onBeforeUnmount(() => {
-  stopLegacyReady?.();
-  window.removeEventListener('filmnote:list-controls', onLegacyControls);
-});
 </script>
 
 <template>
@@ -115,7 +90,7 @@ onBeforeUnmount(() => {
         </article>
       </div>
 
-      <PaginationControls :page="page" :total-pages="totalPages" kind="watchlist" @change="changePage" />
+      <PaginationControls :page="watchlistPage" :total-pages="totalPages" kind="watchlist" @change="changePage" />
     </template>
   </section>
 </template>

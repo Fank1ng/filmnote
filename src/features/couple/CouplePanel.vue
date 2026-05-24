@@ -1,8 +1,15 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { removeCoupleQueueItem, updateCoupleQueueItem } from '../../api/couple-api.js';
+import { computed, onMounted, ref } from 'vue';
+import {
+  bindCouple,
+  cancelCoupleDisconnect,
+  confirmCouple,
+  deleteCouple,
+  removeCoupleQueueItem,
+  requestCoupleDisconnect,
+  updateCoupleQueueItem,
+} from '../../api/couple-api.js';
 import { refreshVueData } from '../../app/data-sync.js';
-import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
 import { getCurrentUserId } from '../../app/user-context.js';
 import { DIM_LABELS, TMDB_IMG, TMDB_PROXY, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
@@ -75,7 +82,6 @@ const couplesAvailable = ref(true);
 const chartMode = ref<'score' | 'type'>('score');
 const wheelPickId = ref<string | number | null>(null);
 const detailCache = ref<Record<string, CacheDetail>>({});
-let stopLegacyReady: (() => void) | null = null;
 
 const currentUserId = computed(() => getCurrentUserId(session.currentUser));
 const activeCouple = computed(() => couple.activeCouple as Couple | null);
@@ -217,19 +223,11 @@ const diffRows = computed(() => (Object.keys(WEIGHTS) as RatingDim[]).map(dim =>
   };
 }));
 
-function asControls(input: unknown): CoupleControls {
-  return (input || {}) as CoupleControls;
-}
-
 function applyControls(controls: CoupleControls): void {
   if (controls.tab === 'archive' || controls.tab === 'recommend' || controls.tab === 'queue') tab.value = controls.tab;
   if ((controls as { archiveChart?: string }).archiveChart) chartMode.value = (controls as { archiveChart?: string }).archiveChart === 'type' ? 'type' : 'score';
   if ('queueAvailable' in controls) queueAvailable.value = !!controls.queueAvailable;
   if ('couplesAvailable' in controls) couplesAvailable.value = !!controls.couplesAvailable;
-}
-
-function onControls(event: Event): void {
-  applyControls(asControls((event as CustomEvent<CoupleControls>).detail));
 }
 
 function mediaType(value: unknown): MediaType {
@@ -344,16 +342,72 @@ async function loadRecommendations(force = false): Promise<void> {
 }
 
 async function bindUser(userId: string): Promise<void> {
-  await getLegacyBridge()?.couple?.bindCoupleWith?.(userId);
+  if (!currentUserId.value || !userId || userId === currentUserId.value) return;
+  if (activeCouple.value) {
+    ui.showToast('已经绑定 Couple');
+    return;
+  }
+  const { error } = await bindCouple(currentUserId.value, userId);
+  if (error) {
+    ui.showToast(/schema cache|does not exist|relation|couples/i.test(error.message || '')
+      ? 'Couple 表尚未创建，请先执行升级 SQL'
+      : `绑定请求失败: ${error.message}`);
+    return;
+  }
   search.value = '';
+  ui.showToast('已发送绑定请求');
+  await refreshVueData();
 }
 
 async function confirm(coupleId: string | number): Promise<void> {
-  await getLegacyBridge()?.couple?.confirmCouple?.(coupleId);
+  const { error } = await confirmCouple(coupleId);
+  if (error) {
+    ui.showToast(`确认失败: ${error.message}`);
+    return;
+  }
+  ui.showToast('Couple 已绑定');
+  await refreshVueData();
 }
 
 async function disconnect(coupleId: string | number): Promise<void> {
-  await getLegacyBridge()?.couple?.disconnectCouple?.(coupleId);
+  const target = String(activeCouple.value?.id) === String(coupleId)
+    ? activeCouple.value
+    : couple.pendingCouples.find(item => String(item.id) === String(coupleId)) || null;
+  const wasActive = target?.status === 'active';
+  if (wasActive) {
+    const requester = String(target?.disconnect_requested_by || '');
+    if (!requester) {
+      if (!window.confirm('将向对方发送解除 Couple 申请，对方同意后才会解除。确认发送？')) return;
+      const { error } = await requestCoupleDisconnect(coupleId, currentUserId.value);
+      if (error) {
+        ui.showToast(/schema cache|does not exist|relation|disconnect_requested_by|column/i.test(error.message || '')
+          ? 'Couple 表尚未升级，请先执行解除申请升级 SQL'
+          : `发送解除申请失败: ${error.message}`);
+        return;
+      }
+      ui.showToast('已发送解除申请');
+      await refreshVueData();
+      return;
+    }
+    if (requester === currentUserId.value) {
+      const { error } = await cancelCoupleDisconnect(coupleId);
+      if (error) {
+        ui.showToast(`撤销解除申请失败: ${error.message}`);
+        return;
+      }
+      ui.showToast('已撤销解除申请');
+      await refreshVueData();
+      return;
+    }
+    if (!window.confirm('对方请求解除 Couple。同意后，共享下次看队列也会一起删除，确认同意？')) return;
+  }
+  const { error } = await deleteCouple(coupleId);
+  if (error) {
+    ui.showToast(`${wasActive ? '同意解除失败' : '撤销失败'}: ${error.message}`);
+    return;
+  }
+  ui.showToast(wasActive ? '已同意解除 Couple' : '已撤销绑定请求');
+  await refreshVueData();
 }
 
 async function moveQueue(item: CoupleQueueItem, direction: number): Promise<void> {
@@ -565,14 +619,9 @@ function ratingState(item: CoupleQueueItem): string {
 
 onMounted(() => {
   loadDetailCache();
-  stopLegacyReady = onLegacyReady(bridge => applyControls(asControls(bridge.couple?.getControls?.())));
-  window.addEventListener('filmnote:couple-controls', onControls);
+  applyControls({ queueAvailable: true, couplesAvailable: true });
 });
 
-onBeforeUnmount(() => {
-  stopLegacyReady?.();
-  window.removeEventListener('filmnote:couple-controls', onControls);
-});
 </script>
 
 <template>

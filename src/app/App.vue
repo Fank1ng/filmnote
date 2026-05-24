@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, watch } from 'vue';
+import { computed, onMounted, watch } from 'vue';
+import { buildExportPayload, downloadExport, importFilmNoteJson } from '../api/import-export-api.js';
 import { refreshVueData } from './data-sync.js';
-import FeatureArchitectureRoot from './FeatureArchitectureRoot.vue';
-import { getLegacyBridge, onLegacyReady, requireLegacyBridge } from './legacy-bridge.js';
-import { installLegacyStateSync } from './legacy-state-sync.js';
+import { initializeVueSession, logoutCurrentUser } from './session.js';
 import { AccountModals, AuthOverlay } from '../features/auth/index.js';
 import { CouplePanel } from '../features/couple/index.js';
 import { DiscoverPanel } from '../features/discover/index.js';
@@ -11,6 +10,9 @@ import { ListBody, ListControls, WatchlistGrid } from '../features/list/index.js
 import { QuickRateModal, RatingsSearchPanel } from '../features/ratings/index.js';
 import { StatsContent, StatsControls } from '../features/stats/index.js';
 import { AppHeader, AppToast, EntryDetailModal, ImportExportToolbar, MediaDetailModal, TabShell } from '../shared/components/index.js';
+import { useCoupleStore } from '../stores/couple.js';
+import { useEntriesStore } from '../stores/entries.js';
+import { useListsStore } from '../stores/lists.js';
 import { useSessionStore } from '../stores/session.js';
 import { mainTabs, type MainTab, useUiStore } from '../stores/ui.js';
 
@@ -18,109 +20,108 @@ defineOptions({ name: 'FilmNoteApp' });
 
 const ui = useUiStore();
 const session = useSessionStore();
-let stopLegacyStateSync: (() => void) | null = null;
-let stopLegacyReadySync: (() => void) | null = null;
+const entries = useEntriesStore();
+const lists = useListsStore();
+const couple = useCoupleStore();
 
-window.FilmNoteVueUi = {
-  toast: (message: string) => ui.showToast(message),
-};
-
-function activateTabPanel(tab: MainTab): void {
-  document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
-  document.getElementById(`panel-${tab}`)?.classList.add('active');
-}
-
-function onTabChange(event: Event): void {
-  const tab = (event as CustomEvent<{ tab?: MainTab }>).detail?.tab;
-  if (tab && mainTabs.some(item => item.name === tab)) {
-    ui.setActiveTab(tab);
-    activateTabPanel(tab);
-  }
-}
+const authenticated = computed(() => session.isAuthenticated);
 
 function changeTab(tab: MainTab): void {
   ui.setActiveTab(tab);
-  activateTabPanel(tab);
-  getLegacyBridge()?.shell?.switchTab?.(tab);
 }
 
-watch(() => ui.activeTab, tab => activateTabPanel(tab), { flush: 'post' });
 watch(() => session.currentUser, user => {
   if (user) void refreshVueData();
 }, { flush: 'post' });
 
-onMounted(() => {
-  activateTabPanel(ui.activeTab);
-  stopLegacyStateSync = installLegacyStateSync();
-  stopLegacyReadySync = onLegacyReady(bridge => {
-    bridge.shell?.switchTab?.(ui.activeTab);
-    bridge.state?.sync?.('vue-legacy-ready');
-    void refreshVueData();
-  });
-  window.addEventListener('filmnote:tab-change', onTabChange);
-});
+function currentUserId(): string {
+  return (session.currentUser as { id?: string } | null)?.id || '';
+}
 
-onUnmounted(() => {
-  window.removeEventListener('filmnote:tab-change', onTabChange);
-  stopLegacyStateSync?.();
-  stopLegacyReadySync?.();
-  stopLegacyStateSync = null;
-  stopLegacyReadySync = null;
-  delete window.FilmNoteVueUi;
+function exportJson(): void {
+  const userId = currentUserId();
+  if (!userId) {
+    ui.showToast('请先登录');
+    return;
+  }
+  downloadExport(buildExportPayload({
+    entries: entries.entries.filter(entry => entry.user_id === userId),
+    season_ratings: entries.seasonRatings.filter(season => season.user_id === userId),
+    watchlist: lists.watchlist.filter(item => item.user_id === userId),
+    blocked_movies: lists.blockedMovies.filter(item => item.user_id === userId),
+    couple_queue: couple.queue,
+  }));
+}
+
+async function importJson(file: File): Promise<void> {
+  const userId = currentUserId();
+  if (!userId) {
+    ui.showToast('请先登录');
+    return;
+  }
+  try {
+    const payload = JSON.parse(await file.text());
+    const rows = Array.isArray(payload) ? payload : payload.entries;
+    if (!Array.isArray(rows)) throw new Error('格式错误');
+    if (!window.confirm(`将导入 ${rows.length} 条记录，确认？`)) return;
+    const count = await importFilmNoteJson(userId, payload);
+    await refreshVueData();
+    ui.showToast(`已导入 ${count} 条记录`);
+  } catch {
+    ui.showToast('导入失败：文件格式不正确');
+  }
+}
+
+onMounted(() => {
+  void initializeVueSession();
 });
 </script>
 
 <template>
-  <Teleport to="#filmnoteVueAuth">
-    <AuthOverlay />
-  </Teleport>
-  <Teleport to="#filmnoteVueHeader">
+  <AuthOverlay />
+
+  <div id="mainApp" :class="{ hidden: !authenticated }">
     <AppHeader
       @change-password="ui.openAccountModal('changePassword')"
       @manage-invites="ui.openAccountModal('invites')"
       @manage-blocked="ui.openAccountModal('blocked')"
-      @logout="requireLegacyBridge().header?.logoutCurrentUser?.()"
+      @logout="logoutCurrentUser()"
     />
-  </Teleport>
-  <Teleport to="#filmnoteVueShell">
     <TabShell :tabs="mainTabs" :active="ui.activeTab" @change="changeTab" />
-  </Teleport>
-  <Teleport to="#filmnoteVueImportExport">
-    <ImportExportToolbar
-      @export-json="requireLegacyBridge().importExport?.exportJson?.()"
-      @import-json="requireLegacyBridge().importExport?.importJson?.()"
-    />
-  </Teleport>
-  <Teleport to="#filmnoteVueRatingsSearch">
-    <RatingsSearchPanel />
-  </Teleport>
-  <Teleport to="#filmnoteVueListControls">
-    <ListControls />
-  </Teleport>
-  <Teleport to="#filmnoteVueListBody">
-    <ListBody />
-  </Teleport>
-  <Teleport to="#filmnoteVueWatchlistGrid">
-    <WatchlistGrid />
-  </Teleport>
-  <Teleport to="#filmnoteVueStatsControls">
-    <StatsControls />
-  </Teleport>
-  <Teleport to="#filmnoteVueStatsContent">
-    <StatsContent />
-  </Teleport>
-  <Teleport to="#filmnoteVueDiscover">
-    <DiscoverPanel />
-  </Teleport>
-  <Teleport to="#filmnoteVueCouple">
-    <CouplePanel />
-  </Teleport>
+
+    <main>
+      <section id="panel-rate" class="tab-panel" :class="{ active: ui.activeTab === 'rate' }">
+        <RatingsSearchPanel />
+      </section>
+
+      <section id="panel-list" class="tab-panel" :class="{ active: ui.activeTab === 'list' }">
+        <ListControls />
+        <ListBody />
+        <WatchlistGrid />
+      </section>
+
+      <section id="panel-discover" class="tab-panel" :class="{ active: ui.activeTab === 'discover' }">
+        <h2 class="section-title">发现好片</h2>
+        <DiscoverPanel />
+      </section>
+
+      <section id="panel-couple" class="tab-panel" :class="{ active: ui.activeTab === 'couple' }">
+        <h2 class="section-title">Couple</h2>
+        <CouplePanel />
+      </section>
+
+      <section id="panel-stats" class="tab-panel" :class="{ active: ui.activeTab === 'stats' }">
+        <h2 class="section-title">统计概览</h2>
+        <StatsControls />
+        <StatsContent />
+        <ImportExportToolbar @export-json="exportJson" @import-json="importJson" />
+      </section>
+    </main>
+  </div>
+
   <AppToast :message="ui.toastMessage" :open="ui.toastOpen" />
   <AccountModals />
   <QuickRateModal />
   <EntryDetailModal />
   <MediaDetailModal />
-  <div class="vue-runtime-root" hidden aria-hidden="true">
-    <FeatureArchitectureRoot />
-  </div>
 </template>

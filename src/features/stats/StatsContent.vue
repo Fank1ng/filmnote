@@ -1,14 +1,15 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
+import { computed, onMounted, ref } from 'vue';
+import { storeToRefs } from 'pinia';
 import { getCurrentUserId } from '../../app/user-context.js';
 import { DIM_LABELS, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
 import { getSeasonAwareEntryScore } from '../../shared/scoring.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useSessionStore } from '../../stores/session.js';
+import { useStatsControlsStore } from '../../stores/stats-controls.js';
 import type { Entry, MediaType, SeasonRating } from '../../types/domain.js';
-import { asStatsControlState, type StatsControlState, type StatsFilter, type UserColor } from './state.js';
+import { type UserColor } from './state.js';
 
 defineOptions({ name: 'StatsContent' });
 
@@ -57,11 +58,9 @@ type RadarSeries = {
 
 const entries = useEntriesStore();
 const session = useSessionStore();
-const filter = ref<StatsFilter>('me');
-const type = ref<MediaType>('movie');
-const otherUser = ref<string | null>(null);
+const controls = useStatsControlsStore();
+const { filter, type, otherUser } = storeToRefs(controls);
 const detailCache = ref<Record<string, CachedMediaDetail>>({});
-let stopLegacyReady: (() => void) | null = null;
 
 const axes = Object.keys(WEIGHTS) as RatingDim[];
 const radarLevels = [0.2, 0.4, 0.6, 0.8, 1];
@@ -179,17 +178,6 @@ function calcStats(sourceEntries: Entry[], media: MediaType): StatsResult | null
     movies: sourceEntries.length,
     totalMinutes: sourceEntries.reduce((sum, entry) => sum + getEntryRuntimeMinutes(entry), 0),
   };
-}
-
-function applyState(state: StatsControlState): void {
-  if ('filter' in state) filter.value = state.filter === 'others' || state.filter === 'compare' ? state.filter : 'me';
-  if ('type' in state) type.value = state.type === 'series' ? 'series' : 'movie';
-  if ('otherUser' in state) otherUser.value = state.otherUser || null;
-  loadDetailCache();
-}
-
-function onLegacyControls(event: Event): void {
-  applyState(asStatsControlState((event as CustomEvent<StatsControlState>).detail));
 }
 
 const myEntries = computed(() => entries.entries.filter(entry => entry.user_id === currentUserId.value && mediaType(entry) === type.value));
@@ -317,13 +305,6 @@ function axisValues(axis: RatingDim): string {
 
 onMounted(() => {
   loadDetailCache();
-  stopLegacyReady = onLegacyReady(bridge => applyState(asStatsControlState(bridge.stats?.getControls?.())));
-  window.addEventListener('filmnote:stats-controls', onLegacyControls);
-});
-
-onBeforeUnmount(() => {
-  stopLegacyReady?.();
-  window.removeEventListener('filmnote:stats-controls', onLegacyControls);
 });
 </script>
 

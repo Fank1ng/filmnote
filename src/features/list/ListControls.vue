@@ -1,126 +1,24 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { onLegacyReady } from '../../app/legacy-bridge.js';
+import { computed } from 'vue';
+import { storeToRefs } from 'pinia';
+import { useListControlsStore } from '../../stores/list-controls.js';
 import { useListsStore } from '../../stores/lists.js';
 import type { MediaType } from '../../types/domain.js';
 
 defineOptions({ name: 'ListControls' });
 
-type ListMode = 'entries' | 'watchlist';
-type OwnerFilter = 'all' | 'me';
-type SortBy = 'date-desc' | 'date-asc' | 'score-desc' | 'score-asc' | 'count-desc' | 'title';
-type ScoreFilter = 'all' | '10' | '9' | '8' | '7' | '6' | '5' | '4' | '3' | '2' | '1';
-
-type ListControlState = {
-  mode?: ListMode;
-  type?: MediaType;
-  owner?: OwnerFilter;
-  search?: string;
-  sort?: SortBy;
-  score?: ScoreFilter;
-};
-
+const controls = useListControlsStore();
 const lists = useListsStore();
-
-const mode = ref<ListMode>('entries');
-const type = ref<MediaType>('movie');
-const owner = ref<OwnerFilter>('all');
-const search = ref('');
-const sort = ref<SortBy>('date-desc');
-const score = ref<ScoreFilter>('all');
-let stopLegacyReady: (() => void) | null = null;
-let searchTimer: number | null = null;
-let suppressSync = false;
-
+const { mode, type, owner, search, sort, score } = storeToRefs(controls);
 const watchlistCount = computed(() => lists.watchlist.length);
 
-function asControlState(input: unknown): ListControlState {
-  return (input || {}) as ListControlState;
-}
-
-function applyState(state: ListControlState): void {
-  suppressSync = true;
-  if ('mode' in state) mode.value = state.mode === 'watchlist' ? 'watchlist' : 'entries';
-  if ('type' in state) type.value = state.type === 'series' ? 'series' : 'movie';
-  if ('owner' in state) owner.value = state.owner === 'me' ? 'me' : 'all';
-  if ('search' in state) search.value = state.search || '';
-  if ('sort' in state) sort.value = state.sort || 'date-desc';
-  if ('score' in state) score.value = state.score || 'all';
-  syncListViewVisibility(mode.value);
-  queueMicrotask(() => {
-    suppressSync = false;
-  });
-}
-
-function syncControls(_patch: ListControlState): void {
-  if (suppressSync) return;
-  notifyControlsChanged();
-}
-
-function currentControls(): ListControlState {
-  return {
-    mode: mode.value,
-    type: type.value,
-    owner: owner.value,
-    search: search.value,
-    sort: sort.value,
-    score: score.value,
-  };
-}
-
-function notifyControlsChanged(): void {
-  window.dispatchEvent(new CustomEvent('filmnote:list-controls', { detail: currentControls() }));
-}
-
-function syncListViewVisibility(nextMode: ListMode): void {
-  document.getElementById('listEntriesView')?.classList.toggle('hidden', nextMode === 'watchlist');
-  document.getElementById('listWatchlistView')?.classList.toggle('hidden', nextMode !== 'watchlist');
-}
-
-function syncAllControls(): void {
-  syncControls(currentControls());
-}
-
-function setMode(nextMode: ListMode): void {
-  mode.value = nextMode;
+function setMode(nextMode: 'entries' | 'watchlist'): void {
+  controls.setMode(nextMode);
 }
 
 function setType(nextType: MediaType): void {
-  type.value = nextType;
+  controls.setType(nextType);
 }
-
-function onLegacyControls(event: Event): void {
-  applyState(asControlState((event as CustomEvent<ListControlState>).detail));
-}
-
-watch(mode, value => {
-  syncListViewVisibility(value);
-  syncControls({ mode: value });
-});
-watch(type, value => syncControls({ type: value }));
-watch(owner, value => syncControls({ owner: value }));
-watch(sort, value => syncControls({ sort: value }));
-watch(score, value => syncControls({ score: value }));
-watch(search, value => {
-  if (suppressSync) return;
-  if (searchTimer) window.clearTimeout(searchTimer);
-  searchTimer = window.setTimeout(() => syncControls({ search: value }), 180);
-});
-
-onMounted(() => {
-  syncListViewVisibility(mode.value);
-  stopLegacyReady = onLegacyReady(bridge => {
-    applyState(asControlState(bridge.list?.getControls?.()));
-    queueMicrotask(syncAllControls);
-  });
-  window.addEventListener('filmnote:list-controls', onLegacyControls);
-});
-
-onBeforeUnmount(() => {
-  stopLegacyReady?.();
-  window.removeEventListener('filmnote:list-controls', onLegacyControls);
-  if (searchTimer) window.clearTimeout(searchTimer);
-});
 </script>
 
 <template>
@@ -138,8 +36,14 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="mode === 'entries'" class="list-controls">
-      <input v-model="search" type="text" class="search-box" placeholder="搜索片名 / 导演 / 演员...">
-      <select v-model="sort">
+      <input
+        :value="search"
+        type="text"
+        class="search-box"
+        placeholder="搜索片名 / 导演 / 演员..."
+        @input="controls.setSearch(($event.target as HTMLInputElement).value)"
+      >
+      <select v-model="sort" @change="controls.setSort(sort)">
         <option value="date-desc">最近添加</option>
         <option value="date-asc">最早添加</option>
         <option value="score-desc">评分最高</option>
@@ -147,11 +51,11 @@ onBeforeUnmount(() => {
         <option value="count-desc">评价数量</option>
         <option value="title">按片名 A-Z</option>
       </select>
-      <select v-model="owner">
+      <select v-model="owner" @change="controls.setOwner(owner)">
         <option value="all">所有人</option>
         <option value="me">仅自己</option>
       </select>
-      <select v-model="score">
+      <select v-model="score" @change="controls.setScore(score)">
         <option value="all">全部分数</option>
         <option value="10">10分</option>
         <option value="9">9分</option>

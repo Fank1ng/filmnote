@@ -9,18 +9,10 @@ export function initSupabaseClient(factory: SupabaseFactory | undefined = window
     throw new Error('Supabase client library is not loaded');
   }
   client = factory.createClient(SUPABASE_URL, SUPABASE_KEY);
-  window.db = client;
   return client;
 }
 
 export function getSupabaseClient(): SupabaseClient {
   if (!client) return initSupabaseClient();
   return client;
-}
-
-export function installApiNamespace(target: Window = window): void {
-  target.FilmNoteAPI = target.FilmNoteAPI || {};
-  target.FilmNoteAPI.supabase = {
-    getClient: getSupabaseClient,
-  };
 }

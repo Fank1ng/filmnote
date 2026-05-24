@@ -9,21 +9,22 @@ FilmNote is a Vue 3 + TypeScript + Pinia application backed by Supabase and a Cl
 - `src/app/bootstrap.ts` initializes frontend configuration and the Supabase client.
 - `src/app/session.ts` restores Supabase auth state, manages profile/session-token checks, and refreshes Pinia data.
 - `src/app/data-sync.ts` is the shared refresh path for entries, season ratings, profiles, watchlist, blocked movies, Couple state, and queue.
-- `src/styles/app.css` is imported through Vite. It remains the global stylesheet for now; new feature styling should move toward feature-local styles or feature-level CSS modules.
+- `src/styles/index.css` contains only global base tokens/reset. App layout styles live with `App.vue`, feature styles are imported from each feature module, and shared UI styles live under `src/shared/styles/`.
 
 ## State And Features
 
 - Pinia stores are the source of truth for session, entries, lists, discover, Couple, UI state, list controls, and stats controls.
 - Feature modules under `src/features/` render Vue-native search, ratings, list, discover, Couple, stats, auth, account, and import/export flows.
 - API modules under `src/api/` are the only database mutation/read layer for Supabase-backed features.
-- Shared UI, scoring, TMDB detail/cache helpers, browser-side composables, media actions, and pagination live under `src/shared/`.
+- Shared UI, scoring, TMDB detail/cache helpers, browser platform helpers, browser-side composables, media actions, and pagination live under `src/shared/`.
 
 ## Backend Runtime
 
 - Supabase handles Auth and Postgres persistence; browser code uses the typed Supabase client directly.
 - Cloudflare Worker lives under `worker/` and exposes TMDB proxy, detail aggregation, recommendation, cache warming, and scheduled IMDb Top100 refresh endpoints.
-- Worker runtime entry is `worker/src/index.ts`; HTTP helpers and typed Env boundaries are separated from the route/recommendation implementation.
+- Worker runtime entry is `worker/src/index.ts`; routing, HTTP helpers, cache, TMDB access, IMDb Top100 refresh, request normalization, and recommendation scoring are separated into focused modules.
 - Database upgrade scripts are organized under `supabase/migrations/` in execution order. Root-level SQL files are retained as compatibility copies.
+- Supabase RLS verification is documented in `supabase/AUDIT.md`; `supabase/rls_audit.sql` is the runnable audit query for production checks.
 
 ## Legacy Removal
 

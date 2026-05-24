@@ -1,0 +1,16 @@
+/* ── TMDB Detail Section ── */
+  .tmdb-section { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+  .tmdb-section h4 { font-size: 0.85rem; color: var(--text2); margin-bottom: 8px; }
+  .tmdb-overview { font-size: 0.82rem; color: var(--text2); line-height: 1.7; margin-bottom: 12px; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+  .tmdb-overview.expanded { -webkit-line-clamp: unset; display: block; }
+  .tmdb-expand { font-size: 0.72rem; color: var(--gold); cursor: pointer; margin-left: 4px; display: inline-block; padding: 2px 6px; }
+  .tmdb-cast { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+  .cast-chip { font-size: 0.72rem; padding: 2px 8px; border-radius: 10px; background: rgba(255,255,255,0.04); color: var(--text2); border: 1px solid var(--border); }
+  .detail-spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--gold); border-radius: 50%; animation: spin 0.6s linear infinite; vertical-align: middle; margin-right: 4px; }
+
+  .settings-section { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border); }
+  .settings-section h3 { margin-bottom: 12px; color: var(--text2); font-size: 0.9rem; }
+
+  @media (max-width: 640px) {
+    .tmdb-expand { display: block; margin-left: 0; margin-top: 4px; font-size: 0.78rem; padding: 6px 0; }
+  }

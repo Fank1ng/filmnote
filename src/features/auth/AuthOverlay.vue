@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { getSupabaseClient } from '../../api/supabase.js';
 import { applyAuthenticatedUser } from '../../app/session.js';
+import { appRedirectUrl } from '../../shared/browser.js';
 import { useSessionStore } from '../../stores/session.js';
 import { useUiStore } from '../../stores/ui.js';
 
@@ -176,7 +177,7 @@ async function sendReset(): Promise<void> {
   try {
     const db = getSupabaseClient();
     const { error } = await db.auth.resetPasswordForEmail(mail, {
-      redirectTo: window.location.origin + window.location.pathname,
+      redirectTo: appRedirectUrl(),
     });
     if (error) {
       showError('发送失败: ' + error.message);

@@ -1,3 +1,6 @@
+import './search.css';
+import './styles.css';
+
 export { default as QuickRateModal } from './QuickRateModal.vue';
 export { default as RatingsSearchPanel } from './RatingsSearchPanel.vue';
 

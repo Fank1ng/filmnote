@@ -358,7 +358,7 @@ async function bindUser(userId: string): Promise<void> {
   await refreshVueData();
 }
 
-async function confirm(coupleId: string | number): Promise<void> {
+async function confirmBinding(coupleId: string | number): Promise<void> {
   const { error } = await confirmCouple(coupleId);
   if (error) {
     ui.showToast(`确认失败: ${error.message}`);
@@ -634,7 +634,7 @@ onMounted(() => {
       <div v-if="pendingReceived.length || pendingSent.length" class="couple-pending">
         <div v-for="item in pendingReceived" :key="`received-${item.id}`" class="couple-pending-row">
           <span>{{ displayName(item.requested_by, '对方') }} 请求绑定 Couple</span>
-          <button class="btn btn-sm btn-primary" type="button" @click="confirm(item.id)">确认绑定</button>
+          <button class="btn btn-sm btn-primary" type="button" @click="confirmBinding(item.id)">确认绑定</button>
         </div>
         <div v-for="item in pendingSent" :key="`sent-${item.id}`" class="couple-pending-row">
           <span>已向 {{ displayName(otherUserId(item), '对方') }} 发送请求，等待确认</span>

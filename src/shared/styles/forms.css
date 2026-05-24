@@ -1,0 +1,65 @@
+/* ── Form ── */
+  .form-group { margin-bottom: 14px; }
+  .form-group label { display: block; font-size: 0.85rem; color: var(--text2); margin-bottom: 4px; }
+  .form-group input, .form-group textarea {
+    width: 100%; padding: 10px 14px; background: var(--surface);
+    border: 1px solid var(--border); color: var(--text);
+    border-radius: var(--radius); font-size: 0.95rem; font-family: inherit;
+  }
+  .form-group input:focus, .form-group textarea:focus { border-color: var(--gold); outline: none; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
+
+  /* ── Dimensions ── */
+  .dim-list { display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px; }
+  .dim-row { display: flex; align-items: center; gap: 12px; }
+  .dim-info { min-width: 120px; }
+  .dim-name { font-size: 0.9rem; font-weight: 500; }
+  .dim-weight { font-size: 0.72rem; color: var(--text2); }
+  .dim-slider { flex: 1; display: flex; align-items: center; gap: 10px; }
+  .dim-slider input[type="range"] {
+    flex: 1; -webkit-appearance: none; appearance: none;
+    height: 6px; background: var(--border); border-radius: 3px; outline: none;
+  }
+	  .dim-slider input[type="range"]::-webkit-slider-thumb {
+	    -webkit-appearance: none; appearance: none;
+	    width: 20px; height: 20px; border-radius: 50%;
+	    background: var(--gold); cursor: pointer; border: 2px solid var(--bg);
+	  }
+	  .dim-score { width: 32px; text-align: center; font-weight: 700; font-size: 1rem; color: var(--gold); }
+	  .dim-readonly { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; margin-bottom: 20px; }
+	  .dim-readonly-item {
+	    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+	    padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px;
+	    background: rgba(255,255,255,0.03);
+	  }
+	  .dim-readonly-item span { color: var(--text2); font-size: 0.78rem; }
+	  .dim-readonly-item strong { font-size: 0.95rem; }
+	  .total-preview {
+    background: var(--gold-dim); border: 1px solid var(--gold);
+    border-radius: var(--radius); padding: 14px 20px;
+    display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;
+  }
+  .total-label { font-size: 0.9rem; color: var(--gold); }
+  .total-value { font-size: 2rem; font-weight: 800; color: var(--gold); }
+
+  /* ── Buttons ── */
+  .btn {
+    padding: 10px 20px; border-radius: var(--radius); cursor: pointer;
+    font-size: 0.9rem; font-weight: 600; border: none; transition: var(--t);
+  }
+  .btn-primary { background: var(--gold); color: #000; }
+  .btn-primary:hover { background: #c49b45; }
+  .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { border-color: var(--gold); color: var(--gold); }
+  .btn-danger { background: var(--danger-bg); color: var(--danger); border: 1px solid var(--danger); }
+  .btn-danger:hover { background: var(--danger); color: #fff; }
+  .btn-sm { padding: 5px 12px; font-size: 0.8rem; }
+  .btn-xs { padding: 3px 8px; font-size: 0.7rem; border-radius: 6px; }
+  .btn-group { display: flex; gap: 10px; margin-top: 20px; }
+  .quick-rate-modal { max-width: 640px; max-height: min(86vh, 760px); overflow-y: auto; }
+
+  @media (max-width: 640px) {
+    .form-row, .form-row-3 { grid-template-columns: 1fr; }
+    .dim-info { min-width: 90px; }
+  }

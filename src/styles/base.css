@@ -1,0 +1,15 @@
+:root {
+    --bg: #0f0f0f; --surface: #1a1a1a; --border: #2a2a2a;
+    --text: #e0e0e0; --text2: #888; --gold: #d4a853;
+    --gold-dim: #3a3020; --radius: 10px; --t: 0.2s ease;
+    --danger: #a04040; --danger-bg: #2a1515;
+    --friend: #5b9db0; --friend-dim: #1a2a30;
+    --ceci: #FF69B4; --ceci-dim: #2a1525;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  [hidden] { display: none !important; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); min-height: 100vh; line-height: 1.6;
+  }
+  .hidden { display: none !important; }

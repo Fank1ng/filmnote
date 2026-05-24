@@ -5,17 +5,15 @@ function errorMessage(error: unknown): string {
 }
 
 export function bootstrapVueApp(): void {
-  try {
-    initSupabaseClient();
-  } catch (error) {
-    console.error('Supabase init error:', error);
-    const authError = document.getElementById('authError');
-    if (authError) authError.textContent = '初始化失败：' + errorMessage(error);
-  }
+  initSupabaseClient();
 }
 
-export function showBootstrapError(error: unknown): void {
+export function showBootstrapError(error: unknown, root: HTMLElement): void {
   console.error('FilmNote bootstrap failed:', error);
-  const authError = document.getElementById('authError');
-  if (authError) authError.textContent = '启动失败：' + errorMessage(error);
+  root.textContent = `启动失败：${errorMessage(error)}`;
+  root.style.minHeight = '100vh';
+  root.style.display = 'grid';
+  root.style.placeItems = 'center';
+  root.style.color = '#d4a853';
+  root.style.background = '#0f0f0f';
 }

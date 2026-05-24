@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import { storeToRefs } from 'pinia';
 import { PaginationControls } from '../../shared/components/index.js';
+import { scrollToPageTop } from '../../shared/browser.js';
 import { useMediaActions } from '../../shared/composables/useMediaActions.js';
 import { posterUrl } from '../../shared/tmdb.js';
 import { useListControlsStore } from '../../stores/list-controls.js';
@@ -53,7 +54,7 @@ function showDetail(item: WatchlistItem): void {
 
 function changePage(nextPage: number): void {
   controls.setWatchlistPage(nextPage);
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  scrollToPageTop();
 }
 </script>
 

@@ -1,0 +1,92 @@
+/* ── TMDb Search ── */
+  .search-wrap { position: relative; margin-bottom: 16px; }
+  .search-wrap input {
+    width: 100%; padding: 13px 16px; background: var(--surface);
+    border: 1px solid var(--border); color: var(--text);
+    border-radius: var(--radius); font-size: 1rem;
+  }
+  .search-wrap input:focus { border-color: var(--gold); outline: none; }
+  .search-results {
+    position: static;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); max-height: 360px; overflow-y: auto;
+    display: none; margin-top: 10px;
+  }
+  .search-results.open { display: block; }
+  .sr-item {
+    display: flex; align-items: center; gap: 14px; padding: 12px 14px;
+    cursor: pointer; transition: var(--t); border-bottom: 1px solid var(--border);
+    border-left: 3px solid transparent;
+  }
+  .vue-sr-item {
+    width: 100%; border-top: 0; border-right: 0; border-bottom: 1px solid var(--border);
+    background: transparent; color: inherit; text-align: left; font: inherit;
+  }
+  .search-message { padding: 12px 14px; color: var(--text2); font-size: 0.85rem; }
+  .sr-item:hover { background: rgba(255,255,255,0.04); }
+  .sr-item.selected { background: rgba(212,168,83,0.12); border-left-color: var(--gold); }
+  .sr-item:last-child { border-bottom: none; }
+  .sr-poster { width: 48px; height: 72px; border-radius: 6px; object-fit: cover; background: var(--border); flex-shrink: 0; }
+  .sr-info { flex: 1; min-width: 0; }
+  .sr-title { font-size: 0.9rem; font-weight: 500; }
+  .sr-meta { font-size: 0.75rem; color: var(--text2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .sr-type { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; background: var(--gold-dim); color: var(--gold); }
+  .sr-fill-action { min-width: 0; }
+
+  .selected-search-preview { margin-top: 16px; }
+  .selected-search-empty {
+    min-height: 160px; display: grid; place-items: center;
+    border: 1px dashed var(--border); border-radius: var(--radius);
+    color: var(--text2); background: rgba(255,255,255,0.02); font-size: 0.9rem;
+  }
+  .selected-search-card {
+    display: grid; grid-template-columns: 132px minmax(0, 1fr); gap: 18px;
+    padding: 16px; border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--surface);
+  }
+  .selected-poster {
+    width: 132px; aspect-ratio: 2 / 3; border-radius: 8px;
+    background: var(--border); overflow: hidden; display: grid; place-items: center;
+    color: var(--text2); font-size: 2rem; flex-shrink: 0;
+  }
+  .selected-poster img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .selected-info { min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+  .selected-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .selected-head h3 { margin: 0; font-size: 1.15rem; line-height: 1.3; color: var(--text); word-break: break-word; }
+  .selected-meta { color: var(--text2); font-size: 0.8rem; margin-top: 3px; }
+  .selected-type {
+    padding: 3px 8px; border-radius: 6px; background: var(--gold-dim);
+    color: var(--gold); font-size: 0.72rem; font-weight: 700; white-space: nowrap;
+  }
+  .selected-facts { display: flex; flex-wrap: wrap; gap: 6px; }
+  .selected-facts span {
+    padding: 3px 8px; border-radius: 6px; background: rgba(255,255,255,0.04);
+    color: var(--text2); font-size: 0.75rem;
+  }
+  .selected-overview {
+    color: var(--text2); font-size: 0.84rem; line-height: 1.7;
+    display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
+    overflow: hidden; word-break: break-word;
+  }
+  .selected-overview.expanded { display: block; }
+  .selected-overview.loading { color: var(--text2); }
+  .selected-overview-toggle {
+    align-self: flex-start; border: 0; background: transparent; color: var(--gold);
+    cursor: pointer; font-size: 0.78rem; padding: 0;
+  }
+  .search-actions {
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    margin-top: auto; padding-top: 4px;
+  }
+  .search-actions .btn:disabled {
+    opacity: 0.45; cursor: not-allowed; pointer-events: none;
+  }
+
+  @media (max-width: 640px) {
+    .selected-search-card { grid-template-columns: 1fr; }
+    .selected-poster { width: 112px; }
+    .selected-head { display: grid; gap: 8px; }
+    .search-actions .btn { flex: 1 1 120px; }
+    .sr-item { align-items: flex-start; flex-wrap: wrap; }
+    .sr-info { flex-basis: calc(100% - 62px); }
+  }

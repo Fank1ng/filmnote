@@ -1,3 +1,5 @@
+import './styles.css';
+
 export { default as ListBody } from './ListBody.vue';
 export { default as ListControls } from './ListControls.vue';
 export { default as WatchlistGrid } from './WatchlistGrid.vue';

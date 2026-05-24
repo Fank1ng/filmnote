@@ -1,0 +1,63 @@
+/* ── Stats Compare ── */
+  .stat-compare-row { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; }
+  .stat-compare-label { width: 110px; font-size: 0.82rem; text-align: right; flex-shrink: 0; }
+  .stat-compare-bars { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+  .stat-compare-values { display: flex; gap: 12px; font-size: 0.78rem; font-weight: 600; width: 70px; flex-shrink: 0; }
+
+  /* ── Stats ── */
+  .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 24px; }
+  .stat-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 16px; text-align: center;
+  }
+  .stat-value { font-size: 2rem; font-weight: 800; color: var(--gold); }
+  .stat-label { font-size: 0.8rem; color: var(--text2); margin-top: 2px; }
+  .stat-bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .stat-bar-label { width: 110px; font-size: 0.82rem; text-align: right; }
+  .stat-bar-track { flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+  .stat-bar-fill { height: 100%; background: var(--gold); border-radius: 4px; transition: width 0.5s ease; }
+  .stat-bar-value { width: 34px; font-size: 0.82rem; font-weight: 600; }
+  .stats-radar-wrap { margin: 0 auto 18px; }
+  .stats-radar { display: block; width: 100%; max-width: 620px; aspect-ratio: 1; margin: 0 auto; overflow: visible; }
+  .stats-radar-label { fill: var(--text); font-size: 12px; font-weight: 700; }
+  .stats-radar-score { fill: var(--text2); font-size: 9px; }
+  .stats-radar-legend {
+    display: flex; align-items: center; justify-content: center; flex-wrap: wrap;
+    gap: 14px; color: var(--text); font-size: 0.78rem; margin-top: -8px;
+  }
+  .stats-radar-legend i {
+    display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+    margin-right: 6px; vertical-align: -1px;
+  }
+  .score-dist { display: flex; gap: 6px; align-items: stretch; height: 180px; margin-bottom: 20px; padding: 0 4px; position: relative; }
+  .score-dist::before {
+    content: ''; position: absolute; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 35px, var(--border) 35px, var(--border) 36px);
+    opacity: 0.5; pointer-events: none; border-radius: 4px;
+  }
+  .score-dist-bar { flex: 1; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; z-index: 1; }
+  .score-dist-fill { width: 100%; border-radius: 4px 4px 0 0; min-height: 3px; transition: height 0.5s ease; }
+  .score-dist-fill:hover { filter: brightness(1.3); }
+  .score-dist-label { font-size: 0.7rem; color: var(--text2); margin-top: 2px; flex-shrink: 0; }
+  .score-dist-count { font-size: 0.9rem; font-weight: 700; flex-shrink: 0; }
+
+  /* ── Compare Distribution ── */
+  .compare-dist { display: flex; gap: 6px; align-items: stretch; height: 180px; padding: 0 2px; position: relative; }
+  .compare-dist::before {
+    content: ''; position: absolute; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 35px, var(--border) 35px, var(--border) 36px);
+    opacity: 0.5; pointer-events: none; border-radius: 4px;
+  }
+  .cd-bar-group { flex: 1; height: 100%; display: flex; flex-direction: column; align-items: center; gap: 4px; z-index: 1; }
+  .cd-bars { display: flex; gap: 3px; align-items: flex-end; flex: 1; width: 100%; justify-content: center; }
+  .cd-bar { width: 14px; border-radius: 3px 3px 0 0; min-height: 3px; position: relative; transition: height 0.5s ease; }
+  .cd-bar:hover { filter: brightness(1.3); }
+  .cd-count { position: absolute; top: -16px; left: 50%; transform: translateX(-50%); font-size: 0.75rem; font-weight: 700; white-space: nowrap; color: var(--text); }
+  .cd-label { font-size: 0.68rem; color: var(--text2); flex-shrink: 0; }
+
+  @media (max-width: 640px) {
+    .stats-radar { max-width: 100%; margin-top: 4px; }
+    .stats-radar-label { font-size: 9px; }
+    .stats-radar-score { display: none; }
+    .stats-radar-legend { margin-top: 0; font-size: 0.72rem; }
+  }

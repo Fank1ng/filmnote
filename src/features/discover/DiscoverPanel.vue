@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { getCurrentUserId } from '../../app/user-context.js';
 import { TMDB_IMG, TMDB_PROXY } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
 import { PaginationControls } from '../../shared/components/index.js';
+import { scrollToPageTop } from '../../shared/browser.js';
+import { useIntervalFn } from '../../shared/composables/useIntervalFn.js';
 import { useMediaActions } from '../../shared/composables/useMediaActions.js';
 import { useCoupleStore } from '../../stores/couple.js';
 import { useEntriesStore } from '../../stores/entries.js';
@@ -41,7 +43,6 @@ const errorMessage = ref('');
 const movies = ref<TmdbMedia[] | null>([]);
 const nowTick = ref(Date.now());
 let loadSeq = 0;
-let timer = 0;
 
 const currentUserId = computed(() => getCurrentUserId(session.currentUser));
 const ratedCount = computed(() => entries.entries.filter(entry => entry.user_id === currentUserId.value && mediaType(entry) === 'movie').length);
@@ -192,7 +193,7 @@ async function setTab(tab: DiscoverTab): Promise<void> {
 
 function setPage(page: number): void {
   pages.value[activeTab.value] = Math.min(Math.max(1, page), totalPages.value);
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  scrollToPageTop();
 }
 
 async function toggleTopRatedUnwatched(): Promise<void> {
@@ -248,13 +249,10 @@ watch(() => entries.entries.length, () => {
   if (currentUserId.value && activeTab.value === 'recommend') void loadActiveTab();
 });
 
-onMounted(() => {
-  timer = window.setInterval(() => { nowTick.value = Date.now(); }, 1000);
-  void loadActiveTab();
-});
+useIntervalFn(() => { nowTick.value = Date.now(); }, 1000);
 
-onBeforeUnmount(() => {
-  if (timer) window.clearInterval(timer);
+onMounted(() => {
+  void loadActiveTab();
 });
 </script>
 

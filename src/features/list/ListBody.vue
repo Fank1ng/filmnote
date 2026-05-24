@@ -6,6 +6,7 @@ import { refreshVueData } from '../../app/data-sync.js';
 import { getCurrentUser } from '../../app/user-context.js';
 import { DIM_LABELS, TMDB_PROXY, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import { PaginationControls } from '../../shared/components/index.js';
+import { highlightElementById, scrollToPageTop } from '../../shared/browser.js';
 import { readJsonStorage, writeJsonStorage } from '../../shared/composables/useBrowserStorage.js';
 import { useConfirm } from '../../shared/composables/useConfirm.js';
 import { useMediaActions } from '../../shared/composables/useMediaActions.js';
@@ -383,7 +384,7 @@ function addMyRating(entry: Entry): void {
 
 function changePage(nextPage: number): void {
   controls.setPage(nextPage);
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  scrollToPageTop();
 }
 
 onMounted(() => {
@@ -404,12 +405,9 @@ watch([pageGroups, () => ui.highlightEntryId], async () => {
   const id = ui.highlightEntryId;
   if (!id) return;
   await nextTick();
-  const element = document.getElementById(`entry-${id}`);
-  if (!element) return;
-  element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  element.classList.add('entry-highlight');
-  window.setTimeout(() => element.classList.remove('entry-highlight'), 1800);
-  ui.clearHighlightEntry();
+  if (highlightElementById(`entry-${id}`, 'entry-highlight', 1800)) {
+    ui.clearHighlightEntry();
+  }
 }, { flush: 'post' });
 
 </script>

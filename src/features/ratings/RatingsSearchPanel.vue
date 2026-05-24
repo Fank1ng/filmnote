@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { searchTmdbMedia, loadTmdbMediaDetail, type NormalizedSearchMedia } from '../../api/tmdb-api.js';
 import { getCurrentUser } from '../../app/user-context.js';
+import { useDebouncedFn } from '../../shared/composables/useDebouncedFn.js';
 import { useMediaActions } from '../../shared/composables/useMediaActions.js';
 import { posterUrl } from '../../shared/tmdb.js';
 import { useCoupleStore } from '../../stores/couple.js';
@@ -32,7 +33,6 @@ const loading = ref(false);
 const detailLoading = ref(false);
 const errorMessage = ref('');
 const expanded = ref(false);
-let searchTimer: number | null = null;
 let abortController: AbortController | null = null;
 let detailSeq = 0;
 
@@ -143,13 +143,13 @@ async function addNext(): Promise<void> {
   await mediaActions.addToNextWatch(movie);
 }
 
+const runSearchDebounced = useDebouncedFn(value => void runSearch(value), 350);
+
 watch(query, value => {
-  if (searchTimer) window.clearTimeout(searchTimer);
-  searchTimer = window.setTimeout(() => void runSearch(value), 350);
+  runSearchDebounced(value);
 });
 
 onBeforeUnmount(() => {
-  if (searchTimer) window.clearTimeout(searchTimer);
   abortController?.abort();
 });
 </script>

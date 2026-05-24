@@ -1,0 +1,30 @@
+/* ── Auth ── */
+  .auth-overlay-vue {
+    position: fixed; inset: 0; background: var(--bg);
+    display: flex; align-items: center; justify-content: center; z-index: 200;
+  }
+  #authOverlay {
+    position: fixed; inset: 0; background: var(--bg);
+    display: flex; align-items: center; justify-content: center; z-index: 200;
+  }
+  .auth-box { width: 360px; padding: 32px; }
+  .auth-box h1 { font-size: 1.6rem; margin-bottom: 4px; }
+  .auth-box h1 .fd { color: var(--gold); }
+  .auth-box h1 .ce { color: var(--ceci); }
+  .auth-box .subtitle { color: var(--text2); font-size: 0.85rem; margin-bottom: 16px; }
+  .link-button {
+    border: 0; background: none; color: var(--text2);
+    font: inherit; font-size: 0.8rem; cursor: pointer; padding: 0;
+  }
+  .link-button:hover { color: var(--text); }
+  .link-gold { color: var(--gold); }
+  .auth-box input {
+    width: 100%; padding: 12px; margin-bottom: 10px;
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); border-radius: var(--radius); font-size: 0.95rem;
+  }
+  .auth-box input:focus { border-color: var(--gold); outline: none; }
+  .auth-box .btn { width: 100%; margin-bottom: 8px; padding: 12px; }
+  .auth-box .toggle { text-align: center; font-size: 0.85rem; color: var(--text2); }
+  .auth-box .toggle a { color: var(--gold); cursor: pointer; }
+  .auth-error { color: #d44; font-size: 0.85rem; margin-bottom: 8px; }

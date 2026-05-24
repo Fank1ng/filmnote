@@ -1,3 +1,5 @@
+import './styles.css';
+
 export { default as AuthOverlay } from './AuthOverlay.vue';
 export { default as AccountModals } from './AccountModals.vue';
 

@@ -127,3 +127,5 @@ onMounted(() => {
   <EntryDetailModal />
   <MediaDetailModal />
 </template>
+
+<style src="./styles.css"></style>

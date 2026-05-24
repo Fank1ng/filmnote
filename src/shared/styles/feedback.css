@@ -1,0 +1,16 @@
+/* ── Toast ── */
+  .toast {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: var(--surface); border: 1px solid var(--gold);
+    color: var(--text); padding: 12px 24px; border-radius: var(--radius);
+    font-size: 0.9rem; z-index: 300; opacity: 0; transition: opacity 0.3s;
+  }
+  .toast.show { opacity: 1; }
+
+  /* ── Spinner ── */
+  .spinner {
+    display: inline-block; width: 20px; height: 20px;
+    border: 2px solid var(--border); border-top-color: var(--gold);
+    border-radius: 50%; animation: spin 0.6s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }

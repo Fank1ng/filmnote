@@ -1,6 +1,7 @@
 import { createEntry, saveSeasonRatings } from './entries-api.js';
 import { addBlockedMovie, addWatchlistItem } from './list-api.js';
 import { addCoupleQueueItem } from './couple-api.js';
+import { downloadJsonFile } from '../shared/browser.js';
 import type { BlockedMovie, CoupleQueueItem, Entry, SeasonRating, WatchlistItem } from '../types/domain.js';
 
 type ExportPayload = {
@@ -32,13 +33,7 @@ export function buildExportPayload(payload: Omit<ExportPayload, 'version' | 'exp
 }
 
 export function downloadExport(payload: ExportPayload): void {
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = `filmnote-${new Date().toISOString().slice(0, 10)}.json`;
-  link.click();
-  URL.revokeObjectURL(url);
+  downloadJsonFile(payload, `filmnote-${new Date().toISOString().slice(0, 10)}.json`);
 }
 
 function entryRows(payload: ImportPayload): Entry[] {

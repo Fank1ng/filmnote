@@ -1,3 +1,8 @@
+import '../styles/forms.css';
+import '../styles/modal.css';
+import '../styles/details.css';
+import '../styles/feedback.css';
+
 export { default as AppToast } from './AppToast.vue';
 export { default as AppHeader } from './AppHeader.vue';
 export { default as BaseModal } from './BaseModal.vue';

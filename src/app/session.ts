@@ -1,6 +1,7 @@
 import { refreshVueData } from './data-sync.js';
 import { getSupabaseClient } from '../api/supabase.js';
 import { SESSION_KEY } from '../config/constants.js';
+import { browserSessionStorage, clearBrowserInterval, onDocumentVisible, scheduleBrowserInterval } from '../shared/browser.js';
 import { useCoupleStore } from '../stores/couple.js';
 import { useEntriesStore } from '../stores/entries.js';
 import { useListsStore } from '../stores/lists.js';
@@ -39,10 +40,10 @@ function userFromSession(data: unknown): UserLike | null {
 }
 
 function sessionToken(): string {
-  let token = sessionStorage.getItem(SESSION_KEY);
+  let token = browserSessionStorage.get(SESSION_KEY);
   if (!token) {
     token = crypto.randomUUID();
-    sessionStorage.setItem(SESSION_KEY, token);
+    browserSessionStorage.set(SESSION_KEY, token);
   }
   return token;
 }
@@ -145,7 +146,7 @@ async function checkSessionToken(): Promise<void> {
     .eq('user_id', user.id)
     .maybeSingle();
   const remoteToken = (data as Profile | null)?.session_token;
-  const localToken = sessionStorage.getItem(SESSION_KEY);
+  const localToken = browserSessionStorage.get(SESSION_KEY);
   if (remoteToken && localToken && remoteToken !== localToken) {
     useUiStore().showToast('账号已在其他位置登录');
     await logoutCurrentUser(false);
@@ -153,18 +154,14 @@ async function checkSessionToken(): Promise<void> {
 }
 
 export function startSessionTokenGuard(): void {
-  if (sessionCheckTimer) window.clearInterval(sessionCheckTimer);
+  clearBrowserInterval(sessionCheckTimer);
   removeVisibilityCheck?.();
-  sessionCheckTimer = window.setInterval(() => void checkSessionToken(), 10000);
-  const onVisibility = () => {
-    if (!document.hidden) void checkSessionToken();
-  };
-  document.addEventListener('visibilitychange', onVisibility);
-  removeVisibilityCheck = () => document.removeEventListener('visibilitychange', onVisibility);
+  sessionCheckTimer = scheduleBrowserInterval(() => void checkSessionToken(), 10000);
+  removeVisibilityCheck = onDocumentVisible(() => void checkSessionToken());
 }
 
 export function stopSessionTokenGuard(): void {
-  if (sessionCheckTimer) window.clearInterval(sessionCheckTimer);
+  clearBrowserInterval(sessionCheckTimer);
   sessionCheckTimer = null;
   removeVisibilityCheck?.();
   removeVisibilityCheck = null;
@@ -189,7 +186,7 @@ export async function initializeVueSession(): Promise<void> {
         const authUser = (nextSession as AuthSession | null)?.user || null;
         if (event === 'SIGNED_OUT') {
           stopSessionTokenGuard();
-          sessionStorage.removeItem(SESSION_KEY);
+          browserSessionStorage.remove(SESSION_KEY);
           session.clearSession();
           clearDataStores();
           return;
@@ -213,7 +210,7 @@ export async function initializeVueSession(): Promise<void> {
 export async function logoutCurrentUser(signOut = true): Promise<void> {
   stopSessionTokenGuard();
   if (signOut) await getSupabaseClient().auth.signOut();
-  sessionStorage.removeItem(SESSION_KEY);
+  browserSessionStorage.remove(SESSION_KEY);
   useSessionStore().clearSession();
   clearDataStores();
   useUiStore().setActiveTab('rate');

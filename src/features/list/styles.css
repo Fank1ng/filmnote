@@ -1,0 +1,92 @@
+/* ── List ── */
+  .section-title-switch { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
+  .section-title-switch button {
+    background: transparent; border: none; color: var(--text2);
+    padding: 0 0 4px; cursor: pointer; font-size: 1.1rem; font-weight: 700;
+    border-bottom: 2px solid transparent; transition: var(--t);
+  }
+  .section-title-switch button:hover { color: var(--text); }
+  .section-title-switch button.active { color: var(--gold); border-bottom-color: var(--gold); }
+  .section-title-switch span {
+    display: inline-flex; min-width: 20px; height: 20px; align-items: center; justify-content: center;
+    margin-left: 4px; padding: 0 6px; border-radius: 10px; background: var(--gold-dim);
+    color: var(--gold); font-size: 0.72rem; vertical-align: middle;
+  }
+  .list-subtabs { display: flex; gap: 8px; margin-bottom: 16px; }
+  .list-subtabs button {
+    background: none; border: 1px solid var(--border); color: var(--text2);
+    padding: 6px 16px; cursor: pointer; font-size: 0.85rem; border-radius: 20px; transition: var(--t);
+  }
+  .list-subtabs button:hover { border-color: var(--gold); color: var(--text); }
+  .list-subtabs button.active { border-color: var(--gold); color: var(--gold); background: var(--gold-dim); }
+  .list-controls { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .list-controls input, .list-controls select {
+    padding: 8px 12px; background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px; font-size: 0.85rem;
+  }
+  .list-controls input:focus, .list-controls select:focus { border-color: var(--gold); outline: none; }
+  .search-box { flex: 1; min-width: 180px; }
+
+  .movie-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: 12px 16px; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 14px; transition: var(--t); cursor: pointer;
+    content-visibility: auto; contain-intrinsic-size: auto 90px;
+  }
+  .movie-card:hover { border-color: var(--gold); }
+  .movie-card.entry-highlight {
+    border-color: var(--gold);
+    box-shadow: 0 0 0 2px rgba(212, 168, 83, 0.35), 0 12px 32px rgba(0, 0, 0, 0.28);
+  }
+  .mc-poster { width: 44px; height: 66px; border-radius: 6px; object-fit: cover; background: var(--border); flex-shrink: 0; }
+  .mc-score {
+    width: 52px; height: 52px; border-radius: 10px; flex-shrink: 0;
+    background: var(--gold-dim); border: 2px solid var(--gold);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.2rem; font-weight: 800; color: var(--gold);
+  }
+  .mc-info { flex: 1; min-width: 0; }
+  .mc-title { font-weight: 600; font-size: 0.95rem; }
+  .mc-meta { font-size: 0.78rem; color: var(--text2); margin-top: 2px; display: flex; align-items: center; gap: 8px; }
+  .mc-owner { font-size: 0.7rem; color: var(--gold); background: var(--gold-dim); padding: 1px 6px; border-radius: 4px; }
+  .mc-dim-scores { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+  .mc-dim-scores span { font-size: 0.68rem; color: var(--text2); background: rgba(255,255,255,0.04); padding: 1px 6px; border-radius: 4px; }
+  .mc-comment { font-size: 0.8rem; color: var(--text2); margin-top: 3px; font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 350px; }
+  .mc-actions { display: flex; flex-direction: row; gap: 6px; flex-shrink: 0; }
+  .mc-actions-mobile { display: none; flex-direction: row; gap: 6px; }
+  .mc-season-badge { font-size: 0.7rem; color: var(--gold); background: var(--gold-dim); padding: 2px 8px; border-radius: 10px; }
+  .mc-scores-compare { display: flex; gap: 10px; align-items: center; min-width: 176px; flex-shrink: 0; }
+  .mc-score-sm {
+    width: 52px; height: 52px; border-radius: 10px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.05rem; font-weight: 800; flex-direction: column;
+  }
+  .mc-score-mine { border: 2px solid var(--gold); background: var(--gold-dim); color: var(--gold); }
+  .mc-score-friend { border: 2px solid var(--friend); background: var(--friend-dim); color: var(--friend); }
+  .mc-score-ceci { border: 2px solid var(--ceci); background: var(--ceci-dim); color: var(--ceci); }
+  .mc-score-label { font-size: 0.55rem; font-weight: 400; line-height: 1; }
+  .mc-dim-item {
+    width: 50px; display: flex; flex-direction: column; align-items: center;
+    padding: 3px 4px; border-radius: 6px; gap: 1px;
+    background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06);
+  }
+  .dim-lab { font-size: 0.6rem; color: var(--text2); line-height: 1.1; }
+  .dim-val { font-size: 0.8rem; font-weight: 700; line-height: 1.2; }
+  .mc-dim-user { font-size: 0.65rem; font-weight: 600; white-space: nowrap; min-width: 75px; }
+  .mc-dim-dots { display: flex; gap: 6px; align-items: flex-start; flex-wrap: wrap; }
+  .mc-dim-total { display: none; font-size: 0.75rem; font-weight: 700; }
+
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--text2); }
+
+  @media (max-width: 640px) {
+    .movie-card { flex-wrap: wrap; padding: 10px 12px; gap: 8px; }
+    .mc-actions { flex-shrink: 1; }
+    .mc-info { width: 100%; min-width: 100%; }
+    .mc-dim-dots { display: none; }
+    .mc-dim-total { display: none; }
+    .mc-dim-scores { display: none; }
+    .mc-actions-mobile { display: flex !important; flex-direction: row; gap: 6px; align-items: center; margin-top: 6px; }
+    .mc-poster { width: 36px; height: 54px; }
+    .mc-scores-compare { gap: 4px; min-width: 0; flex-shrink: 1; }
+    .mc-title { font-size: 0.88rem; }
+  }

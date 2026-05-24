@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia';
+import { clearBrowserTimeout, scheduleBrowserTimeout } from '../shared/browser.js';
 
 type MainTab = 'rate' | 'list' | 'discover' | 'couple' | 'stats';
 type AccountModal = 'changePassword' | 'invites' | 'blocked' | null;
@@ -46,10 +47,10 @@ export const useUiStore = defineStore('ui', {
       this.highlightEntryId = null;
     },
     showToast(message: string) {
-      if (this.toastTimer) window.clearTimeout(this.toastTimer);
+      clearBrowserTimeout(this.toastTimer);
       this.toastMessage = message;
       this.toastOpen = true;
-      this.toastTimer = window.setTimeout(() => {
+      this.toastTimer = scheduleBrowserTimeout(() => {
         this.toastOpen = false;
         this.toastTimer = null;
       }, 2500);

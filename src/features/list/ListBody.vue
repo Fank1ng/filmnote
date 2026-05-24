@@ -6,6 +6,8 @@ import { refreshVueData } from '../../app/data-sync.js';
 import { getCurrentUser } from '../../app/user-context.js';
 import { DIM_LABELS, TMDB_PROXY, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import { PaginationControls } from '../../shared/components/index.js';
+import { readJsonStorage, writeJsonStorage } from '../../shared/composables/useBrowserStorage.js';
+import { useConfirm } from '../../shared/composables/useConfirm.js';
 import { useMediaActions } from '../../shared/composables/useMediaActions.js';
 import { getSeasonAwareEntryScore } from '../../shared/scoring.js';
 import { posterUrl } from '../../shared/tmdb.js';
@@ -54,6 +56,7 @@ const session = useSessionStore();
 const ui = useUiStore();
 const mediaActions = useMediaActions();
 const modals = useModalStore();
+const { confirmAction } = useConfirm();
 const { mode, type, owner, search, sort, score, page } = storeToRefs(controls);
 
 const detailCache = ref<Record<string, Record<string, unknown>>>({});
@@ -147,19 +150,11 @@ function groupKey(entry: Entry): string {
 }
 
 function loadDetailCache(): void {
-  try {
-    detailCache.value = JSON.parse(localStorage.getItem('filmnote_movie_cache') || '{}') || {};
-  } catch {
-    detailCache.value = {};
-  }
+  detailCache.value = readJsonStorage<Record<string, Record<string, unknown>>>('filmnote_movie_cache', {});
 }
 
 function loadMediaSearchCache(): void {
-  try {
-    mediaSearchCache.value = JSON.parse(localStorage.getItem('filmnote_media_search_cache_v1') || '{}') || {};
-  } catch {
-    mediaSearchCache.value = {};
-  }
+  mediaSearchCache.value = readJsonStorage<Record<string, MediaSearchRecord>>('filmnote_media_search_cache_v1', {});
 }
 
 function searchRecordFor(entry: Entry): MediaSearchRecord | null {
@@ -191,11 +186,7 @@ function saveMediaSearchRecords(records: Record<string, MediaSearchRecord>): voi
     };
   }
   mediaSearchCache.value = next;
-  try {
-    localStorage.setItem('filmnote_media_search_cache_v1', JSON.stringify(next));
-  } catch {
-    // Search can still use the in-memory cache for this session.
-  }
+  writeJsonStorage('filmnote_media_search_cache_v1', next);
 }
 
 async function warmDetailCache(): Promise<void> {
@@ -367,7 +358,7 @@ function editEntry(entry: Entry): void {
 }
 
 async function deleteEntry(entry: Entry): Promise<void> {
-  if (!window.confirm('确定删除这条评价？此操作不可恢复。')) return;
+  if (!confirmAction('确定删除这条评价？此操作不可恢复。')) return;
   const { error } = await deleteEntryApi(entry.id);
   if (error) {
     ui.showToast(`删除失败: ${error.message || '请稍后重试'}`);

@@ -10,6 +10,7 @@ import { ListBody, ListControls, WatchlistGrid } from '../features/list/index.js
 import { QuickRateModal, RatingsSearchPanel } from '../features/ratings/index.js';
 import { StatsContent, StatsControls } from '../features/stats/index.js';
 import { AppHeader, AppToast, EntryDetailModal, ImportExportToolbar, MediaDetailModal, TabShell } from '../shared/components/index.js';
+import { useConfirm } from '../shared/composables/useConfirm.js';
 import { useCoupleStore } from '../stores/couple.js';
 import { useEntriesStore } from '../stores/entries.js';
 import { useListsStore } from '../stores/lists.js';
@@ -23,6 +24,7 @@ const session = useSessionStore();
 const entries = useEntriesStore();
 const lists = useListsStore();
 const couple = useCoupleStore();
+const { confirmAction } = useConfirm();
 
 const authenticated = computed(() => session.isAuthenticated);
 
@@ -63,7 +65,7 @@ async function importJson(file: File): Promise<void> {
     const payload = JSON.parse(await file.text());
     const rows = Array.isArray(payload) ? payload : payload.entries;
     if (!Array.isArray(rows)) throw new Error('格式错误');
-    if (!window.confirm(`将导入 ${rows.length} 条记录，确认？`)) return;
+    if (!confirmAction(`将导入 ${rows.length} 条记录，确认？`)) return;
     const count = await importFilmNoteJson(userId, payload);
     await refreshVueData();
     ui.showToast(`已导入 ${count} 条记录`);

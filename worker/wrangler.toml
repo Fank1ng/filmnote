@@ -1,7 +1,8 @@
 # FilmNote Worker — TMDB API Proxy + Recommendation Engine
 name = "filmnote"
-main = "src/index.js"
-compatibility_date = "2025-05-01"
+main = "src/index.ts"
+compatibility_date = "2026-05-24"
+compatibility_flags = ["nodejs_compat"]
 
 # KV: persistent TMDB data cache (movie details permanent, lists 7-day TTL)
 kv_namespaces = [
@@ -13,3 +14,7 @@ crons = ["0 3 * * MON"]
 
 [vars]
 ALLOWED_ORIGINS = "null,https://fank1ng.github.io,https://filmnote.lccf1223.workers.dev,http://localhost:8000,http://127.0.0.1:8000,http://localhost:8787,http://127.0.0.1:8787"
+
+[observability]
+enabled = true
+head_sampling_rate = 1

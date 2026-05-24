@@ -2,6 +2,7 @@ import { createPinia } from 'pinia';
 import { createApp } from 'vue';
 import App from './app/App.vue';
 import { bootstrapVueApp, showBootstrapError } from './app/bootstrap.js';
+import './styles/app.css';
 
 function ensureVueRoot(): HTMLElement {
   let root = document.getElementById('filmnoteVueRoot');

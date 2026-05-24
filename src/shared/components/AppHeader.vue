@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useSessionStore } from '../../stores/session.js';
+import { useDocumentEvent } from '../composables/useDocumentEvent.js';
 
 defineOptions({ name: 'AppHeader' });
 
@@ -60,8 +61,7 @@ function onDocumentClick(): void {
   closeMenu();
 }
 
-onMounted(() => document.addEventListener('click', onDocumentClick));
-onBeforeUnmount(() => document.removeEventListener('click', onDocumentClick));
+useDocumentEvent('click', onDocumentClick);
 </script>
 
 <template>

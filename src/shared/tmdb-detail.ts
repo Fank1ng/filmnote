@@ -1,5 +1,6 @@
 import { TMDB_PROXY } from '../config/constants.js';
 import type { MediaType, TmdbDetail, TmdbMedia } from '../types/domain.js';
+import { readJsonStorage, writeJsonStorage } from './composables/useBrowserStorage.js';
 import { tmdbFetch } from './tmdb.js';
 
 const CACHE_KEY = 'filmnote_movie_cache';
@@ -26,19 +27,11 @@ export function mediaSearchKey(mediaType: MediaType, tmdbId: number): string {
 }
 
 function loadCache(): Record<string, unknown> {
-  try {
-    return JSON.parse(localStorage.getItem(CACHE_KEY) || '{}') || {};
-  } catch {
-    return {};
-  }
+  return readJsonStorage<Record<string, unknown>>(CACHE_KEY, {});
 }
 
 function saveCache(cache: Record<string, unknown>): void {
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
-  } catch {
-    // localStorage can be unavailable or full; detail UI can still render fetched data.
-  }
+  writeJsonStorage(CACHE_KEY, cache);
 }
 
 function stringArray(value: unknown, limit = 8): string[] {

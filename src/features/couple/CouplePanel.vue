@@ -13,6 +13,8 @@ import { refreshVueData } from '../../app/data-sync.js';
 import { getCurrentUserId } from '../../app/user-context.js';
 import { DIM_LABELS, TMDB_IMG, TMDB_PROXY, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
+import { readJsonStorage } from '../../shared/composables/useBrowserStorage.js';
+import { useConfirm } from '../../shared/composables/useConfirm.js';
 import { useMediaActions } from '../../shared/composables/useMediaActions.js';
 import { getSeasonAwareEntryScore } from '../../shared/scoring.js';
 import { useCoupleStore } from '../../stores/couple.js';
@@ -74,6 +76,7 @@ const lists = useListsStore();
 const session = useSessionStore();
 const mediaActions = useMediaActions();
 const ui = useUiStore();
+const { confirmAction } = useConfirm();
 
 const tab = ref<CoupleTab>('archive');
 const search = ref('');
@@ -259,11 +262,7 @@ function posterUrl(path: string | null | undefined): string {
 }
 
 function loadDetailCache(): void {
-  try {
-    detailCache.value = JSON.parse(localStorage.getItem('filmnote_movie_cache') || '{}') || {};
-  } catch {
-    detailCache.value = {};
-  }
+  detailCache.value = readJsonStorage<Record<string, CacheDetail>>('filmnote_movie_cache', {});
 }
 
 function detailFor(entry: Pick<Entry, 'tmdb_id' | 'type' | 'media_type'>): CacheDetail | null {
@@ -377,7 +376,7 @@ async function disconnect(coupleId: string | number): Promise<void> {
   if (wasActive) {
     const requester = String(target?.disconnect_requested_by || '');
     if (!requester) {
-      if (!window.confirm('将向对方发送解除 Couple 申请，对方同意后才会解除。确认发送？')) return;
+      if (!confirmAction('将向对方发送解除 Couple 申请，对方同意后才会解除。确认发送？')) return;
       const { error } = await requestCoupleDisconnect(coupleId, currentUserId.value);
       if (error) {
         ui.showToast(/schema cache|does not exist|relation|disconnect_requested_by|column/i.test(error.message || '')
@@ -399,7 +398,7 @@ async function disconnect(coupleId: string | number): Promise<void> {
       await refreshVueData();
       return;
     }
-    if (!window.confirm('对方请求解除 Couple。同意后，共享下次看队列也会一起删除，确认同意？')) return;
+    if (!confirmAction('对方请求解除 Couple。同意后，共享下次看队列也会一起删除，确认同意？')) return;
   }
   const { error } = await deleteCouple(coupleId);
   if (error) {

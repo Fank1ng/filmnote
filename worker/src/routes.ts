@@ -1,5 +1,7 @@
 // FilmNote Cloudflare Worker — TMDB proxy + recommendation + KV persistence
-import { IMDB_TOP100_SEED } from './imdb-top100-seed.js';
+import { corsHeaders, errorResponse, getAllowedOrigins, jsonResponse, readJsonBody } from './http';
+import { IMDB_TOP100_SEED } from './imdb-top100-seed';
+import type { Env, ScheduledController, WorkerExecutionContext } from './worker-types';
 
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const IMDB_TOP_URL = 'https://www.imdb.com/chart/top/';
@@ -7,22 +9,20 @@ const IMDB_TOP100_KV_KEY = 'list:imdb_top100:v1';
 const IMDB_TOP100_MEM_KEY = 'list:imdb_top100:v1';
 const IMDB_TOP100_LIMIT = 100;
 const MAX_IMDB_NEW_MAPPINGS = 20;
-const DEFAULT_ALLOWED_ORIGINS = [
-  'null',
-  'https://fank1ng.github.io',
-  'https://filmnote.lccf1223.workers.dev',
-  'http://localhost:8000',
-  'http://127.0.0.1:8000',
-  'http://localhost:8787',
-  'http://127.0.0.1:8787',
-];
 const MAX_PREFETCH_IDS = 50;
 const MAX_TITLE_IDS = 100;
 const MAX_CREDIT_IDS = 50;
 const MAX_SEARCH_INDEX_ITEMS = 50;
 const MAX_RECOMMEND_ENTRIES = 1000;
-const MAX_JSON_BYTES = 256 * 1024;
 const REC_CACHE_VERSION = 'v4';
+
+type NumericRecord = Record<string, number>;
+type DecadeScoreRecord = Record<string, { total: number; count: number }>;
+type RecommendationOptions = {
+  mode?: 'single' | 'couple';
+  partnerUserId?: string;
+  coupleMode?: boolean;
+};
 
 function getTmdbKey(env) {
   return env && env.TMDB_API_KEY;
@@ -47,50 +47,6 @@ function cacheGet(key) {
 function cacheSet(key, value) {
   if (memCache.size >= MEM_MAX) memCache.delete(memCache.keys().next().value);
   memCache.set(key, value);
-}
-
-function getAllowedOrigins(env) {
-  const configured = env && env.ALLOWED_ORIGINS;
-  if (!configured) return DEFAULT_ALLOWED_ORIGINS;
-  return configured.split(',').map(o => o.trim()).filter(Boolean);
-}
-
-function corsHeaders(request, env) {
-  const origin = request && request.headers.get('Origin');
-  const allowedOrigins = getAllowedOrigins(env);
-  const allowOrigin = origin && allowedOrigins.includes(origin)
-    ? origin
-    : allowedOrigins[0];
-  return {
-    'Access-Control-Allow-Origin': allowOrigin,
-    'Vary': 'Origin',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Max-Age': '86400',
-  };
-}
-
-function jsonResponse(data, request, env, status = 200, extraHeaders = {}) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      'Content-Type': 'application/json',
-      ...extraHeaders,
-      ...corsHeaders(request, env),
-    },
-  });
-}
-
-function errorResponse(message, request, env, status = 400, extra = {}) {
-  return jsonResponse({ error: message, ...extra }, request, env, status);
-}
-
-async function readJsonBody(request, maxBytes = MAX_JSON_BYTES) {
-  const len = Number(request.headers.get('Content-Length') || 0);
-  if (len && len > maxBytes) throw new Error('Request body too large');
-  const text = await request.text();
-  if (text.length > maxBytes) throw new Error('Request body too large');
-  return JSON.parse(text);
 }
 
 function normalizeIds(ids, limit) {
@@ -854,12 +810,12 @@ function computeFeedbackPenalty(candidate, feedbackProfile, fullGenres, candidat
 async function buildUserProfile(scored, env, advanced) {
   const profileSize = advanced ? 40 : 15;
   const topRated = scored.filter(e => e.tmdb_id).slice(0, profileSize);
-  const keywordWeight = {};     // keyword_id → weighted score sum
-  const genreWeight = {};       // genre_id → weighted score sum
-  const directorWeight = {};    // director_name → weighted score sum
-  const actorWeight = {};       // actor_name → weighted score sum
-  const decadeScores = {};      // decade → {total, count}
-  const langWeight = {};        // language → weighted score
+  const keywordWeight: NumericRecord = {};     // keyword_id → weighted score sum
+  const genreWeight: NumericRecord = {};       // genre_id → weighted score sum
+  const directorWeight: NumericRecord = {};    // director_name → weighted score sum
+  const actorWeight: NumericRecord = {};       // actor_name → weighted score sum
+  const decadeScores: DecadeScoreRecord = {};  // decade → {total, count}
+  const langWeight: NumericRecord = {};        // language → weighted score
   let totalWeight = 0;
 
   await Promise.all(topRated.map(async e => {
@@ -906,7 +862,7 @@ async function buildUserProfile(scored, env, advanced) {
   }));
 
   // Normalize to preference scores
-  const norm = (obj, topN) => {
+  const norm = (obj: NumericRecord, topN: number): NumericRecord => {
     const entries = Object.entries(obj)
       .sort((a, b) => b[1] - a[1])
       .slice(0, topN);
@@ -914,7 +870,7 @@ async function buildUserProfile(scored, env, advanced) {
     return Object.fromEntries(entries.map(([k, v]) => [k, v / max]));
   };
 
-  const decadeProfile = {};
+  const decadeProfile: NumericRecord = {};
   for (const [dec, v] of Object.entries(decadeScores)) {
     decadeProfile[dec] = v.count ? v.total / v.count : 5;
   }
@@ -1338,7 +1294,7 @@ function applyCoupleScoring(movies, profile, partnerProfile) {
   }
 }
 
-function attachRecommendationReasons(movies, profile, partnerProfile, options = {}) {
+function attachRecommendationReasons(movies, profile, partnerProfile, options: RecommendationOptions = {}) {
   const routeLabels = {
     rec: '来自你的高分片相似推荐',
     rec2: '来自你的高分片延展推荐',
@@ -1461,7 +1417,7 @@ async function enrichKeywordsAndFinalScore(final, profile, partnerProfile, avoid
   final.sort((a, b) => b._score - a._score);
 }
 
-async function loadRecommendations(env, entries, userId, blockedIds, excludeIds, blockedFeedback, options = {}) {
+async function loadRecommendations(env, entries, userId, blockedIds, excludeIds, blockedFeedback, options: RecommendationOptions = {}) {
   const coupleMode = options.mode === 'couple' && !!options.partnerUserId;
   const myMovies = entries.filter(e => e.user_id === userId && e.tmdb_id && e.type === 'movie');
   const totalRated = entries.filter(e => e.user_id === userId && e.type === 'movie').length;
@@ -1558,7 +1514,7 @@ async function loadRecommendations(env, entries, userId, blockedIds, excludeIds,
 }
 
 // Cache key for recommendations
-function makeRecKey(userId, entries, blockedIds, excludeIds, blockedFeedback, options = {}) {
+function makeRecKey(userId, entries, blockedIds, excludeIds, blockedFeedback, options: RecommendationOptions = {}) {
   const coupleMode = options.mode === 'couple' && !!options.partnerUserId;
   const movieIds = entries
     .filter(e => (e.user_id === userId || (coupleMode && e.user_id === options.partnerUserId)) && e.type === 'movie' && e.tmdb_id)
@@ -1615,9 +1571,8 @@ function makeRecKey(userId, entries, blockedIds, excludeIds, blockedFeedback, op
   return keyBase;
 }
 
-// ── Main Worker ──
-export default {
-  async fetch(request, env, ctx) {
+// ── Route handlers ──
+export async function handleRequest(request: Request, env: Env, ctx: WorkerExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     if (request.method === 'OPTIONS') {
@@ -1700,7 +1655,13 @@ export default {
           }
         }
 
-        const resp = { cached, errors, total: unique.length };
+        const resp: {
+          cached: number;
+          errors: number;
+          total: number;
+          overviews?: Record<string, string>;
+          details?: Record<string, unknown>;
+        } = { cached, errors, total: unique.length };
         if (returnOverviews) {
           resp.overviews = overviews;
           resp.details = details;
@@ -1834,7 +1795,7 @@ export default {
       try {
         const body = await readJsonBody(request);
         const { entries, userId, blockedIds, blockedMovies, excludeIds } = body;
-        const mode = body.mode === 'couple' ? 'couple' : 'single';
+        const mode: 'single' | 'couple' = body.mode === 'couple' ? 'couple' : 'single';
         const partnerUserId = typeof body.partnerUserId === 'string' ? body.partnerUserId.slice(0, 120) : '';
         const cleanEntries = sanitizeEntries(entries);
         const cleanBlockedFeedback = sanitizeBlockedFeedback(blockedMovies, blockedIds);
@@ -1857,7 +1818,7 @@ export default {
         // Check Cache API
         let cachedRes = await cache.match(cacheKey);
         if (cachedRes) {
-          const data = await cachedRes.json();
+          const data = await cachedRes.json() as Record<string, unknown>;
           return jsonResponse({ ...data, cached: true }, request, env, 200, { 'X-Rec-Cache': 'HIT' });
         }
 
@@ -1878,14 +1839,13 @@ export default {
     }
 
     return new Response('FilmNote Worker', { status: 404, headers: corsHeaders(request, env) });
-  },
+}
 
-  async scheduled(event, env, ctx) {
+export function handleScheduled(event: ScheduledController, env: Env, ctx: WorkerExecutionContext): void {
     ctx.waitUntil(refreshImdbTop100(env).catch(error => {
       console.error('IMDb Top100 refresh failed', {
         message: error?.message || String(error),
         cron: event?.cron || ''
       });
     }));
-  },
-};
+}

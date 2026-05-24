@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { getCurrentUserId } from '../../app/user-context.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useModalStore } from '../../stores/modals.js';
@@ -16,6 +16,7 @@ import {
   tmdbIdOf,
 } from '../tmdb-detail.js';
 import { getSeasonAwareEntryScore } from '../scoring.js';
+import { useDocumentEvent } from '../composables/useDocumentEvent.js';
 import BaseModal from './BaseModal.vue';
 import SeasonDetailTabs from './SeasonDetailTabs.vue';
 
@@ -151,13 +152,7 @@ function onKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape') close();
 }
 
-onMounted(() => {
-  document.addEventListener('keydown', onKeydown);
-});
-
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', onKeydown);
-});
+useDocumentEvent('keydown', onKeydown);
 
 watch(() => modals.mediaDetailRequest?.seq, () => {
   const request = modals.mediaDetailRequest;

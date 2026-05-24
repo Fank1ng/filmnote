@@ -1,5 +1,6 @@
 **/.DS_Store
 worker/.wrangler/
+worker/.mf-test/
 worker/node_modules/
 
 # wrangler files

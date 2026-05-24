@@ -5,9 +5,14 @@
   "type": "module",
   "scripts": {
     "deploy": "wrangler deploy",
-    "dev": "wrangler dev"
+    "dev": "wrangler dev",
+    "typecheck": "tsc --noEmit",
+    "test:smoke": "node --test test/routes-smoke.test.mjs",
+    "test": "npm run typecheck && npm run test:smoke"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260524.1",
+    "typescript": "^6.0.3",
     "wrangler": "^3.0.0"
   }
 }

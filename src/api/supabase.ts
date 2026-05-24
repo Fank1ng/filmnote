@@ -1,18 +1,19 @@
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { SUPABASE_KEY, SUPABASE_URL } from '../config/constants.js';
-import type { SupabaseClient, SupabaseFactory } from '../types/supabase.js';
+import type { Database } from '../types/database.js';
 
-let client: SupabaseClient | null = null;
+let client: SupabaseClient<Database> | null = null;
 
-export function initSupabaseClient(factory: SupabaseFactory | undefined = window.supabase): SupabaseClient {
+export function initSupabaseClient(): SupabaseClient<Database> {
   if (client) return client;
-  if (!factory || typeof factory.createClient !== 'function') {
-    throw new Error('Supabase client library is not loaded');
+  if (!SUPABASE_URL || !SUPABASE_KEY) {
+    throw new Error('Supabase configuration is missing');
   }
-  client = factory.createClient(SUPABASE_URL, SUPABASE_KEY);
+  client = createClient<Database>(SUPABASE_URL, SUPABASE_KEY);
   return client;
 }
 
-export function getSupabaseClient(): SupabaseClient {
+export function getSupabaseClient(): SupabaseClient<Database> {
   if (!client) return initSupabaseClient();
   return client;
 }

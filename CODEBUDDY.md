@@ -2,7 +2,7 @@
 
 ## 项目概况
 
-Fank1ng 与 ceci 共用的电影+剧集评分系统。Vue 3 + Pinia + Vite + TypeScript 前端入口 + legacy 单页应用兼容层 + Supabase BaaS + GitHub Pages 部署 + Cloudflare Worker 后端。
+Fank1ng 与 ceci 共用的电影+剧集评分系统。Vue 3 + Pinia + Vite + TypeScript 前端入口 + Supabase BaaS + GitHub Pages 部署 + Cloudflare Worker 后端。
 
 | 角色 | 颜色 |
 |------|------|
@@ -17,12 +17,12 @@ Fank1ng 与 ceci 共用的电影+剧集评分系统。Vue 3 + Pinia + Vite + Typ
 
 ```
 src/main.ts             — Vue 3 + Pinia 前端入口
-src/app/bootstrap.ts    — 安装兼容全局并加载 legacy 脚本
-src/features/registry.ts— 完整 feature registry；当前 feature 为 legacy-backed 渐进迁移状态
-src/                    — 新模块化架构层：app/stores/config/api/core/shared/features/types
-app.js                  — legacy 前端业务脚本，逐步迁移到 src/features/*
-worker/src/index.js     — Cloudflare Worker：推荐算法/TMDB代理/KV缓存
-supabase_constraints.sql— 数据库约束：去重/blocked_movies表及RLS
+src/app/bootstrap.ts    — 初始化 Supabase client
+src/styles/app.css      — Vite 管理的全局样式入口
+src/                    — Vue 模块化架构层：app/stores/config/api/shared/features/types
+worker/src/index.ts     — Cloudflare Worker TypeScript 入口
+worker/src/routes.ts    — TMDB 代理、推荐算法、KV 缓存路由
+supabase/migrations/    — 数据库约束、RLS、功能升级迁移
 ```
 
 - **Worker 域名**: `filmnote.lccf1223.workers.dev`
@@ -43,14 +43,12 @@ supabase_constraints.sql— 数据库约束：去重/blocked_movies表及RLS
 
 ## 关键注意事项
 
-- **Worker 部署**: 修改 `worker/src/index.js` 后需 `cd worker && npx wrangler deploy`
+- **Worker 部署**: 修改 `worker/src/*.ts` 后需 `cd worker && npm run typecheck && npx wrangler deploy`
 - **前端开发**: 使用 `npm run dev`，生产构建使用 `npm run build`
 - **Vue 主线**: 新 UI 使用 Vue SFC + Composition API；跨功能状态使用 Pinia stores
-- **Feature registry**: 所有产品域都必须登记到 `src/features/registry.ts`
 - **Pages 部署**: workflow 会执行 `npm ci && npm run build` 并发布 `dist/`
 - **GitHub Pages 并发锁**: workflow 有 `concurrency: group: pages; cancel-in-progress: true`，新 push 会取消正在运行的部署
-- **legacy 迁移**: 新功能优先进入 `src/features/*` 和 `src/shared/components/*`，避免继续扩大 `app.js`
-- **legacy bridge**: Vue 侧通过 feature adapter 调用旧行为，避免直接访问 `window.FilmNoteLegacy`
+- **Vue 主线**: 新功能优先进入 `src/features/*`、`src/shared/components/*`、`src/shared/composables/*`
 - **TMDb API**: 中国网络需 VPN，Worker 端不受影响
 - **Auth 状态管理**: 完全手动控制 `initApp()` / `doLogout()`，不使用 `onAuthStateChange`（历史原因：与手动 init 冲突导致 session 丢失）
 

@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { deleteEntry as deleteEntryApi } from '../../api/entries-api.js';
 import { refreshVueData } from '../../app/data-sync.js';
 import { getCurrentUserId } from '../../app/user-context.js';
 import { DIM_LABELS, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import { useMediaActions } from '../composables/useMediaActions.js';
+import { useConfirm } from '../composables/useConfirm.js';
+import { useDocumentEvent } from '../composables/useDocumentEvent.js';
 import { getSeasonAwareEntryScore } from '../scoring.js';
 import { posterUrl } from '../tmdb.js';
 import {
@@ -36,6 +38,7 @@ const session = useSessionStore();
 const modals = useModalStore();
 const ui = useUiStore();
 const mediaActions = useMediaActions();
+const { confirmAction } = useConfirm();
 const open = ref(false);
 const entryId = ref<Entry['id'] | null>(null);
 const detail = ref<TmdbDetail | null>(null);
@@ -153,7 +156,7 @@ function editEntry(opts: { targetSeasonNumber?: number; enableTargetSeason?: boo
 async function deleteEntry(): Promise<void> {
   const target = entry.value;
   if (!target) return;
-  if (!window.confirm('确定删除这条评价？此操作不可恢复。')) return;
+  if (!confirmAction('确定删除这条评价？此操作不可恢复。')) return;
   close();
   const { error } = await deleteEntryApi(target.id);
   if (error) {
@@ -207,13 +210,7 @@ function onKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape') close();
 }
 
-onMounted(() => {
-  document.addEventListener('keydown', onKeydown);
-});
-
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', onKeydown);
-});
+useDocumentEvent('keydown', onKeydown);
 
 watch(() => modals.entryDetailRequest?.seq, () => {
   const request = modals.entryDetailRequest;

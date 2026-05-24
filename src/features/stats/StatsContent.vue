@@ -4,6 +4,7 @@ import { storeToRefs } from 'pinia';
 import { getCurrentUserId } from '../../app/user-context.js';
 import { DIM_LABELS, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
+import { readJsonStorage } from '../../shared/composables/useBrowserStorage.js';
 import { getSeasonAwareEntryScore } from '../../shared/scoring.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useSessionStore } from '../../stores/session.js';
@@ -72,11 +73,7 @@ const typeLabel = computed(() => (type.value === 'series' ? '剧集' : '电影')
 const typeSuffix = computed(() => ` · ${typeLabel.value}`);
 
 function loadDetailCache(): void {
-  try {
-    detailCache.value = JSON.parse(localStorage.getItem('filmnote_movie_cache') || '{}') || {};
-  } catch {
-    detailCache.value = {};
-  }
+  detailCache.value = readJsonStorage<Record<string, CachedMediaDetail>>('filmnote_movie_cache', {});
 }
 
 function mediaType(entry: Entry): MediaType {

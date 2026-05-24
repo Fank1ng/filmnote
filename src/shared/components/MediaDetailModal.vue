@@ -15,7 +15,7 @@ import {
   normalizeTmdbMedia,
   tmdbIdOf,
 } from '../tmdb-detail.js';
-import { getEntryScore } from '../scoring.js';
+import { getSeasonAwareEntryScore } from '../scoring.js';
 import BaseModal from './BaseModal.vue';
 import SeasonDetailTabs from './SeasonDetailTabs.vue';
 
@@ -72,6 +72,8 @@ const seasonRecords = computed(() => seasons.value
     tmdb: season,
   }))
   .filter(record => record.number > 0));
+
+const ratedEntryScore = computed(() => ratedEntry.value ? getSeasonAwareEntryScore(ratedEntry.value, entries.seasonRatings) : 0);
 
 function openMedia(input: unknown, fallbackType: MediaType = 'movie'): boolean {
   const normalized = normalizeTmdbMedia(input, fallbackType);
@@ -185,7 +187,7 @@ onBeforeUnmount(() => {
           <div v-if="detailChips.length" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
             <span v-for="chip in detailChips" :key="chip" class="cast-chip">{{ chip }}</span>
           </div>
-          <p v-if="ratedEntry" style="font-size:0.85rem;color:var(--gold);margin-top:8px">已评价 · 你的评分 {{ getEntryScore(ratedEntry).toFixed(1) }}</p>
+          <p v-if="ratedEntry" style="font-size:0.85rem;color:var(--gold);margin-top:8px">已评价 · 你的评分 {{ ratedEntryScore.toFixed(1) }}</p>
         </div>
       </div>
 

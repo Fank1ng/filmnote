@@ -5,7 +5,7 @@ import { refreshVueData } from '../../app/data-sync.js';
 import { getCurrentUserId } from '../../app/user-context.js';
 import { DIM_LABELS, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import { useMediaActions } from '../composables/useMediaActions.js';
-import { getEntryScore } from '../scoring.js';
+import { getSeasonAwareEntryScore } from '../scoring.js';
 import { posterUrl } from '../tmdb.js';
 import {
   fetchTmdbDetail,
@@ -118,6 +118,10 @@ function formatDate(value: string | undefined): string {
 
 function entryMediaType(item: Entry): 'movie' | 'series' {
   return normalizeMediaType(item.type || item.media_type || 'movie');
+}
+
+function entryScore(item: Entry): number {
+  return getSeasonAwareEntryScore(item, entries.seasonRatings);
 }
 
 function openEntry(id: Entry['id']): boolean {
@@ -233,7 +237,7 @@ onBeforeUnmount(() => {
         <div>
           <p v-if="entry.director" style="color:var(--text2);font-size:0.85rem">{{ entry.director }}</p>
           <p style="color:var(--text2);font-size:0.8rem">{{ ownerName }} · {{ formatDate(entry.created_at) }} <span v-if="isSeries">· 剧集</span></p>
-          <p :style="{ color: userColor(entry.user_id).main }" style="font-size:1.8rem;font-weight:800;margin-top:4px">{{ getEntryScore(entry).toFixed(1) }} / 10</p>
+          <p :style="{ color: userColor(entry.user_id).main }" style="font-size:1.8rem;font-weight:800;margin-top:4px">{{ entryScore(entry).toFixed(1) }} / 10</p>
         </div>
       </div>
 
@@ -258,7 +262,7 @@ onBeforeUnmount(() => {
         <div v-for="friend in friendEntries" :key="friend.id" class="friend-rating">
           <div class="fr-header">
             <span class="fr-name" :style="{ color: userColor(friend.user_id).main }">{{ displayName(friend.user_id) }}</span>
-            <span class="fr-score" :style="{ color: userColor(friend.user_id).main }">{{ getEntryScore(friend).toFixed(1) }} / 10</span>
+            <span class="fr-score" :style="{ color: userColor(friend.user_id).main }">{{ entryScore(friend).toFixed(1) }} / 10</span>
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;font-size:0.75rem">
             <span v-for="dim in dims" :key="dim" class="mc-dim-item" :style="{ borderColor: userColor(friend.user_id).main }">

@@ -7,7 +7,7 @@ import { DIM_LABELS, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import { onLegacyReady } from '../../app/legacy-bridge.js';
 import { PaginationControls } from '../../shared/components/index.js';
 import { useMediaActions } from '../../shared/composables/useMediaActions.js';
-import { getEntryScore } from '../../shared/scoring.js';
+import { getSeasonAwareEntryScore } from '../../shared/scoring.js';
 import { posterUrl } from '../../shared/tmdb.js';
 import { fetchTmdbDetail, getCachedTmdbDetail, needsTmdbDetailFetch } from '../../shared/tmdb-detail.js';
 import { useEntriesStore } from '../../stores/entries.js';
@@ -152,6 +152,10 @@ function entrySearchText(entry: Entry): string {
 
 function mediaType(entry: Entry): MediaType {
   return (entry.type || entry.media_type) === 'series' ? 'series' : 'movie';
+}
+
+function entryScore(entry: Entry): number {
+  return getSeasonAwareEntryScore(entry, entries.seasonRatings);
 }
 
 function groupKey(entry: Entry): string {
@@ -300,7 +304,7 @@ const filteredGroups = computed<EntryGroup[]>(() => {
     if (seen.has(key)) continue;
     seen.add(key);
     const group = filtered.filter(item => groupKey(item) === key) as EntryGroup;
-    group._avgScore = group.reduce((sum, item) => sum + getEntryScore(item), 0) / group.length;
+    group._avgScore = group.reduce((sum, item) => sum + entryScore(item), 0) / group.length;
     groups.push(group);
   }
 
@@ -490,7 +494,7 @@ onBeforeUnmount(() => {
             :title="displayName(entry.user_id)"
           >
             <span class="mc-score-label">{{ displayName(entry.user_id) }}</span>
-            {{ getEntryScore(entry).toFixed(1) }}
+            {{ entryScore(entry).toFixed(1) }}
           </div>
         </div>
 
@@ -531,7 +535,7 @@ onBeforeUnmount(() => {
                   <span class="dim-val" :style="{ color: userColor(entry.user_id).main }">{{ dim.value }}</span>
                 </span>
               </span>
-              <span class="mc-dim-total" :style="{ color: userColor(entry.user_id).main }">总分 {{ getEntryScore(entry).toFixed(1) }}</span>
+              <span class="mc-dim-total" :style="{ color: userColor(entry.user_id).main }">总分 {{ entryScore(entry).toFixed(1) }}</span>
               <div v-if="entry.user_id === currentUserId" class="mc-actions" style="margin-left:auto" @click.stop>
                 <button class="btn btn-sm btn-secondary" type="button" @click="editEntry(entry)">编辑</button>
                 <button class="btn btn-sm btn-danger" type="button" @click="deleteEntry(entry)">删除</button>

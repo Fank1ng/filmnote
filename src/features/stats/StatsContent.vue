@@ -4,7 +4,7 @@ import { getLegacyBridge, onLegacyReady } from '../../app/legacy-bridge.js';
 import { getCurrentUserId } from '../../app/user-context.js';
 import { DIM_LABELS, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
-import { getEntryScore } from '../../shared/scoring.js';
+import { getSeasonAwareEntryScore } from '../../shared/scoring.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useSessionStore } from '../../stores/session.js';
 import type { Entry, MediaType, SeasonRating } from '../../types/domain.js';
@@ -120,6 +120,10 @@ function getEntryRatedSeasons(entry: Entry): SeasonRating[] {
   );
 }
 
+function entryScore(entry: Entry): number {
+  return getSeasonAwareEntryScore(entry, entries.seasonRatings);
+}
+
 function getSeriesRuntimeStats(entry: Entry, ratedSeasons: SeasonRating[]): { episodeCount: number; totalMinutes: number } {
   const seasonDetails = detailForEntry(entry)?.seasons || [];
   const fallbackRuntime = getEntryRuntimeMinutes(entry);
@@ -137,16 +141,16 @@ function getSeriesRuntimeStats(entry: Entry, ratedSeasons: SeasonRating[]): { ep
 
 function calcStats(sourceEntries: Entry[], media: MediaType): StatsResult | null {
   if (!sourceEntries.length) return null;
-  const avgTotal = sourceEntries.reduce((sum, entry) => sum + getEntryScore(entry), 0) / sourceEntries.length;
-  const best = sourceEntries.reduce((current, entry) => (getEntryScore(current) > getEntryScore(entry) ? current : entry));
-  const worst = sourceEntries.reduce((current, entry) => (getEntryScore(current) < getEntryScore(entry) ? current : entry));
+  const avgTotal = sourceEntries.reduce((sum, entry) => sum + entryScore(entry), 0) / sourceEntries.length;
+  const best = sourceEntries.reduce((current, entry) => (entryScore(current) > entryScore(entry) ? current : entry));
+  const worst = sourceEntries.reduce((current, entry) => (entryScore(current) < entryScore(entry) ? current : entry));
   const dimAvgs = {} as Record<RatingDim, number>;
   for (const dim of axes) {
     dimAvgs[dim] = sourceEntries.reduce((sum, entry) => sum + Number(entry.ratings?.[dim] || 5), 0) / sourceEntries.length;
   }
   const dist = new Array(10).fill(0);
   sourceEntries.forEach(entry => {
-    const bucket = Math.min(Math.floor(getEntryScore(entry)) - 1, 9);
+    const bucket = Math.min(Math.floor(entryScore(entry)) - 1, 9);
     if (bucket >= 0) dist[bucket]++;
   });
 
@@ -249,8 +253,8 @@ function statCards(stats: StatsResult, color: UserColor): StatCard[] {
     );
   }
   cards.push(
-    { value: getEntryScore(stats.best).toFixed(1), label: `最高分 · ${stats.best.title.slice(0, 8)}`, color: color.main },
-    { value: getEntryScore(stats.worst).toFixed(1), label: `最低分 · ${stats.worst.title.slice(0, 8)}`, color: color.main },
+    { value: entryScore(stats.best).toFixed(1), label: `最高分 · ${stats.best.title.slice(0, 8)}`, color: color.main },
+    { value: entryScore(stats.worst).toFixed(1), label: `最低分 · ${stats.worst.title.slice(0, 8)}`, color: color.main },
   );
   return cards;
 }

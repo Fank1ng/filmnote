@@ -10,9 +10,11 @@ const props = withDefaults(defineProps<{
   modelValue: RatingDims;
   prefix?: string;
   readonly?: boolean;
+  showTotal?: boolean;
 }>(), {
   prefix: 'vue',
   readonly: false,
+  showTotal: true,
 });
 
 const emit = defineEmits<{
@@ -57,7 +59,7 @@ function updateDim(dim: RatingDim, value: string): void {
         </div>
       </div>
     </div>
-    <div class="total-preview">
+    <div v-if="showTotal" class="total-preview">
       <span class="total-label">加权总分</span>
       <span class="total-value">{{ total.toFixed(1) }}</span>
     </div>

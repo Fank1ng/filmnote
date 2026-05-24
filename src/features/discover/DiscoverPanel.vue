@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { getCurrentUserId } from '../../app/user-context.js';
 import { TMDB_IMG, TMDB_PROXY } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
+import { PaginationControls } from '../../shared/components/index.js';
 import { useMediaActions } from '../../shared/composables/useMediaActions.js';
 import { useCoupleStore } from '../../stores/couple.js';
 import { useEntriesStore } from '../../stores/entries.js';
@@ -94,29 +95,6 @@ const pageMovies = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value;
   return filteredMovies.value.slice(start, start + pageSize.value);
 });
-const paginationItems = computed<Array<number | '...'>>(() => {
-  if (activeTab.value !== 'toprated') return [];
-  const total = totalPages.value;
-  const page = currentPage.value;
-  if (total <= 1) return [];
-  if (total <= 5) return Array.from({ length: total }, (_, index) => index + 1);
-  const items: Array<number | '...'> = [1];
-  let start = 2;
-  let end = 4;
-  if (page > 3 && page < total - 2) {
-    start = page - 1;
-    end = page + 1;
-  } else if (page >= total - 2) {
-    start = total - 3;
-    end = total - 1;
-  }
-  if (start > 2) items.push('...');
-  for (let index = start; index <= end; index++) items.push(index);
-  if (end < total - 1) items.push('...');
-  items.push(total);
-  return items;
-});
-
 function asControls(input: unknown): DiscoverControls {
   return (input || {}) as DiscoverControls;
 }
@@ -408,14 +386,13 @@ onBeforeUnmount(() => {
         </article>
       </div>
 
-      <div v-if="activeTab === 'toprated' && paginationItems.length" class="discover-pages">
-        <button type="button" :disabled="currentPage <= 1" aria-label="上一页" @click="setPage(currentPage - 1)">‹</button>
-        <template v-for="(item, index) in paginationItems" :key="`${item}-${index}`">
-          <span v-if="item === '...'" class="pagination-ellipsis" aria-hidden="true">…</span>
-          <button v-else type="button" :class="{ active: item === currentPage }" :aria-current="item === currentPage ? 'page' : undefined" @click="setPage(item)">{{ item }}</button>
-        </template>
-        <button type="button" :disabled="currentPage >= totalPages" aria-label="下一页" @click="setPage(currentPage + 1)">›</button>
-      </div>
+      <PaginationControls
+        v-if="activeTab === 'toprated' && totalPages > 1"
+        :page="currentPage"
+        :total-pages="totalPages"
+        variant="discover"
+        @change="setPage"
+      />
     </template>
   </section>
 </template>

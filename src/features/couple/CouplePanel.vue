@@ -7,7 +7,7 @@ import { getCurrentUserId } from '../../app/user-context.js';
 import { DIM_LABELS, TMDB_IMG, TMDB_PROXY, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
 import { useMediaActions } from '../../shared/composables/useMediaActions.js';
-import { getEntryScore } from '../../shared/scoring.js';
+import { getSeasonAwareEntryScore } from '../../shared/scoring.js';
 import { useCoupleStore } from '../../stores/couple.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useListsStore } from '../../stores/lists.js';
@@ -127,9 +127,9 @@ const compatibility = computed(() => {
   let harmony = pairs[0];
   let split = pairs[0];
   const diffs = pairs.map(pair => {
-    const diff = Math.abs(getEntryScore(pair.mine) - getEntryScore(pair.partner));
-    if (diff < Math.abs(getEntryScore(harmony.mine) - getEntryScore(harmony.partner))) harmony = pair;
-    if (diff > Math.abs(getEntryScore(split.mine) - getEntryScore(split.partner))) split = pair;
+    const diff = Math.abs(entryScore(pair.mine) - entryScore(pair.partner));
+    if (diff < Math.abs(entryScore(harmony.mine) - entryScore(harmony.partner))) harmony = pair;
+    if (diff > Math.abs(entryScore(split.mine) - entryScore(split.partner))) split = pair;
     return diff;
   });
   const avgDiff = diffs.reduce((sum, diff) => sum + diff, 0) / diffs.length;
@@ -151,8 +151,8 @@ const mineMovieEntries = computed(() => entries.entries.filter(entry => entry.us
 const partnerMovieEntries = computed(() => entries.entries.filter(entry => entry.user_id === partnerId.value && mediaType(entry.type || entry.media_type) === 'movie'));
 const archiveData = computed(() => {
   const pairs = commonPairs.value.map(pair => {
-    const mineScore = getEntryScore(pair.mine);
-    const partnerScore = getEntryScore(pair.partner);
+    const mineScore = entryScore(pair.mine);
+    const partnerScore = entryScore(pair.partner);
     return {
       ...pair,
       mineScore,
@@ -234,6 +234,10 @@ function onControls(event: Event): void {
 
 function mediaType(value: unknown): MediaType {
   return value === 'series' || value === 'tv' ? 'series' : 'movie';
+}
+
+function entryScore(entry: Entry): number {
+  return getSeasonAwareEntryScore(entry, entries.seasonRatings);
 }
 
 function mediaTypeLabel(value: unknown): string {

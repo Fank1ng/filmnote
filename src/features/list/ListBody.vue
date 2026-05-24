@@ -555,7 +555,7 @@ onBeforeUnmount(() => {
         </div>
       </article>
 
-      <PaginationControls :page="page" :total-pages="totalPages" @change="changePage" />
+      <PaginationControls :page="page" :total-pages="totalPages" kind="list" @change="changePage" />
     </template>
   </section>
 </template>

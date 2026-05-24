@@ -5988,6 +5988,10 @@ function queueQuickRateSeasonDetailFetch() {
 
 function openQuickRate(movie) {
   if (window.FilmNoteVueRatings?.openQuickRate?.(movie)) return;
+  if (isVueRatingsReady()) {
+    blockLegacyQuickRateOpen();
+    return;
+  }
   const normalized = normalizeListMovie(movie) || (movie?.title ? {
     id: null,
     tmdb_id: null,
@@ -6019,6 +6023,10 @@ function openQuickRate(movie) {
 
 function openQuickEdit(id, opts = {}) {
   if (window.FilmNoteVueRatings?.openQuickEdit?.(id, opts)) return;
+  if (isVueRatingsReady()) {
+    blockLegacyQuickRateOpen();
+    return;
+  }
   const entry = allEntries.find(e=>e.id===id);
   if (!entry) return;
   quickEditEntryId = id;
@@ -6065,6 +6073,15 @@ function openQuickEdit(id, opts = {}) {
   bindDimSliders('qr');
   if (!seasons.length) updateQrTotal();
   $['quickRateModal'].classList.add('open');
+}
+
+function isVueRatingsReady() {
+  return document.documentElement.dataset.filmnoteVueRatings === 'ready';
+}
+
+function blockLegacyQuickRateOpen() {
+  $['quickRateModal']?.classList.remove('open');
+  toast('评分面板还未就绪，请刷新后重试');
 }
 
 function updateQrTotal() {

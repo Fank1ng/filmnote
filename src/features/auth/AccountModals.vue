@@ -248,6 +248,7 @@ watch(blockedOpen, open => {
       v-if="blockedMovies.length > pageSize"
       :page="blockedPage"
       :total-pages="blockedTotalPages"
+      kind="blocked"
       @change="blockedPage = $event"
     />
   </BaseModal>

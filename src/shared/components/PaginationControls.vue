@@ -5,6 +5,7 @@ const props = defineProps<{
   page: number;
   totalPages: number;
   variant?: 'list' | 'discover';
+  kind?: 'list' | 'watchlist' | 'blocked' | 'discover';
 }>();
 
 const emit = defineEmits<{
@@ -39,16 +40,28 @@ function changePage(page: number): void {
   if (page < 1 || page > props.totalPages || page === props.page) return;
   emit('change', page);
 }
+
+function pageAttrs(page: number): Record<string, number> {
+  const attr = props.kind === 'watchlist'
+    ? 'data-wl-pg'
+    : props.kind === 'blocked'
+      ? 'data-bl-pg'
+      : props.kind === 'discover'
+        ? 'data-pg'
+        : 'data-lp-pg';
+  return { [attr]: page };
+}
 </script>
 
 <template>
   <div v-if="totalPages > 1" :class="variant === 'discover' ? 'discover-pages' : 'list-pages'">
-    <button type="button" :disabled="page <= 1" aria-label="上一页" @click="changePage(page - 1)">‹</button>
+    <button type="button" v-bind="pageAttrs(page - 1)" :disabled="page <= 1" aria-label="上一页" @click="changePage(page - 1)">‹</button>
     <template v-for="(item, index) in pageItems()" :key="`${item}-${index}`">
       <span v-if="item === '...'" class="pagination-ellipsis" aria-hidden="true">…</span>
       <button
         v-else
         type="button"
+        v-bind="pageAttrs(item)"
         :class="{ active: item === page }"
         :aria-current="item === page ? 'page' : undefined"
         :aria-label="item === page ? undefined : `第 ${item} 页`"
@@ -57,6 +70,6 @@ function changePage(page: number): void {
         {{ item }}
       </button>
     </template>
-    <button type="button" :disabled="page >= totalPages" aria-label="下一页" @click="changePage(page + 1)">›</button>
+    <button type="button" v-bind="pageAttrs(page + 1)" :disabled="page >= totalPages" aria-label="下一页" @click="changePage(page + 1)">›</button>
   </div>
 </template>

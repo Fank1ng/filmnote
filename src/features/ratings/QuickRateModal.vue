@@ -549,12 +549,21 @@ const api = reactive({
 
 window.FilmNoteVueRatings = api;
 
+function hideLegacyQuickRateModal(): void {
+  document.getElementById('quickRateModal')?.classList.remove('open');
+}
+
 onMounted(() => {
   window.FilmNoteVueRatings = api;
+  document.documentElement.dataset.filmnoteVueRatings = 'ready';
+  hideLegacyQuickRateModal();
 });
 
 onBeforeUnmount(() => {
   if (window.FilmNoteVueRatings === api) delete window.FilmNoteVueRatings;
+  if (document.documentElement.dataset.filmnoteVueRatings === 'ready') {
+    delete document.documentElement.dataset.filmnoteVueRatings;
+  }
 });
 </script>
 

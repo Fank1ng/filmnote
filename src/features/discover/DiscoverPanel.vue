@@ -391,6 +391,7 @@ onBeforeUnmount(() => {
         :page="currentPage"
         :total-pages="totalPages"
         variant="discover"
+        kind="discover"
         @change="setPage"
       />
     </template>

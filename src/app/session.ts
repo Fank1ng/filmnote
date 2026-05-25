@@ -48,6 +48,17 @@ function sessionToken(): string {
   return token;
 }
 
+function validDisplayName(name: string): boolean {
+  return /^[a-zA-Z0-9]{1,6}$/.test(name);
+}
+
+function displayNameCandidates(user: UserLike): string[] {
+  const metadataName = (user.user_metadata?.display_name || '').trim();
+  const emailName = (user.email?.split('@')[0] || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 6);
+  const idName = `U${(user.id || '').replace(/[^a-zA-Z0-9]/g, '').slice(0, 5)}`;
+  return [...new Set([metadataName, emailName, idName].filter(validDisplayName))];
+}
+
 function clearDataStores(): void {
   useEntriesStore().setEntries([]);
   useEntriesStore().setSeasonRatings([]);
@@ -73,6 +84,36 @@ async function loadCurrentProfile(userId: string): Promise<Profile | null> {
   return (data || null) as Profile | null;
 }
 
+async function displayNameAvailable(displayName: string, userId: string): Promise<boolean> {
+  const { data, error } = await getSupabaseClient()
+    .from('user_preferences')
+    .select('user_id')
+    .eq('display_name', displayName)
+    .maybeSingle();
+  if (error) throw new Error(error.message || '账号名称检查失败');
+  const ownerId = (data as Profile | null)?.user_id;
+  return !ownerId || ownerId === userId;
+}
+
+async function createDefaultProfile(user: UserLike): Promise<Profile> {
+  if (!user.id) throw new Error('登录信息缺少用户 ID');
+  const token = sessionToken();
+  const candidates = displayNameCandidates(user);
+
+  for (const displayName of candidates) {
+    if (!await displayNameAvailable(displayName, user.id)) continue;
+    const profile = { user_id: user.id, display_name: displayName, session_token: token };
+    const { error } = await getSupabaseClient().from('user_preferences').upsert(profile);
+    if (!error) return profile;
+    const duplicateDisplayName = error.code === '23505' || String(error.message || '').toLowerCase().includes('duplicate');
+    if (!duplicateDisplayName) {
+      throw new Error(error.message || '账号信息初始化失败');
+    }
+  }
+
+  throw new Error('账号名称已被占用，请联系管理员处理');
+}
+
 export async function applyAuthenticatedUser(user: UserLike): Promise<void> {
   if (!user.id) throw new Error('登录信息缺少用户 ID');
   const session = useSessionStore();
@@ -83,19 +124,17 @@ export async function applyAuthenticatedUser(user: UserLike): Promise<void> {
     session.setRestoring(true);
     session.setUser(user, null);
     const profile = await loadCurrentProfile(user.id);
-    if (profile) {
-      const token = sessionToken();
+    const activeProfile = profile || await createDefaultProfile(user);
+    if (activeProfile) {
+      const token = activeProfile.session_token || sessionToken();
       const { error } = await getSupabaseClient()
         .from('user_preferences')
         .update({ session_token: token })
         .eq('user_id', user.id);
       if (error) throw new Error(error.message || '会话刷新失败');
-      session.setUser(user, { ...profile, session_token: token });
+      session.setUser(user, { ...activeProfile, session_token: token });
       await refreshVueData();
       startSessionTokenGuard();
-    } else {
-      clearDataStores();
-      session.setUser(user, null);
     }
   } catch (error) {
     ui.showToast(error instanceof Error ? error.message : String(error));

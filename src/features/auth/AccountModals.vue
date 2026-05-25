@@ -3,7 +3,6 @@ import { computed, ref, watch } from 'vue';
 import { getSupabaseClient } from '../../api/supabase.js';
 import { generateInviteCode, loadInviteCodes } from '../../api/profile-api.js';
 import { removeBlockedMovie as removeBlockedMovieRecord } from '../../api/list-api.js';
-import { saveDisplayName as saveDisplayNameApi } from '../../app/session.js';
 import { BaseModal, PaginationControls } from '../../shared/components/index.js';
 import { useListsStore } from '../../stores/lists.js';
 import { useSessionStore } from '../../stores/session.js';
@@ -28,7 +27,6 @@ const session = useSessionStore();
 const lists = useListsStore();
 const ui = useUiStore();
 
-const displayName = ref('');
 const password = ref('');
 const inviteCodes = ref<InviteCode[]>([]);
 const inviteLoading = ref(false);
@@ -37,7 +35,6 @@ const busy = ref(false);
 const errorMessage = ref('');
 
 const currentUser = computed(() => session.currentUser as UserLike | null);
-const nameSetupOpen = computed(() => session.isAuthenticated && !session.currentProfile);
 const changePasswordOpen = computed(() => ui.accountModal === 'changePassword');
 const invitesOpen = computed(() => ui.accountModal === 'invites');
 const blockedOpen = computed(() => ui.accountModal === 'blocked');
@@ -67,21 +64,6 @@ function formatRemaining(code: InviteCode): string {
   const hours = Math.floor(remaining / 3600000);
   const minutes = Math.floor((remaining % 3600000) / 60000);
   return `剩余 ${hours}小时${minutes}分`;
-}
-
-async function saveDisplayName(): Promise<void> {
-  errorMessage.value = '';
-  busy.value = true;
-  try {
-    const name = displayName.value.trim();
-    if (!/^[a-zA-Z0-9]{1,6}$/.test(name)) throw new Error('用户名仅支持英文和数字，最多6位');
-    await saveDisplayNameApi(name);
-    ui.showToast('名称已保存');
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : String(error);
-  } finally {
-    busy.value = false;
-  }
 }
 
 async function changePassword(): Promise<void> {
@@ -150,13 +132,6 @@ async function removeBlocked(tmdbId: number): Promise<void> {
   }
 }
 
-watch(nameSetupOpen, open => {
-  if (open && !displayName.value) {
-    const user = session.currentUser as { email?: string; user_metadata?: { display_name?: string } } | null;
-    displayName.value = user?.user_metadata?.display_name || user?.email?.split('@')[0] || '';
-  }
-});
-
 watch(invitesOpen, open => {
   if (open) void refreshInvites();
 });
@@ -167,16 +142,6 @@ watch(blockedOpen, open => {
 </script>
 
 <template>
-  <BaseModal :open="nameSetupOpen" max-width="380px" labelled-by="name-setup-title">
-    <h3 id="name-setup-title">设置显示名称</h3>
-    <p class="modal-hint">你的名称将对朋友可见</p>
-    <div v-if="errorMessage" class="auth-error">{{ errorMessage }}</div>
-    <input v-model.trim="displayName" type="text" placeholder="输入名称" @keyup.enter="saveDisplayName">
-    <button class="btn btn-primary" type="button" :disabled="busy" @click="saveDisplayName">
-      {{ busy ? '保存中...' : '保存' }}
-    </button>
-  </BaseModal>
-
   <BaseModal :open="changePasswordOpen" max-width="380px" labelled-by="change-password-title" @close="closeAccountModal">
     <h3 id="change-password-title">修改密码</h3>
     <p class="modal-hint">输入新密码（至少6位）</p>

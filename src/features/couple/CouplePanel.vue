@@ -1,28 +1,21 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import {
-  bindCouple,
-  cancelCoupleDisconnect,
-  confirmCouple,
-  deleteCouple,
   removeCoupleQueueItem,
-  requestCoupleDisconnect,
   updateCoupleQueueItem,
 } from '../../api/couple-api.js';
 import { refreshVueData } from '../../app/data-sync.js';
-import { getCurrentUserId } from '../../app/user-context.js';
 import { DIM_LABELS, TMDB_IMG, TMDB_PROXY, WEIGHTS, type RatingDim } from '../../config/constants.js';
 import EmptyState from '../../shared/components/EmptyState.vue';
 import { readJsonStorage } from '../../shared/composables/useBrowserStorage.js';
-import { useConfirm } from '../../shared/composables/useConfirm.js';
+import { useCoupleBinding } from '../../shared/composables/useCoupleBinding.js';
 import { useMediaActions } from '../../shared/composables/useMediaActions.js';
 import { getSeasonAwareEntryScore } from '../../shared/scoring.js';
 import { useCoupleStore } from '../../stores/couple.js';
 import { useEntriesStore } from '../../stores/entries.js';
 import { useListsStore } from '../../stores/lists.js';
-import { useSessionStore } from '../../stores/session.js';
 import { useUiStore } from '../../stores/ui.js';
-import type { Couple, CoupleQueueItem, Entry, MediaType, Profile, TmdbMedia } from '../../types/domain.js';
+import type { CoupleQueueItem, Entry, MediaType, TmdbMedia } from '../../types/domain.js';
 
 defineOptions({ name: 'CouplePanel' });
 
@@ -31,10 +24,6 @@ type CoupleControls = {
   tab?: CoupleTab;
   queueAvailable?: boolean;
   couplesAvailable?: boolean;
-};
-type UserColor = {
-  main: string;
-  dim: string;
 };
 type ArchiveAxis = {
   key: string;
@@ -73,50 +62,30 @@ const wheelLabels = ['剧情', '爱情', '科幻', '动画', '喜剧', '动作']
 const couple = useCoupleStore();
 const entries = useEntriesStore();
 const lists = useListsStore();
-const session = useSessionStore();
 const mediaActions = useMediaActions();
 const ui = useUiStore();
-const { confirmAction } = useConfirm();
+const {
+  activeCouple,
+  currentUserId,
+  disconnectByMe,
+  disconnectRequester,
+  displayName,
+  myColor,
+  partnerColor,
+  partnerId,
+  partnerName,
+  userColor,
+} = useCoupleBinding();
 
 const tab = ref<CoupleTab>('archive');
-const search = ref('');
 const queueAvailable = ref(true);
 const couplesAvailable = ref(true);
 const chartMode = ref<'score' | 'type'>('score');
 const wheelPickId = ref<string | number | null>(null);
 const detailCache = ref<Record<string, CacheDetail>>({});
 
-const currentUserId = computed(() => getCurrentUserId(session.currentUser));
-const activeCouple = computed(() => couple.activeCouple as Couple | null);
-const currentProfile = computed(() => session.currentProfile);
-const partnerId = computed(() => {
-  const active = activeCouple.value;
-  if (!active || !currentUserId.value) return '';
-  return active.user_a === currentUserId.value ? active.user_b || '' : active.user_a || '';
-});
-const partnerProfile = computed<Profile | null>(() => partnerId.value ? entries.profiles[partnerId.value] || null : null);
-const partnerName = computed(() => partnerProfile.value?.display_name || '对方');
-const myColor = computed(() => userColor(currentUserId.value));
-const partnerColor = computed(() => userColor(partnerId.value));
 const watchlistIds = computed(() => lists.watchlistIds);
 const queueIds = computed(() => new Set(couple.queue.map(item => `${mediaType(item.media_type)}:${item.tmdb_id}`)));
-const pendingReceived = computed(() => couple.pendingCouples.filter(item => item.requested_by !== currentUserId.value));
-const pendingSent = computed(() => couple.pendingCouples.filter(item => item.requested_by === currentUserId.value));
-const unavailableUserIds = computed(() => {
-  const ids = new Set<string>([currentUserId.value, partnerId.value].filter(Boolean));
-  couple.pendingCouples.forEach(item => {
-    if (item.user_a) ids.add(item.user_a);
-    if (item.user_b) ids.add(item.user_b);
-  });
-  return ids;
-});
-const bindableUsers = computed(() => {
-  const query = search.value.trim().toLowerCase();
-  return Object.values(entries.profiles)
-    .filter(profile => profile.user_id && !unavailableUserIds.value.has(profile.user_id))
-    .filter(profile => !query || (profile.display_name || '').toLowerCase().includes(query))
-    .slice(0, 8);
-});
 const commonPairs = computed(() => {
   if (!currentUserId.value || !partnerId.value) return [];
   const mine = new Map<number, typeof entries.entries[number]>();
@@ -150,11 +119,6 @@ const compatibility = computed(() => {
     splitTitle: split.mine.title,
   };
 });
-const disconnectRequester = computed(() => String(activeCouple.value?.disconnect_requested_by || ''));
-const disconnectByMe = computed(() => !!disconnectRequester.value && disconnectRequester.value === currentUserId.value);
-const disconnectByPartner = computed(() => !!disconnectRequester.value && !disconnectByMe.value);
-const disconnectText = computed(() => disconnectByMe.value ? '撤销解除申请' : (disconnectByPartner.value ? '同意解除 Couple' : '申请解除 Couple'));
-const disconnectClass = computed(() => disconnectByPartner.value ? 'btn-primary' : (disconnectByMe.value ? 'btn-secondary' : 'btn-danger'));
 const recommendationLoading = computed(() => couple.loading || couple.recommendationState === 'loading');
 const mineMovieEntries = computed(() => entries.entries.filter(entry => entry.user_id === currentUserId.value && mediaType(entry.type || entry.media_type) === 'movie'));
 const partnerMovieEntries = computed(() => entries.entries.filter(entry => entry.user_id === partnerId.value && mediaType(entry.type || entry.media_type) === 'movie'));
@@ -271,21 +235,6 @@ function detailFor(entry: Pick<Entry, 'tmdb_id' | 'type' | 'media_type'>): Cache
   return detailCache.value[`${mediaType(entry.type || entry.media_type)}:${id}`] || detailCache.value[String(id)] || null;
 }
 
-function displayName(userId: string | undefined, fallback = '未知'): string {
-  return userId ? entries.profiles[userId]?.display_name || fallback : fallback;
-}
-
-function userColor(userId: string): UserColor {
-  const name = displayName(userId, '').toLowerCase();
-  if (name === 'fank1ng') return { main: '#d4a853', dim: '#3a3020' };
-  if (name === 'ceci') return { main: '#FF69B4', dim: '#2a1525' };
-  return { main: '#5b9db0', dim: '#1a2a30' };
-}
-
-function otherUserId(item: Couple): string {
-  return item.user_a === currentUserId.value ? item.user_b || '' : item.user_a || '';
-}
-
 function setTab(nextTab: CoupleTab): void {
   tab.value = nextTab;
   if (nextTab === 'recommend' && couple.recommendationState === 'idle') void loadRecommendations(false);
@@ -338,75 +287,6 @@ async function loadRecommendations(force = false): Promise<void> {
   } finally {
     couple.setLoading(false);
   }
-}
-
-async function bindUser(userId: string): Promise<void> {
-  if (!currentUserId.value || !userId || userId === currentUserId.value) return;
-  if (activeCouple.value) {
-    ui.showToast('已经绑定 Couple');
-    return;
-  }
-  const { error } = await bindCouple(currentUserId.value, userId);
-  if (error) {
-    ui.showToast(/schema cache|does not exist|relation|couples/i.test(error.message || '')
-      ? 'Couple 表尚未创建，请先执行升级 SQL'
-      : `绑定请求失败: ${error.message}`);
-    return;
-  }
-  search.value = '';
-  ui.showToast('已发送绑定请求');
-  await refreshVueData();
-}
-
-async function confirmBinding(coupleId: string | number): Promise<void> {
-  const { error } = await confirmCouple(coupleId);
-  if (error) {
-    ui.showToast(`确认失败: ${error.message}`);
-    return;
-  }
-  ui.showToast('Couple 已绑定');
-  await refreshVueData();
-}
-
-async function disconnect(coupleId: string | number): Promise<void> {
-  const target = String(activeCouple.value?.id) === String(coupleId)
-    ? activeCouple.value
-    : couple.pendingCouples.find(item => String(item.id) === String(coupleId)) || null;
-  const wasActive = target?.status === 'active';
-  if (wasActive) {
-    const requester = String(target?.disconnect_requested_by || '');
-    if (!requester) {
-      if (!confirmAction('将向对方发送解除 Couple 申请，对方同意后才会解除。确认发送？')) return;
-      const { error } = await requestCoupleDisconnect(coupleId, currentUserId.value);
-      if (error) {
-        ui.showToast(/schema cache|does not exist|relation|disconnect_requested_by|column/i.test(error.message || '')
-          ? 'Couple 表尚未升级，请先执行解除申请升级 SQL'
-          : `发送解除申请失败: ${error.message}`);
-        return;
-      }
-      ui.showToast('已发送解除申请');
-      await refreshVueData();
-      return;
-    }
-    if (requester === currentUserId.value) {
-      const { error } = await cancelCoupleDisconnect(coupleId);
-      if (error) {
-        ui.showToast(`撤销解除申请失败: ${error.message}`);
-        return;
-      }
-      ui.showToast('已撤销解除申请');
-      await refreshVueData();
-      return;
-    }
-    if (!confirmAction('对方请求解除 Couple。同意后，共享下次看队列也会一起删除，确认同意？')) return;
-  }
-  const { error } = await deleteCouple(coupleId);
-  if (error) {
-    ui.showToast(`${wasActive ? '同意解除失败' : '撤销失败'}: ${error.message}`);
-    return;
-  }
-  ui.showToast(wasActive ? '已同意解除 Couple' : '已撤销绑定请求');
-  await refreshVueData();
 }
 
 async function moveQueue(item: CoupleQueueItem, direction: number): Promise<void> {
@@ -625,56 +505,26 @@ onMounted(() => {
 
 <template>
   <section class="vue-couple-panel">
+    <div class="couple-sticky-controls">
+      <h2 class="section-title couple-title">Couple</h2>
+      <div v-if="activeCouple" class="discover-subtabs couple-subtabs">
+        <button type="button" :class="{ active: tab === 'archive' }" @click="setTab('archive')">档案</button>
+        <button type="button" :class="{ active: tab === 'recommend' }" @click="setTab('recommend')">双人推荐</button>
+        <button type="button" :class="{ active: tab === 'queue' }" @click="setTab('queue')">下次看</button>
+      </div>
+    </div>
+
     <EmptyState v-if="!couplesAvailable" title="Couple 表尚未创建，请先执行升级 SQL" />
 
     <div v-else-if="!activeCouple" class="couple-empty">
       <h3>绑定 Couple 后启用双人观影功能</h3>
       <p>绑定后可查看评分默契度、偏好对比、双人推荐，并共同维护“下次看”队列。</p>
-
-      <div v-if="pendingReceived.length || pendingSent.length" class="couple-pending">
-        <div v-for="item in pendingReceived" :key="`received-${item.id}`" class="couple-pending-row">
-          <span>{{ displayName(item.requested_by, '对方') }} 请求绑定 Couple</span>
-          <button class="btn btn-sm btn-primary" type="button" @click="confirmBinding(item.id)">确认绑定</button>
-        </div>
-        <div v-for="item in pendingSent" :key="`sent-${item.id}`" class="couple-pending-row">
-          <span>已向 {{ displayName(otherUserId(item), '对方') }} 发送请求，等待确认</span>
-          <button class="btn btn-sm btn-danger" type="button" @click="disconnect(item.id)">撤销</button>
-        </div>
-      </div>
-
-      <div class="couple-bind-box">
-        <input v-model="search" type="text" placeholder="搜索用户名绑定 Couple">
-        <div class="couple-user-results">
-          <button v-for="user in bindableUsers" :key="user.user_id" class="couple-user-result" type="button" @click="bindUser(user.user_id)">
-            <span>{{ user.display_name || '未命名' }}</span>
-            <em>发送绑定请求</em>
-          </button>
-          <div v-if="search && !bindableUsers.length" class="couple-muted">没有可绑定用户</div>
-        </div>
-      </div>
+      <button class="btn btn-sm btn-primary" type="button" @click="ui.openAccountModal('couple')">管理 Couple 关系</button>
     </div>
 
     <template v-else>
-      <div class="couple-hero">
-        <div>
-          <p>已绑定</p>
-          <h3>
-            <span :style="{ color: myColor.main }">{{ currentProfile?.display_name || '我' }}</span>
-            &
-            <span :style="{ color: partnerColor.main }">{{ partnerName }}</span>
-          </h3>
-        </div>
-        <button class="btn btn-xs" :class="disconnectClass" type="button" @click="disconnect(activeCouple.id)">{{ disconnectText }}</button>
-      </div>
-
       <div v-if="disconnectRequester" class="couple-section couple-disconnect-notice">
         <p>{{ disconnectByMe ? '已发送解除申请，等待对方同意。' : `${partnerName} 请求解除 Couple，同意后共享下次看队列会一起删除。` }}</p>
-      </div>
-
-      <div class="discover-subtabs couple-subtabs">
-        <button type="button" :class="{ active: tab === 'archive' }" @click="setTab('archive')">档案</button>
-        <button type="button" :class="{ active: tab === 'recommend' }" @click="setTab('recommend')">双人推荐</button>
-        <button type="button" :class="{ active: tab === 'queue' }" @click="setTab('queue')">下次看</button>
       </div>
 
       <div v-if="tab === 'archive'" class="couple-archive">

@@ -118,6 +118,7 @@ onBeforeUnmount(() => {
       @change-password="ui.openAccountModal('changePassword')"
       @manage-invites="ui.openAccountModal('invites')"
       @manage-blocked="ui.openAccountModal('blocked')"
+      @manage-couple="ui.openAccountModal('couple')"
       @logout="logoutCurrentUser()"
     />
     <TabShell class="app-tabs" :tabs="mainTabs" :active="ui.activeTab" @change="changeTab" />
@@ -138,7 +139,6 @@ onBeforeUnmount(() => {
       </section>
 
       <section id="panel-couple" class="tab-panel" :class="{ active: ui.activeTab === 'couple' }">
-        <h2 class="section-title">Couple</h2>
         <CouplePanel />
       </section>
 

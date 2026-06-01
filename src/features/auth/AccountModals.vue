@@ -4,6 +4,7 @@ import { getSupabaseClient } from '../../api/supabase.js';
 import { generateInviteCode, loadInviteCodes } from '../../api/profile-api.js';
 import { removeBlockedMovie as removeBlockedMovieRecord } from '../../api/list-api.js';
 import { BaseModal, PaginationControls } from '../../shared/components/index.js';
+import { useCoupleBinding } from '../../shared/composables/useCoupleBinding.js';
 import { useListsStore } from '../../stores/lists.js';
 import { useSessionStore } from '../../stores/session.js';
 import { useUiStore } from '../../stores/ui.js';
@@ -26,6 +27,26 @@ const pageSize = 12;
 const session = useSessionStore();
 const lists = useListsStore();
 const ui = useUiStore();
+const {
+  activeCouple,
+  bindableUsers,
+  bindUser,
+  confirmBinding,
+  currentProfile,
+  disconnect,
+  disconnectByMe,
+  disconnectClass,
+  disconnectRequester,
+  disconnectText,
+  displayName,
+  myColor,
+  otherUserId,
+  partnerColor,
+  partnerName,
+  pendingReceived,
+  pendingSent,
+  search: coupleSearch,
+} = useCoupleBinding();
 
 const password = ref('');
 const inviteCodes = ref<InviteCode[]>([]);
@@ -38,6 +59,7 @@ const currentUser = computed(() => session.currentUser as UserLike | null);
 const changePasswordOpen = computed(() => ui.accountModal === 'changePassword');
 const invitesOpen = computed(() => ui.accountModal === 'invites');
 const blockedOpen = computed(() => ui.accountModal === 'blocked');
+const coupleOpen = computed(() => ui.accountModal === 'couple');
 const activeInviteCodes = computed(() => {
   const now = Date.now();
   return inviteCodes.value.filter(code => {
@@ -176,6 +198,64 @@ watch(blockedOpen, open => {
     </div>
     <div class="btn-group modal-actions">
       <button class="btn btn-secondary btn-sm" type="button" @click="closeAccountModal">关闭</button>
+    </div>
+  </BaseModal>
+
+  <BaseModal :open="coupleOpen" max-width="560px" labelled-by="couple-account-title" @close="closeAccountModal">
+    <div class="modal-title-row">
+      <h3 id="couple-account-title">Couple 关系</h3>
+      <button class="btn btn-xs btn-secondary" type="button" @click="closeAccountModal">关闭</button>
+    </div>
+
+    <div v-if="activeCouple" class="couple-account-card">
+      <p>已绑定</p>
+      <h4>
+        <span :style="{ color: myColor.main }">{{ currentProfile?.display_name || '我' }}</span>
+        &
+        <span :style="{ color: partnerColor.main }">{{ partnerName }}</span>
+      </h4>
+      <div v-if="disconnectRequester" class="couple-account-notice">
+        {{ disconnectByMe ? '已发送解除申请，等待对方同意。' : `${partnerName} 请求解除 Couple，同意后共享下次看队列会一起删除。` }}
+      </div>
+      <div class="couple-account-actions">
+        <button class="btn btn-sm" :class="disconnectClass" type="button" @click="disconnect(activeCouple.id)">
+          {{ disconnectText }}
+        </button>
+      </div>
+    </div>
+
+    <div v-else class="couple-account-card">
+      <p>尚未绑定</p>
+      <h4>绑定 Couple 后启用双人观影功能</h4>
+      <span>可查看评分默契度、偏好对比、双人推荐，并共同维护“下次看”队列。</span>
+    </div>
+
+    <div v-if="pendingReceived.length || pendingSent.length" class="couple-pending">
+      <div v-for="item in pendingReceived" :key="`received-${item.id}`" class="couple-pending-row">
+        <span>{{ displayName(item.requested_by, '对方') }} 请求绑定 Couple</span>
+        <button class="btn btn-sm btn-primary" type="button" @click="confirmBinding(item.id)">确认绑定</button>
+      </div>
+      <div v-for="item in pendingSent" :key="`sent-${item.id}`" class="couple-pending-row">
+        <span>已向 {{ displayName(otherUserId(item), '对方') }} 发送请求，等待确认</span>
+        <button class="btn btn-sm btn-danger" type="button" @click="disconnect(item.id)">撤销</button>
+      </div>
+    </div>
+
+    <div v-if="!activeCouple" class="couple-bind-box">
+      <input v-model="coupleSearch" type="text" placeholder="搜索用户名绑定 Couple">
+      <div class="couple-user-results">
+        <button
+          v-for="user in bindableUsers"
+          :key="user.user_id"
+          class="couple-user-result"
+          type="button"
+          @click="user.user_id && bindUser(user.user_id)"
+        >
+          <span>{{ user.display_name || '未命名' }}</span>
+          <em>发送绑定请求</em>
+        </button>
+        <div v-if="coupleSearch && !bindableUsers.length" class="couple-muted">没有可绑定用户</div>
+      </div>
     </div>
   </BaseModal>
 

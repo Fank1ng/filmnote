@@ -2,7 +2,7 @@ import { defineStore } from 'pinia';
 import { clearBrowserTimeout, scheduleBrowserTimeout } from '../shared/browser.js';
 
 type MainTab = 'rate' | 'list' | 'discover' | 'couple' | 'stats';
-type AccountModal = 'changePassword' | 'invites' | 'blocked' | null;
+type AccountModal = 'changePassword' | 'invites' | 'blocked' | 'couple' | null;
 
 type UiState = {
   activeTab: MainTab;

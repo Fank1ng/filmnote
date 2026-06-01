@@ -10,6 +10,7 @@ const emit = defineEmits<{
   changePassword: [];
   manageInvites: [];
   manageBlocked: [];
+  manageCouple: [];
   logout: [];
 }>();
 
@@ -74,6 +75,7 @@ useDocumentEvent('click', onDocumentClick);
         <span class="user-arrow">▾</span>
         <div class="user-dropdown">
           <button type="button" @click.stop="run(() => emit('changePassword'))">修改密码</button>
+          <button type="button" @click.stop="run(() => emit('manageCouple'))">Couple 关系</button>
           <button v-if="canManageInvites" type="button" @click.stop="run(() => emit('manageInvites'))">邀请码管理</button>
           <button type="button" @click.stop="run(() => emit('manageBlocked'))">管理屏蔽</button>
           <button type="button" @click.stop="run(() => emit('logout'))">退出</button>

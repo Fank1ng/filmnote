@@ -1,4 +1,10 @@
 /* ── Couple ── */
+  .couple-sticky-controls {
+    position: sticky; top: var(--page-sticky-top); z-index: 30;
+    background: var(--bg); padding-bottom: 12px; margin-bottom: 14px;
+  }
+  .couple-title { margin-bottom: 20px; }
+  .couple-subtabs { margin-bottom: 0; flex-wrap: wrap; }
   .couple-empty, .couple-section, .couple-hero, .couple-stat-grid > div {
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
   }
@@ -31,6 +37,19 @@
   .couple-user-result em, .couple-muted, .couple-pending-row span { color: var(--text2); font-size: 0.8rem; font-style: normal; }
   .couple-pending-row em { color: var(--gold); font-size: 0.78rem; font-style: normal; white-space: nowrap; }
   .couple-pending { display: grid; gap: 8px; margin: 12px 0; }
+  .couple-account-card {
+    padding: 16px; border: 1px solid var(--border); border-radius: var(--radius);
+    background: rgba(255,255,255,0.03); margin-bottom: 12px;
+  }
+  .couple-account-card p { color: var(--text2); font-size: 0.78rem; margin-bottom: 4px; }
+  .couple-account-card h4 { color: var(--gold); font-size: 1.15rem; margin-bottom: 4px; }
+  .couple-account-card > span { color: var(--text2); font-size: 0.82rem; }
+  .couple-account-notice {
+    color: var(--text2); font-size: 0.8rem; margin-top: 10px;
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+    background: rgba(255,255,255,0.025);
+  }
+  .couple-account-actions { display: flex; justify-content: flex-end; margin-top: 12px; }
   .couple-hero { display: flex; align-items: center; justify-content: space-between; padding: 18px 20px; margin-bottom: 14px; }
   .couple-hero p { color: var(--text2); font-size: 0.78rem; margin-bottom: 2px; }
   .couple-hero h3 { color: var(--gold); font-size: 1.25rem; }
@@ -164,6 +183,9 @@
 
   @media (max-width: 640px) {
     .couple-stat-grid, .couple-meter-grid, .couple-pref-grid, .couple-split-grid, .couple-archive-top, .couple-archive-layout { grid-template-columns: 1fr; }
+    .couple-sticky-controls { padding-bottom: 10px; }
+    .couple-title { margin-bottom: 14px; }
+    .couple-account-actions { justify-content: flex-start; }
     .couple-archive-left, .couple-archive-right, .couple-archive-main { grid-column: auto; grid-row: auto; }
     .couple-archive-main { min-height: 0; padding: 16px; overflow: hidden; }
     .couple-archive-main .couple-section-head { display: grid; }

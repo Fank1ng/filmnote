@@ -5,6 +5,7 @@
     --danger: #a04040; --danger-bg: #2a1515;
     --friend: #5b9db0; --friend-dim: #1a2a30;
     --ceci: #FF69B4; --ceci-dim: #2a1525;
+    --app-header-height: 0px; --app-tabs-height: 0px; --page-sticky-top: 0px;
   }
   * { margin:0; padding:0; box-sizing:border-box; }
   [hidden] { display: none !important; }

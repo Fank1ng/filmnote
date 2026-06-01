@@ -1,4 +1,8 @@
 /* ── List ── */
+  .vue-list-controls {
+    position: sticky; top: var(--page-sticky-top); z-index: 30;
+    background: var(--bg); padding-bottom: 4px; margin-bottom: 12px;
+  }
   .section-title-switch { display: flex; gap: 10px; margin-bottom: 20px; align-items: center; flex-wrap: wrap; }
   .section-title-switch button {
     background: transparent; border: none; color: var(--text2);
@@ -19,7 +23,7 @@
   }
   .list-subtabs button:hover { border-color: var(--gold); color: var(--text); }
   .list-subtabs button.active { border-color: var(--gold); color: var(--gold); background: var(--gold-dim); }
-  .list-controls { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .list-controls { display: flex; gap: 10px; margin-bottom: 0; flex-wrap: wrap; }
   .list-controls input, .list-controls select {
     padding: 8px 12px; background: var(--surface); border: 1px solid var(--border);
     color: var(--text); border-radius: 8px; font-size: 0.85rem;

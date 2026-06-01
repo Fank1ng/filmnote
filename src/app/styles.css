@@ -2,7 +2,7 @@
   header {
     background: var(--surface); border-bottom: 1px solid var(--border);
     padding: 14px 24px; display: flex; align-items: center;
-    justify-content: space-between; position: sticky; top: 0; z-index: 10;
+    justify-content: space-between; position: sticky; top: 0; z-index: 50;
   }
   .logo { font-size: 1.3rem; font-weight: 700; }
   .logo .fd { color: var(--gold); }
@@ -16,7 +16,7 @@
   .user-dropdown {
     position: absolute; top: 100%; right: 0; margin-top: 8px;
     background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 4px; min-width: 120px; display: none; z-index: 30;
+    padding: 4px; min-width: 120px; display: none; z-index: 70;
   }
   .user-menu.open .user-dropdown { display: block; }
   .user-dropdown button {
@@ -26,7 +26,13 @@
   .user-dropdown button:hover { background: rgba(255,255,255,0.05); color: var(--gold); }
 
   /* ── Tabs ── */
-  nav { display: flex; gap: 4px; padding: 16px 24px 0; overflow-x: auto; }
+  nav {
+    display: flex; gap: 4px; padding: 16px 24px 0; overflow-x: auto;
+    background: var(--bg); border-bottom: 1px solid var(--border);
+  }
+  .app-tabs {
+    position: sticky; top: var(--app-header-height); z-index: 40;
+  }
   nav button {
     background: none; border: none; color: var(--text2);
     padding: 10px 20px; cursor: pointer; font-size: 0.95rem;

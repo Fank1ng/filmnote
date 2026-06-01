@@ -1,5 +1,10 @@
 /* ── Discover ── */
-  .discover-subtabs { display: flex; gap: 8px; margin-bottom: 20px; }
+  .discover-sticky-controls {
+    position: sticky; top: var(--page-sticky-top); z-index: 30;
+    background: var(--bg); padding-bottom: 12px; margin-bottom: 16px;
+  }
+  .discover-title { margin-bottom: 20px; }
+  .discover-subtabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
   .discover-subtabs button {
     background: none; border: 1px solid var(--border); color: var(--text2);
     padding: 6px 16px; cursor: pointer; font-size: 0.85rem; border-radius: 20px; transition: var(--t);
@@ -82,7 +87,7 @@
     font-size: 0.95rem; font-weight: 600; box-sizing: border-box;
     user-select: none; -webkit-user-select: none;
   }
-  .discover-topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+  .discover-topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 0; flex-wrap: wrap; }
   .discover-topbar .toggle-pill {
     font-size: 0.78rem; padding: 4px 12px; border-radius: 14px; cursor: pointer;
     border: 1px solid var(--border); background: none; color: var(--text2); transition: var(--t);

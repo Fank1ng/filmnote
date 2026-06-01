@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, watch } from 'vue';
 import { buildExportPayload, downloadExport, importFilmNoteJson } from '../api/import-export-api.js';
 import { refreshVueData } from './data-sync.js';
 import { initializeVueSession, logoutCurrentUser } from './session.js';
@@ -27,6 +27,24 @@ const couple = useCoupleStore();
 const { confirmAction } = useConfirm();
 
 const authenticated = computed(() => session.isAuthenticated);
+let stickyResizeObserver: ResizeObserver | null = null;
+
+function updateStickyOffsets(): void {
+  const headerHeight = document.querySelector<HTMLElement>('.app-header')?.offsetHeight || 0;
+  const tabsHeight = document.querySelector<HTMLElement>('.app-tabs')?.offsetHeight || 0;
+  document.documentElement.style.setProperty('--app-header-height', `${headerHeight}px`);
+  document.documentElement.style.setProperty('--app-tabs-height', `${tabsHeight}px`);
+  document.documentElement.style.setProperty('--page-sticky-top', `${headerHeight + tabsHeight}px`);
+}
+
+function observeStickyOffsets(): void {
+  stickyResizeObserver = new ResizeObserver(updateStickyOffsets);
+  document.querySelectorAll<HTMLElement>('.app-header, .app-tabs').forEach(element => {
+    stickyResizeObserver?.observe(element);
+  });
+  window.addEventListener('resize', updateStickyOffsets);
+  updateStickyOffsets();
+}
 
 function changeTab(tab: MainTab): void {
   ui.setActiveTab(tab);
@@ -34,6 +52,12 @@ function changeTab(tab: MainTab): void {
 
 watch(() => session.currentUser, user => {
   if (user) void refreshVueData();
+}, { flush: 'post' });
+
+watch(authenticated, async isAuthenticated => {
+  if (!isAuthenticated) return;
+  await nextTick();
+  updateStickyOffsets();
 }, { flush: 'post' });
 
 function currentUserId(): string {
@@ -75,7 +99,13 @@ async function importJson(file: File): Promise<void> {
 }
 
 onMounted(() => {
+  observeStickyOffsets();
   void initializeVueSession();
+});
+
+onBeforeUnmount(() => {
+  stickyResizeObserver?.disconnect();
+  window.removeEventListener('resize', updateStickyOffsets);
 });
 </script>
 
@@ -84,12 +114,13 @@ onMounted(() => {
 
   <div id="mainApp" :class="{ hidden: !authenticated }">
     <AppHeader
+      class="app-header"
       @change-password="ui.openAccountModal('changePassword')"
       @manage-invites="ui.openAccountModal('invites')"
       @manage-blocked="ui.openAccountModal('blocked')"
       @logout="logoutCurrentUser()"
     />
-    <TabShell :tabs="mainTabs" :active="ui.activeTab" @change="changeTab" />
+    <TabShell class="app-tabs" :tabs="mainTabs" :active="ui.activeTab" @change="changeTab" />
 
     <main>
       <section id="panel-rate" class="tab-panel" :class="{ active: ui.activeTab === 'rate' }">
@@ -103,7 +134,6 @@ onMounted(() => {
       </section>
 
       <section id="panel-discover" class="tab-panel" :class="{ active: ui.activeTab === 'discover' }">
-        <h2 class="section-title">发现好片</h2>
         <DiscoverPanel />
       </section>
 

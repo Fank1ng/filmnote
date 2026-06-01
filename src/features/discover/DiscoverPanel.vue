@@ -258,30 +258,21 @@ onMounted(() => {
 
 <template>
   <section class="vue-discover-panel">
-    <div class="discover-subtabs">
-      <button
-        v-for="tab in tabs"
-        :key="tab.key"
-        type="button"
-        :class="{ active: activeTab === tab.key, 'fd-tab': tab.key === 'recommend' && tabLabel(tab.key).toLowerCase().includes('fd'), 'ceci-tab': tab.key === 'recommend' && tabLabel(tab.key).toLowerCase().includes('ceci') }"
-        @click="setTab(tab.key)"
-      >
-        {{ tabLabel(tab.key) }}
-      </button>
-    </div>
+    <div class="discover-sticky-controls">
+      <h2 class="section-title discover-title">发现好片</h2>
+      <div class="discover-subtabs">
+        <button
+          v-for="tab in tabs"
+          :key="tab.key"
+          type="button"
+          :class="{ active: activeTab === tab.key, 'fd-tab': tab.key === 'recommend' && tabLabel(tab.key).toLowerCase().includes('fd'), 'ceci-tab': tab.key === 'recommend' && tabLabel(tab.key).toLowerCase().includes('ceci') }"
+          @click="setTab(tab.key)"
+        >
+          {{ tabLabel(tab.key) }}
+        </button>
+      </div>
 
-    <div v-if="loading" class="discover-spinner"><div class="spinner"></div></div>
-    <EmptyState v-else-if="errorMessage" title="加载失败，请稍后重试" :detail="errorMessage" />
-    <EmptyState
-      v-else-if="movies === null"
-      icon="🎬"
-      :title="`评价 25 部以上电影后`"
-      :detail="`Ceci 会为你生成个性化推荐 · 当前已评价 ${ratedCount} 部`"
-    />
-    <EmptyState v-else-if="!pageMovies.length" :title="activeTab === 'toprated' && topRatedUnwatched ? '全部已看过' : '暂无推荐，试试热门标签吧'" />
-
-    <template v-else>
-      <div class="discover-topbar">
+      <div v-if="!loading && !errorMessage && movies !== null && pageMovies.length" class="discover-topbar">
         <template v-if="activeTab === 'recommend'">
           <button class="btn btn-sm btn-secondary" type="button" :disabled="cooldownRemaining > 0" @click.stop="refreshRecommendations">刷新推荐</button>
           <span id="discoverRefreshHint" class="topbar-count">{{ refreshHint }}</span>
@@ -299,7 +290,19 @@ onMounted(() => {
           </button>
         </template>
       </div>
+    </div>
 
+    <div v-if="loading" class="discover-spinner"><div class="spinner"></div></div>
+    <EmptyState v-else-if="errorMessage" title="加载失败，请稍后重试" :detail="errorMessage" />
+    <EmptyState
+      v-else-if="movies === null"
+      icon="🎬"
+      :title="`评价 25 部以上电影后`"
+      :detail="`Ceci 会为你生成个性化推荐 · 当前已评价 ${ratedCount} 部`"
+    />
+    <EmptyState v-else-if="!pageMovies.length" :title="activeTab === 'toprated' && topRatedUnwatched ? '全部已看过' : '暂无推荐，试试热门标签吧'" />
+
+    <template v-else>
       <div class="discover-grid">
         <article
           v-for="movie in pageMovies"

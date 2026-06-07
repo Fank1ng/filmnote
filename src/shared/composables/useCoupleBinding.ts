@@ -39,8 +39,8 @@ export function useCoupleBinding() {
   });
   const partnerProfile = computed<Profile | null>(() => partnerId.value ? entries.profiles[partnerId.value] || null : null);
   const partnerName = computed(() => partnerProfile.value?.display_name || '对方');
-  const pendingReceived = computed(() => couple.pendingCouples.filter(item => item.requested_by !== currentUserId.value));
-  const pendingSent = computed(() => couple.pendingCouples.filter(item => item.requested_by === currentUserId.value));
+  const pendingReceived = computed(() => activeCouple.value ? [] : couple.pendingCouples.filter(item => item.requested_by !== currentUserId.value));
+  const pendingSent = computed(() => activeCouple.value ? [] : couple.pendingCouples.filter(item => item.requested_by === currentUserId.value));
   const unavailableUserIds = computed(() => {
     const ids = new Set<string>([currentUserId.value, partnerId.value].filter(Boolean));
     couple.pendingCouples.forEach(item => {
@@ -87,9 +87,12 @@ export function useCoupleBinding() {
     }
     const { error } = await bindCouple(currentUserId.value, userId);
     if (error) {
-      ui.showToast(/schema cache|does not exist|relation|couples/i.test(error.message || '')
+      const message = error.message || '';
+      ui.showToast(/schema cache|does not exist|relation|couples/i.test(message)
         ? 'Couple 表尚未创建，请先执行升级 SQL'
-        : `绑定请求失败: ${error.message}`);
+        : (/user already has an active couple/i.test(message)
+          ? '对方或你已经绑定 Couple'
+          : `绑定请求失败: ${message}`));
       return;
     }
     search.value = '';
@@ -98,6 +101,10 @@ export function useCoupleBinding() {
   }
 
   async function confirmBinding(coupleId: string | number): Promise<void> {
+    if (activeCouple.value) {
+      ui.showToast('已经绑定 Couple，不能确认新的绑定请求');
+      return;
+    }
     const { error } = await confirmCouple(coupleId);
     if (error) {
       ui.showToast(`确认失败: ${error.message}`);

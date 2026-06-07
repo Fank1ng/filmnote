@@ -47,7 +47,7 @@ returns trigger
 language plpgsql
 as $$
 begin
-  if new.status = 'active' and exists (
+  if exists (
     select 1 from public.couples c
     where c.id <> new.id
       and c.status = 'active'
@@ -63,6 +63,18 @@ drop trigger if exists couples_enforce_single_active on public.couples;
 create trigger couples_enforce_single_active
 before insert or update on public.couples
 for each row execute function public.enforce_single_active_couple();
+
+delete from public.couples pending
+where pending.status = 'pending'
+  and exists (
+    select 1 from public.couples active
+    where active.id <> pending.id
+      and active.status = 'active'
+      and (
+        active.user_a in (pending.user_a, pending.user_b)
+        or active.user_b in (pending.user_a, pending.user_b)
+      )
+  );
 
 create table if not exists public.couple_watch_queue (
   id uuid primary key default gen_random_uuid(),

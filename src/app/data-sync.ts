@@ -35,7 +35,7 @@ async function refreshCouple(userId: string): Promise<void> {
   const rows = (data || []) as Couple[];
   const activeCouple = rows.find(row => row.status === 'active') || null;
   coupleStore.setActiveCouple(activeCouple);
-  coupleStore.setPendingCouples(rows.filter(row => row.status === 'pending'));
+  coupleStore.setPendingCouples(activeCouple ? [] : rows.filter(row => row.status === 'pending'));
   coupleStore.setPartnerProfileId(partnerId(activeCouple, userId));
 
   if (!activeCouple) {

@@ -27,6 +27,7 @@ const couple = useCoupleStore();
 const { confirmAction } = useConfirm();
 
 const authenticated = computed(() => session.isAuthenticated);
+const visibleTabs = computed(() => authenticated.value ? mainTabs : mainTabs.filter(tab => tab.name !== 'couple'));
 let stickyResizeObserver: ResizeObserver | null = null;
 
 function updateStickyOffsets(): void {
@@ -47,11 +48,16 @@ function observeStickyOffsets(): void {
 }
 
 function changeTab(tab: MainTab): void {
+  if (tab === 'couple' && !authenticated.value) {
+    ui.openAuthModal('login');
+    return;
+  }
   ui.setActiveTab(tab);
 }
 
 watch(() => session.currentUser, user => {
-  if (user) void refreshVueData();
+  void refreshVueData();
+  if (!user && ui.activeTab === 'couple') ui.setActiveTab('rate');
 }, { flush: 'post' });
 
 watch(authenticated, async isAuthenticated => {
@@ -67,7 +73,8 @@ function currentUserId(): string {
 function exportJson(): void {
   const userId = currentUserId();
   if (!userId) {
-    ui.showToast('请先登录');
+    ui.openAuthModal('login');
+    ui.showToast('请先登录后导出');
     return;
   }
   downloadExport(buildExportPayload({
@@ -82,7 +89,8 @@ function exportJson(): void {
 async function importJson(file: File): Promise<void> {
   const userId = currentUserId();
   if (!userId) {
-    ui.showToast('请先登录');
+    ui.openAuthModal('login');
+    ui.showToast('请先登录后导入');
     return;
   }
   try {
@@ -112,16 +120,18 @@ onBeforeUnmount(() => {
 <template>
   <AuthOverlay />
 
-  <div id="mainApp" :class="{ hidden: !authenticated }">
+  <div id="mainApp">
     <AppHeader
       class="app-header"
       @change-password="ui.openAccountModal('changePassword')"
+      @login="ui.openAuthModal('login')"
       @manage-invites="ui.openAccountModal('invites')"
       @manage-blocked="ui.openAccountModal('blocked')"
       @manage-couple="ui.openAccountModal('couple')"
+      @register="ui.openAuthModal('register')"
       @logout="logoutCurrentUser()"
     />
-    <TabShell class="app-tabs" :tabs="mainTabs" :active="ui.activeTab" @change="changeTab" />
+    <TabShell class="app-tabs" :tabs="visibleTabs" :active="ui.activeTab" @change="changeTab" />
 
     <main>
       <section id="panel-rate" class="tab-panel" :class="{ active: ui.activeTab === 'rate' }">
@@ -138,7 +148,7 @@ onBeforeUnmount(() => {
         <DiscoverPanel />
       </section>
 
-      <section id="panel-couple" class="tab-panel" :class="{ active: ui.activeTab === 'couple' }">
+      <section v-if="authenticated" id="panel-couple" class="tab-panel" :class="{ active: ui.activeTab === 'couple' }">
         <CouplePanel />
       </section>
 

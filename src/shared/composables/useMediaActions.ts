@@ -92,8 +92,14 @@ export function useMediaActions() {
   const modals = useModalStore();
 
   const userId = () => getCurrentUserId(session.currentUser);
+  const requireLogin = (message = '请先登录'): boolean => {
+    ui.openAuthModal('login');
+    ui.showToast(message);
+    return false;
+  };
 
   function rateMedia(input: MediaActionInput, opts: Record<string, unknown> = {}): boolean {
+    if (!userId()) return requireLogin('请先登录后添加评价');
     const media = normalizeMedia(input);
     if (!media) {
       ui.showToast('无法识别影片信息');
@@ -122,8 +128,7 @@ export function useMediaActions() {
     const currentUserId = userId();
     const media = normalizeMedia(input);
     if (!currentUserId) {
-      ui.showToast('请先登录');
-      return false;
+      return requireLogin('请先登录后使用想看清单');
     }
     if (!media) {
       ui.showToast('无法更新想看清单，影片信息不完整');
@@ -168,8 +173,7 @@ export function useMediaActions() {
     const currentUserId = userId();
     const media = normalizeMedia(input);
     if (!currentUserId) {
-      ui.showToast('请先登录');
-      return false;
+      return requireLogin('请先登录后加入下次看');
     }
     if (!couple.activeCouple) {
       ui.showToast('请先绑定 Couple');
@@ -213,8 +217,7 @@ export function useMediaActions() {
     const currentUserId = userId();
     const media = normalizeMedia(input);
     if (!currentUserId) {
-      ui.showToast('请先登录');
-      return false;
+      return requireLogin('请先登录后屏蔽推荐');
     }
     if (!media) {
       ui.showToast('无法屏蔽，影片信息不完整');

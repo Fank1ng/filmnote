@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { getCurrentUser } from '../../app/user-context.js';
 import { useEntriesStore } from '../../stores/entries.js';
@@ -19,6 +19,7 @@ const controls = useStatsControlsStore();
 const { filter, type, otherUser } = storeToRefs(controls);
 
 const currentUser = computed(() => getCurrentUser<UserLike>(session.currentUser));
+const authenticated = computed(() => session.isAuthenticated);
 const otherUsers = computed(() => {
   const currentId = currentUser.value?.id;
   const ids = [...new Set(entries.entries.filter(entry => entry.user_id !== currentId).map(entry => entry.user_id))];
@@ -36,6 +37,11 @@ function setType(nextType: MediaType): void {
 function setFilter(nextFilter: StatsFilter): void {
   controls.setFilter(nextFilter);
 }
+
+watch(authenticated, isAuthenticated => {
+  if (!isAuthenticated && filter.value !== 'others') controls.setFilter('others');
+  if (isAuthenticated && filter.value === 'others' && !otherUser.value) controls.setFilter('me');
+}, { immediate: true });
 </script>
 
 <template>
@@ -46,9 +52,9 @@ function setFilter(nextFilter: StatsFilter): void {
     </div>
 
     <div class="list-subtabs stats-filter-tabs">
-      <button type="button" :class="{ active: filter === 'me' }" @click="setFilter('me')">自己</button>
+      <button v-if="authenticated" type="button" :class="{ active: filter === 'me' }" @click="setFilter('me')">自己</button>
       <button type="button" :class="{ active: filter === 'others' }" @click="setFilter('others')">他人</button>
-      <button type="button" :class="{ active: filter === 'compare' }" @click="setFilter('compare')">对比</button>
+      <button v-if="authenticated" type="button" :class="{ active: filter === 'compare' }" @click="setFilter('compare')">对比</button>
     </div>
 
     <div v-if="showUserPicker" class="stats-user-row">

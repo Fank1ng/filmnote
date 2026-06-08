@@ -3,10 +3,13 @@ import { clearBrowserTimeout, scheduleBrowserTimeout } from '../shared/browser.j
 
 type MainTab = 'rate' | 'list' | 'discover' | 'couple' | 'stats';
 type AccountModal = 'changePassword' | 'invites' | 'blocked' | 'couple' | null;
+type AuthModalMode = 'login' | 'register' | 'reset';
 
 type UiState = {
   activeTab: MainTab;
   accountModal: AccountModal;
+  authModalOpen: boolean;
+  authMode: AuthModalMode;
   highlightEntryId: string | number | null;
   toastMessage: string;
   toastOpen: boolean;
@@ -25,6 +28,8 @@ export const useUiStore = defineStore('ui', {
   state: (): UiState => ({
     activeTab: 'rate',
     accountModal: null,
+    authModalOpen: false,
+    authMode: 'login',
     highlightEntryId: null,
     toastMessage: '',
     toastOpen: false,
@@ -39,6 +44,13 @@ export const useUiStore = defineStore('ui', {
     },
     closeAccountModal() {
       this.accountModal = null;
+    },
+    openAuthModal(authMode: AuthModalMode = 'login') {
+      this.authMode = authMode;
+      this.authModalOpen = true;
+    },
+    closeAuthModal() {
+      this.authModalOpen = false;
     },
     setHighlightEntry(id: string | number | null) {
       this.highlightEntryId = id;
@@ -58,4 +70,4 @@ export const useUiStore = defineStore('ui', {
   },
 });
 
-export type { AccountModal, MainTab };
+export type { AccountModal, AuthModalMode, MainTab };

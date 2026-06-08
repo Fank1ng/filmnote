@@ -218,6 +218,7 @@ export async function initializeVueSession(): Promise<void> {
     else {
       session.clearSession();
       clearDataStores();
+      await refreshVueData();
     }
 
     if (!removeAuthListener) {
@@ -228,6 +229,7 @@ export async function initializeVueSession(): Promise<void> {
           browserSessionStorage.remove(SESSION_KEY);
           session.clearSession();
           clearDataStores();
+          void refreshVueData();
           return;
         }
         if (authUser && ['SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED'].includes(event)) {
@@ -241,6 +243,7 @@ export async function initializeVueSession(): Promise<void> {
     useUiStore().showToast(error instanceof Error ? error.message : String(error));
     session.clearSession();
     clearDataStores();
+    await refreshVueData();
   } finally {
     session.setRestoring(false);
   }
@@ -253,4 +256,5 @@ export async function logoutCurrentUser(signOut = true): Promise<void> {
   useSessionStore().clearSession();
   clearDataStores();
   useUiStore().setActiveTab('rate');
+  await refreshVueData();
 }

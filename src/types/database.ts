@@ -27,6 +27,8 @@ export type InviteCode = {
   [key: string]: unknown;
 };
 
+type PublicProfile = Pick<Profile, 'user_id' | 'display_name'>;
+
 export type Database = {
   public: {
     Tables: {
@@ -39,7 +41,11 @@ export type Database = {
       couple_watch_queue: Table<CoupleQueueItem>;
       invite_codes: Table<InviteCode>;
     };
-    Views: Record<string, never>;
+    Views: {
+      public_entries: Table<Entry>;
+      public_season_ratings: Table<SeasonRating>;
+      public_profiles: Table<PublicProfile>;
+    };
     Functions: {
       generate_invite_code: {
         Args: Record<string, never>;

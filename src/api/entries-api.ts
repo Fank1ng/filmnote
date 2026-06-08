@@ -8,6 +8,13 @@ export async function loadEntries() {
     .order('created_at', { ascending: false });
 }
 
+export async function loadPublicEntries() {
+  return getSupabaseClient()
+    .from('public_entries')
+    .select('*')
+    .order('created_at', { ascending: false });
+}
+
 export async function createEntry(payload: Partial<Entry>) {
   return getSupabaseClient()
     .from('entries')
@@ -33,6 +40,13 @@ export async function deleteEntry(id: Entry['id']) {
 export async function loadSeasonRatings() {
   return getSupabaseClient()
     .from('season_ratings')
+    .select('*')
+    .order('season_number', { ascending: true });
+}
+
+export async function loadPublicSeasonRatings() {
+  return getSupabaseClient()
+    .from('public_season_ratings')
     .select('*')
     .order('season_number', { ascending: true });
 }

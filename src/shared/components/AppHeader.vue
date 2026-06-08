@@ -8,9 +8,11 @@ defineOptions({ name: 'AppHeader' });
 
 const emit = defineEmits<{
   changePassword: [];
+  login: [];
   manageInvites: [];
   manageBlocked: [];
   manageCouple: [];
+  register: [];
   logout: [];
 }>();
 
@@ -24,6 +26,7 @@ const entries = useEntriesStore();
 const open = ref(false);
 
 const currentUser = computed(() => session.currentUser as UserLike | null);
+const authenticated = computed(() => session.isAuthenticated);
 const displayName = computed(() => {
   return session.currentProfile?.display_name || currentUser.value?.email?.split('@')[0] || '...';
 });
@@ -36,7 +39,7 @@ const userColor = computed(() => {
 });
 const headerCount = computed(() => {
   const userId = currentUser.value?.id;
-  if (!userId) return '暂无记录';
+  if (!userId) return '公开浏览';
   const movieCount = entries.entries.filter(entry => entry.user_id === userId && (entry.type || entry.media_type) === 'movie').length;
   const seriesCount = entries.entries.filter(entry => entry.user_id === userId && (entry.type || entry.media_type) === 'series').length;
   const parts: string[] = [];
@@ -70,7 +73,11 @@ useDocumentEvent('click', onDocumentClick);
     <div class="logo"><span class="fd">FD</span>&amp;<span class="ce">Ceci</span></div>
     <div class="header-right">
       <span class="header-count">{{ headerCount }}</span>
-      <div class="user-menu" :class="{ open }" @click.stop="toggleMenu">
+      <div v-if="!authenticated" class="guest-auth-actions">
+        <button type="button" class="link-button" @click="emit('login')">登录</button>
+        <button type="button" class="btn btn-sm btn-primary" @click="emit('register')">注册</button>
+      </div>
+      <div v-else class="user-menu" :class="{ open }" @click.stop="toggleMenu">
         <span class="user-badge" :style="{ color: userColor }">{{ displayName }}</span>
         <span class="user-arrow">▾</span>
         <div class="user-dropdown">

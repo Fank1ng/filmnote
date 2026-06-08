@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { getSupabaseClient } from '../../api/supabase.js';
 import { applyAuthenticatedUser } from '../../app/session.js';
 import { appRedirectUrl } from '../../shared/browser.js';
@@ -28,7 +28,7 @@ type AuthStateSubscription = {
 const session = useSessionStore();
 const ui = useUiStore();
 
-const mode = ref<AuthMode>('login');
+const mode = ref<AuthMode>(ui.authMode);
 const email = ref('');
 const password = ref('');
 const registerEmail = ref('');
@@ -41,7 +41,7 @@ const errorMessage = ref('');
 const busy = ref(false);
 let removeAuthListener: { subscription?: { unsubscribe?: () => void } } | null = null;
 
-const visible = computed(() => !session.isAuthenticated);
+const visible = computed(() => (!session.isAuthenticated && ui.authModalOpen) || mode.value === 'newPassword');
 const subtitle = computed(() => {
   if (mode.value === 'register') return '创建账号';
   if (mode.value === 'reset') return '找回密码';
@@ -55,6 +55,11 @@ function setMode(nextMode: AuthMode): void {
   if (nextMode === 'reset') resetEmail.value = email.value;
 }
 
+function close(): void {
+  if (mode.value === 'newPassword') return;
+  ui.closeAuthModal();
+}
+
 function showError(message: string): void {
   errorMessage.value = message;
 }
@@ -65,6 +70,7 @@ function validateDisplayName(name: string): boolean {
 
 async function finishLogin(user: unknown): Promise<void> {
   await applyAuthenticatedUser(user as AuthUser);
+  ui.closeAuthModal();
 }
 
 async function login(): Promise<void> {
@@ -217,9 +223,20 @@ async function updatePassword(): Promise<void> {
 onMounted(() => {
   const db = getSupabaseClient();
   const { data } = db.auth.onAuthStateChange((event: string) => {
-    if (event === 'PASSWORD_RECOVERY') setMode('newPassword');
+    if (event === 'PASSWORD_RECOVERY') {
+      setMode('newPassword');
+      ui.openAuthModal('login');
+    }
   }) as AuthStateSubscription;
   removeAuthListener = data ?? null;
+});
+
+watch(() => ui.authMode, nextMode => {
+  if (mode.value !== 'newPassword') setMode(nextMode);
+});
+
+watch(() => session.isAuthenticated, isAuthenticated => {
+  if (isAuthenticated) ui.closeAuthModal();
 });
 
 onBeforeUnmount(() => {
@@ -228,8 +245,9 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div v-if="visible" class="auth-overlay-vue">
+  <div v-if="visible" class="auth-overlay-vue" @click.self="close">
     <div class="auth-box">
+      <button v-if="mode !== 'newPassword'" class="auth-close" type="button" aria-label="关闭登录窗口" @click="close">×</button>
       <h1><span class="fd">FD</span>&amp;<span class="ce">Ceci</span></h1>
       <p class="subtitle">{{ subtitle }}</p>
       <div class="auth-error">{{ errorMessage }}</div>

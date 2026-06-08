@@ -16,6 +16,7 @@ import {
   tmdbIdOf,
 } from '../tmdb-detail.js';
 import { getSeasonAwareEntryScore } from '../scoring.js';
+import { useMediaActions } from '../composables/useMediaActions.js';
 import { useDocumentEvent } from '../composables/useDocumentEvent.js';
 import BaseModal from './BaseModal.vue';
 import SeasonDetailTabs from './SeasonDetailTabs.vue';
@@ -27,6 +28,7 @@ type RatingMode = 'total' | 'season';
 const entries = useEntriesStore();
 const session = useSessionStore();
 const modals = useModalStore();
+const mediaActions = useMediaActions();
 const open = ref(false);
 const media = ref<TmdbMedia | null>(null);
 const detail = ref<TmdbDetail | null>(null);
@@ -145,7 +147,7 @@ function ratingPayload(mode?: RatingMode): TmdbMedia & Record<string, unknown> {
 function rate(mode?: RatingMode): void {
   const payload = ratingPayload(mode);
   close();
-  modals.openQuickRate(payload);
+  mediaActions.rateMedia(payload);
 }
 
 function onKeydown(event: KeyboardEvent): void {

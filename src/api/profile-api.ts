@@ -7,6 +7,12 @@ export async function loadProfiles() {
     .select('*');
 }
 
+export async function loadPublicProfiles() {
+  return getSupabaseClient()
+    .from('public_profiles')
+    .select('user_id, display_name');
+}
+
 export async function loadProfile(userId: string) {
   return getSupabaseClient()
     .from('user_preferences')

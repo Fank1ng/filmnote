@@ -128,7 +128,7 @@ async function addReview(): Promise<void> {
   if (!movie) return;
   const existing = findExistingEntry(movie);
   if (existing) modals.openQuickEdit(existing.id);
-  else modals.openQuickRate(movie);
+  else mediaActions.rateMedia(movie);
 }
 
 async function addWatchlist(): Promise<void> {

@@ -1,6 +1,6 @@
-import { loadEntries, loadSeasonRatings } from '../api/entries-api.js';
+import { loadEntries, loadPublicEntries, loadPublicSeasonRatings, loadSeasonRatings } from '../api/entries-api.js';
 import { loadBlockedMovies, loadWatchlist } from '../api/list-api.js';
-import { loadProfiles } from '../api/profile-api.js';
+import { loadProfiles, loadPublicProfiles } from '../api/profile-api.js';
 import { getSupabaseClient } from '../api/supabase.js';
 import { useCoupleStore } from '../stores/couple.js';
 import { useEntriesStore } from '../stores/entries.js';
@@ -56,18 +56,30 @@ export async function refreshVueData(): Promise<void> {
   const userId = currentUserId();
   const entriesStore = useEntriesStore();
   const listsStore = useListsStore();
+  const authenticated = useSessionStore().isAuthenticated;
 
   const [entriesResult, seasonsResult, profilesResult] = await Promise.all([
-    loadEntries(),
-    loadSeasonRatings(),
-    loadProfiles(),
+    authenticated ? loadEntries() : loadPublicEntries(),
+    authenticated ? loadSeasonRatings() : loadPublicSeasonRatings(),
+    authenticated ? loadProfiles() : loadPublicProfiles(),
   ]);
 
   if (!entriesResult.error) entriesStore.setEntries((entriesResult.data || []) as Entry[]);
   if (!seasonsResult.error) entriesStore.setSeasonRatings((seasonsResult.data || []) as SeasonRating[]);
   if (!profilesResult.error) entriesStore.setProfiles(profilesById((profilesResult.data || []) as Profile[]));
 
-  if (!userId) return;
+  if (!userId) {
+    listsStore.setWatchlist([]);
+    listsStore.setBlockedMovies([]);
+    const coupleStore = useCoupleStore();
+    coupleStore.setActiveCouple(null);
+    coupleStore.setPendingCouples([]);
+    coupleStore.setPartnerProfileId(null);
+    coupleStore.setQueue([]);
+    coupleStore.setRecommendations([]);
+    coupleStore.setRecommendationState('idle');
+    return;
+  }
 
   const [watchlistResult, blockedResult] = await Promise.all([
     loadWatchlist(userId),

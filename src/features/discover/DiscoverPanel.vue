@@ -45,6 +45,7 @@ const nowTick = ref(Date.now());
 let loadSeq = 0;
 
 const currentUserId = computed(() => getCurrentUserId(session.currentUser));
+const authenticated = computed(() => session.isAuthenticated);
 const ratedCount = computed(() => entries.entries.filter(entry => entry.user_id === currentUserId.value && mediaType(entry) === 'movie').length);
 const ratedTmdbIds = computed(() => new Set(entries.entries
   .filter(entry => entry.user_id === currentUserId.value && entry.tmdb_id)
@@ -166,7 +167,11 @@ async function loadActiveTab(): Promise<void> {
   try {
     let result: unknown;
     if (activeTab.value === 'recommend') {
-      result = await loadRecommendationsDirect();
+      if (!currentUserId.value) {
+        result = null;
+      } else {
+        result = await loadRecommendationsDirect();
+      }
     } else if (activeTab.value === 'week' || activeTab.value === 'toprated') {
       const endpoint = activeTab.value === 'week' ? 'trending' : 'toprated';
       const response = await fetch(`${TMDB_PROXY}/${endpoint}`);
@@ -242,7 +247,10 @@ async function openDetail(movie: TmdbMedia): Promise<void> {
 }
 
 watch(currentUserId, userId => {
-  if (userId) void loadActiveTab();
+  if (!userId && activeTab.value === 'recommend') {
+    activeTab.value = 'week';
+  }
+  void loadActiveTab();
 });
 
 watch(() => entries.entries.length, () => {
@@ -252,6 +260,7 @@ watch(() => entries.entries.length, () => {
 useIntervalFn(() => { nowTick.value = Date.now(); }, 1000);
 
 onMounted(() => {
+  if (!currentUserId.value && activeTab.value === 'recommend') activeTab.value = 'week';
   void loadActiveTab();
 });
 </script>
@@ -297,8 +306,8 @@ onMounted(() => {
     <EmptyState
       v-else-if="movies === null"
       icon="🎬"
-      :title="`评价 25 部以上电影后`"
-      :detail="`Ceci 会为你生成个性化推荐 · 当前已评价 ${ratedCount} 部`"
+      :title="authenticated ? `评价 25 部以上电影后` : '登录后开启个性化推荐'"
+      :detail="authenticated ? `Ceci 会为你生成个性化推荐 · 当前已评价 ${ratedCount} 部` : '本周热门和 IMDb Top100 可直接浏览'"
     />
     <EmptyState v-else-if="!pageMovies.length" :title="activeTab === 'toprated' && topRatedUnwatched ? '全部已看过' : '暂无推荐，试试热门标签吧'" />
 

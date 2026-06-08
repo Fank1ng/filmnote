@@ -1,15 +1,18 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 import { storeToRefs } from 'pinia';
 import { useListControlsStore } from '../../stores/list-controls.js';
 import { useListsStore } from '../../stores/lists.js';
+import { useSessionStore } from '../../stores/session.js';
 import type { MediaType } from '../../types/domain.js';
 
 defineOptions({ name: 'ListControls' });
 
 const controls = useListControlsStore();
 const lists = useListsStore();
+const session = useSessionStore();
 const { mode, type, owner, search, sort, score } = storeToRefs(controls);
+const authenticated = computed(() => session.isAuthenticated);
 const watchlistCount = computed(() => lists.watchlist.length);
 
 function setMode(nextMode: 'entries' | 'watchlist'): void {
@@ -19,13 +22,20 @@ function setMode(nextMode: 'entries' | 'watchlist'): void {
 function setType(nextType: MediaType): void {
   controls.setType(nextType);
 }
+
+watch(authenticated, isAuthenticated => {
+  if (!isAuthenticated) {
+    if (mode.value === 'watchlist') controls.setMode('entries');
+    if (owner.value === 'me') controls.setOwner('all');
+  }
+}, { immediate: true });
 </script>
 
 <template>
   <section class="vue-list-controls">
     <div class="section-title-switch" aria-label="影单视图">
-      <button type="button" :class="{ active: mode === 'entries' }" @click="setMode('entries')">我的影单</button>
-      <button type="button" :class="{ active: mode === 'watchlist' }" @click="setMode('watchlist')">
+      <button type="button" :class="{ active: mode === 'entries' }" @click="setMode('entries')">{{ authenticated ? '我的影单' : '公开影单' }}</button>
+      <button v-if="authenticated" type="button" :class="{ active: mode === 'watchlist' }" @click="setMode('watchlist')">
         想看清单 <span>{{ watchlistCount }}</span>
       </button>
     </div>
@@ -53,7 +63,7 @@ function setType(nextType: MediaType): void {
       </select>
       <select v-model="owner" @change="controls.setOwner(owner)">
         <option value="all">所有人</option>
-        <option value="me">仅自己</option>
+        <option v-if="authenticated" value="me">仅自己</option>
       </select>
       <select v-model="score" @change="controls.setScore(score)">
         <option value="all">全部分数</option>

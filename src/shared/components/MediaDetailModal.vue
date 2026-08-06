@@ -171,7 +171,7 @@ watch(() => modals.mediaDetailRequest?.seq, () => {
       </div>
 
       <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px">
-        <img v-if="poster" :src="posterUrl(poster)" style="width:96px;border-radius:8px" alt="">
+        <img v-if="poster" :src="posterUrl(poster)" :style="{ width: '96px', borderRadius: '8px', viewTransitionName: `detail-poster-${mediaType}-${tmdbId}` }" :alt="title">
         <div v-else class="qr-poster-empty" style="width:96px;height:140px">No poster</div>
         <div>
           <p style="color:var(--text2);font-size:0.82rem">{{ mediaType === 'series' ? '剧集' : '电影' }} · TMDB #{{ tmdbId }}</p>

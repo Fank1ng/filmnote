@@ -350,8 +350,14 @@ function rowActionEntry(group: EntryGroup): Entry | null {
     || null;
 }
 
-function showDetail(entry: Entry): void {
-  mediaActions.openEntryDetail(entry.id);
+function showDetail(entry: Entry, source?: HTMLElement): void {
+  const open = () => mediaActions.openEntryDetail(entry.id);
+  const poster = source?.querySelector<HTMLElement>('.mc-poster');
+  if (poster && document.startViewTransition) {
+    poster.style.viewTransitionName = `entry-poster-${entry.id}`;
+    const transition = document.startViewTransition(open);
+    transition.finished.catch(() => undefined).finally(() => { poster.style.viewTransitionName = ''; });
+  } else open();
 }
 
 function editEntry(entry: Entry): void {
@@ -415,18 +421,19 @@ watch([pageGroups, () => ui.highlightEntryId], async () => {
 <template>
   <section v-if="mode === 'entries'" class="vue-list-body">
     <div v-if="!filteredGroups.length" class="empty-state">
-      <p style="font-size:2rem">🎬</p>
       <p>还没有评价记录</p>
     </div>
 
     <template v-else>
+      <TransitionGroup name="library-grid" tag="div" class="library-list">
       <article
-        v-for="group in pageGroups"
+        v-for="(group, groupIndex) in pageGroups"
         :id="`entry-${mainEntry(group).id}`"
         :key="groupKey(mainEntry(group))"
         class="movie-card"
+        :style="{ '--card-delay': `${Math.min(groupIndex, 5) * 30}ms` }"
         :aria-label="mainEntry(group).title"
-        @click="showDetail(mainEntry(group))"
+        @click="showDetail(mainEntry(group), $event.currentTarget as HTMLElement)"
       >
         <img v-if="mainEntry(group).poster_path" class="mc-poster" :src="posterUrl(mainEntry(group).poster_path)" alt="">
         <div v-else class="mc-poster"></div>
@@ -500,6 +507,7 @@ watch([pageGroups, () => ui.highlightEntryId], async () => {
           <button v-else class="btn btn-sm btn-secondary" type="button" @click="addMyRating(rowActionEntry(group)!)">+ 我的评分</button>
         </div>
       </article>
+      </TransitionGroup>
 
       <PaginationControls :page="page" :total-pages="totalPages" kind="list" @change="changePage" />
     </template>

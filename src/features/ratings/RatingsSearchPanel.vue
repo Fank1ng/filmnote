@@ -106,11 +106,19 @@ async function runSearch(value: string): Promise<void> {
   }
 }
 
-async function selectResult(movie: NormalizedSearchMedia): Promise<void> {
-  selected.value = movie;
-  results.value = [];
-  query.value = '';
-  expanded.value = false;
+async function selectResult(movie: NormalizedSearchMedia, source?: HTMLElement): Promise<void> {
+  const update = () => {
+    selected.value = movie;
+    results.value = [];
+    query.value = '';
+    expanded.value = false;
+  };
+  const sourcePoster = source?.querySelector<HTMLElement>('.sr-poster');
+  if (sourcePoster && document.startViewTransition) {
+    sourcePoster.style.viewTransitionName = `selected-poster-${movie.tmdb_id}`;
+    const transition = document.startViewTransition(update);
+    transition.finished.catch(() => undefined).finally(() => { sourcePoster.style.viewTransitionName = ''; });
+  } else update();
   const seq = ++detailSeq;
   detailLoading.value = true;
   try {
@@ -163,7 +171,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="search-wrap vue-search-wrap">
-      <input v-model="query" type="text" :placeholder="placeholder">
+      <input v-model="query" type="text" :placeholder="placeholder" aria-label="搜索电影或剧集">
       <div v-if="query && (results.length || loading || errorMessage)" class="search-results open">
         <div v-if="loading" class="search-message">搜索中...</div>
         <div v-else-if="errorMessage" class="search-message">{{ errorMessage }}</div>
@@ -173,7 +181,7 @@ onBeforeUnmount(() => {
           :key="`${movie.media_type}:${movie.tmdb_id}`"
           type="button"
           class="sr-item vue-sr-item"
-          @click="selectResult(movie)"
+          @click="selectResult(movie, $event.currentTarget as HTMLElement)"
         >
           <img v-if="movie.poster_path" class="sr-poster" :src="posterUrl(movie.poster_path)" alt="">
           <div v-else class="sr-poster"></div>
@@ -188,7 +196,7 @@ onBeforeUnmount(() => {
     <div class="selected-search-preview">
       <div v-if="!selected" class="selected-search-empty">搜索并选择一部电影或剧集后确认信息</div>
       <div v-else class="selected-search-card">
-        <div class="selected-poster">
+        <div class="selected-poster" :style="{ viewTransitionName: `selected-poster-${selected.tmdb_id}` }">
           <img v-if="selected.poster_path" :src="posterUrl(selected.poster_path)" :alt="selected.title">
           <span v-else>{{ selected.media_type === 'series' ? '剧集' : '电影' }}</span>
         </div>

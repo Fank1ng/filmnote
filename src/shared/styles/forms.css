@@ -19,14 +19,14 @@
   .dim-slider { flex: 1; display: flex; align-items: center; gap: 10px; }
   .dim-slider input[type="range"] {
     flex: 1; -webkit-appearance: none; appearance: none;
-    height: 6px; background: var(--border); border-radius: 3px; outline: none;
+    height:6px; background:linear-gradient(90deg,var(--gold) var(--fill,44%),var(--border) var(--fill,44%)); border-radius:3px; outline:none;
   }
 	  .dim-slider input[type="range"]::-webkit-slider-thumb {
 	    -webkit-appearance: none; appearance: none;
 	    width: 20px; height: 20px; border-radius: 50%;
 	    background: var(--gold); cursor: pointer; border: 2px solid var(--bg);
 	  }
-	  .dim-score { width: 32px; text-align: center; font-weight: 700; font-size: 1rem; color: var(--gold); }
+	  .dim-score { width:32px; text-align:center; font-weight:700; font-size:1rem; color:var(--gold); animation:score-pop var(--fast) var(--ease); font-variant-numeric:tabular-nums; }
 	  .dim-readonly { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; margin-bottom: 20px; }
 	  .dim-readonly-item {
 	    display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -41,7 +41,8 @@
     display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px;
   }
   .total-label { font-size: 0.9rem; color: var(--gold); }
-  .total-value { font-size: 2rem; font-weight: 800; color: var(--gold); }
+  .total-value { font-size:2rem; font-weight:800; color:var(--gold); animation:score-pop var(--fast) var(--ease); font-variant-numeric:tabular-nums; }
+  @keyframes score-pop { 50% { transform:scale(1.18); filter:brightness(1.4); } }
 
   /* ── Buttons ── */
   .btn {

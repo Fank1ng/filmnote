@@ -33,13 +33,6 @@ watch(authenticated, isAuthenticated => {
 
 <template>
   <section class="vue-list-controls">
-    <div class="section-title-switch" aria-label="影单视图">
-      <button type="button" :class="{ active: mode === 'entries' }" @click="setMode('entries')">{{ authenticated ? '我的影单' : '公开影单' }}</button>
-      <button v-if="authenticated" type="button" :class="{ active: mode === 'watchlist' }" @click="setMode('watchlist')">
-        想看清单 <span>{{ watchlistCount }}</span>
-      </button>
-    </div>
-
     <div v-if="mode === 'entries'" class="list-subtabs">
       <button type="button" :class="{ active: type === 'movie' }" @click="setType('movie')">电影</button>
       <button type="button" :class="{ active: type === 'series' }" @click="setType('series')">剧集</button>

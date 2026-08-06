@@ -87,6 +87,7 @@ const pageMovies = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value;
   return filteredMovies.value.slice(start, start + pageSize.value);
 });
+const heroMovie = computed(() => pageMovies.value[0] || null);
 function mediaType(movie: { media_type?: unknown; type?: unknown }): MediaType {
   return normalizeMediaType(movie.media_type || movie.type || 'movie');
 }
@@ -241,9 +242,15 @@ async function block(movie: TmdbMedia): Promise<void> {
   if (ok) movies.value = (movies.value || []).filter(item => tmdbId(item) !== tmdbId(movie));
 }
 
-async function openDetail(movie: TmdbMedia): Promise<void> {
+async function openDetail(movie: TmdbMedia, source?: HTMLElement): Promise<void> {
   if (!tmdbId(movie)) return;
-  mediaActions.openMediaDetail({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) });
+  const open = () => mediaActions.openMediaDetail({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie) });
+  const poster = source?.querySelector<HTMLElement>('img') || (source?.matches('img') ? source : null);
+  if (poster && document.startViewTransition) {
+    poster.style.viewTransitionName = `detail-poster-${mediaType(movie)}-${tmdbId(movie)}`;
+    const transition = document.startViewTransition(open);
+    transition.finished.catch(() => undefined).finally(() => { poster.style.viewTransitionName = ''; });
+  } else open();
 }
 
 watch(currentUserId, userId => {
@@ -305,13 +312,33 @@ onMounted(() => {
     <EmptyState v-else-if="errorMessage" title="加载失败，请稍后重试" :detail="errorMessage" />
     <EmptyState
       v-else-if="movies === null"
-      icon="🎬"
       :title="authenticated ? `评价 25 部以上电影后` : '登录后开启个性化推荐'"
       :detail="authenticated ? `Ceci 会为你生成个性化推荐 · 当前已评价 ${ratedCount} 部` : '本周热门和 IMDb Top100 可直接浏览'"
     />
     <EmptyState v-else-if="!pageMovies.length" :title="activeTab === 'toprated' && topRatedUnwatched ? '全部已看过' : '暂无推荐，试试热门标签吧'" />
 
     <template v-else>
+      <article v-if="heroMovie" class="discover-hero" :style="{ '--hero-poster': `url(${posterUrl(heroMovie.poster_path)})` }">
+        <div class="discover-hero-copy">
+          <p class="eyebrow">{{ activeTab === 'recommend' ? 'CURATED FOR YOU' : activeTab === 'week' ? 'NOW SHOWING' : 'THE CANON' }}</p>
+          <h1>{{ titleOf(heroMovie) }}</h1>
+          <div class="discover-hero-meta">
+            <span>{{ yearOf(heroMovie) || '年份未知' }}</span><span v-for="genre in genresOf(heroMovie)" :key="genre">{{ genre }}</span>
+            <span v-if="heroMovie.vote_average">TMDB {{ Number(heroMovie.vote_average).toFixed(1) }}</span>
+          </div>
+          <p>{{ heroMovie.overview || heroMovie.reasons?.join(' · ') || '从今晚的放映单里选一部，进入详情继续探索。' }}</p>
+          <div class="discover-hero-actions">
+            <button class="btn btn-primary" type="button" @click="openDetail(heroMovie)">查看影片</button>
+            <button class="btn btn-secondary" type="button" @click="rateMovie(heroMovie)">记录评分</button>
+          </div>
+        </div>
+        <button class="discover-hero-poster" type="button" :aria-label="`查看 ${titleOf(heroMovie)} 详情`" @click="openDetail(heroMovie, $event.currentTarget as HTMLElement)">
+          <img v-if="posterUrl(heroMovie.poster_path)" :src="posterUrl(heroMovie.poster_path)" :alt="titleOf(heroMovie)">
+          <span v-else>暂无海报</span>
+        </button>
+      </article>
+
+      <div class="discover-section-heading"><p class="eyebrow">FILMS ON THE SHELF</p><h2>{{ tabLabel(activeTab) }}</h2></div>
       <div class="discover-grid">
         <article
           v-for="movie in pageMovies"
@@ -319,12 +346,12 @@ onMounted(() => {
           class="discover-card"
           :data-tmdb-id="tmdbId(movie)"
           :data-media-type="mediaType(movie)"
-          @click="openDetail(movie)"
+          @click="openDetail(movie, $event.currentTarget as HTMLElement)"
         >
           <div class="dc-poster-wrap">
             <img v-if="posterUrl(movie.poster_path)" :src="posterUrl(movie.poster_path)" :alt="titleOf(movie)" loading="lazy">
-            <div v-else class="dc-no-poster">🎬</div>
-            <span v-if="movie.vote_average" class="dc-tmdb-score">⭐ {{ Number(movie.vote_average).toFixed(1) }}</span>
+            <div v-else class="dc-no-poster">暂无海报</div>
+            <span v-if="movie.vote_average" class="dc-tmdb-score">TMDB {{ Number(movie.vote_average).toFixed(1) }}</span>
           </div>
           <div class="dc-info">
             <div class="dc-title">{{ titleOf(movie) }}</div>
@@ -358,7 +385,7 @@ onMounted(() => {
                 >
                   ▶
                 </button>
-                <button v-if="activeTab === 'recommend'" class="btn btn-xs dc-block-btn" type="button" title="不再推荐" @click.stop="block(movie)">🚫</button>
+                <button v-if="activeTab === 'recommend'" class="btn btn-xs dc-block-btn" type="button" title="不再推荐" aria-label="不再推荐" @click.stop="block(movie)">隐藏</button>
               </div>
             </div>
           </div>

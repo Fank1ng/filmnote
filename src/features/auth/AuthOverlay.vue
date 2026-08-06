@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { getSupabaseClient } from '../../api/supabase.js';
 import { applyAuthenticatedUser } from '../../app/session.js';
 import { appRedirectUrl } from '../../shared/browser.js';
@@ -39,7 +39,9 @@ const resetEmail = ref('');
 const newPassword = ref('');
 const errorMessage = ref('');
 const busy = ref(false);
+const authBox = ref<HTMLElement | null>(null);
 let removeAuthListener: { subscription?: { unsubscribe?: () => void } } | null = null;
+let returnFocus: HTMLElement | null = null;
 
 const visible = computed(() => (!session.isAuthenticated && ui.authModalOpen) || mode.value === 'newPassword');
 const subtitle = computed(() => {
@@ -239,16 +241,27 @@ watch(() => session.isAuthenticated, isAuthenticated => {
   if (isAuthenticated) ui.closeAuthModal();
 });
 
+watch(visible, async open => {
+  if (open) {
+    returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    await nextTick();
+    authBox.value?.querySelector<HTMLElement>('input,button')?.focus({ preventScroll: true });
+  } else {
+    returnFocus?.focus({ preventScroll: true });
+    returnFocus = null;
+  }
+});
+
 onBeforeUnmount(() => {
   removeAuthListener?.subscription?.unsubscribe?.();
 });
 </script>
 
 <template>
-  <div v-if="visible" class="auth-overlay-vue" @click.self="close">
-    <div class="auth-box">
+  <div v-if="visible" class="auth-overlay-vue" @click.self="close" @keydown.esc="close">
+    <div ref="authBox" class="auth-box" role="dialog" aria-modal="true" aria-labelledby="auth-title">
       <button v-if="mode !== 'newPassword'" class="auth-close" type="button" aria-label="关闭登录窗口" @click="close">×</button>
-      <h1><span class="fd">FD</span>&amp;<span class="ce">Ceci</span></h1>
+      <h1 id="auth-title"><span class="fd">FD</span>&amp;<span class="ce">Ceci</span></h1>
       <p class="subtitle">{{ subtitle }}</p>
       <div class="auth-error">{{ errorMessage }}</div>
 

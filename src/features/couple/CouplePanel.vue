@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import {
   removeCoupleQueueItem,
   updateCoupleQueueItem,
@@ -20,6 +20,7 @@ import type { CoupleQueueItem, Entry, MediaType, TmdbMedia } from '../../types/d
 defineOptions({ name: 'CouplePanel' });
 
 type CoupleTab = 'archive' | 'recommend' | 'queue';
+const props = withDefaults(defineProps<{ activeTab?: CoupleTab }>(), { activeTab: 'archive' });
 type CoupleControls = {
   tab?: CoupleTab;
   queueAvailable?: boolean;
@@ -77,11 +78,15 @@ const {
   userColor,
 } = useCoupleBinding();
 
-const tab = ref<CoupleTab>('archive');
+const tab = ref<CoupleTab>(props.activeTab);
 const queueAvailable = ref(true);
 const couplesAvailable = ref(true);
 const chartMode = ref<'score' | 'type'>('score');
 const wheelPickId = ref<string | number | null>(null);
+const wheelSpinning = ref(false);
+const ratingsRevealed = ref(false);
+const stackOpen = ref(false);
+const movingQueueId = ref<string | number | null>(null);
 const detailCache = ref<Record<string, CacheDetail>>({});
 
 const watchlistIds = computed(() => lists.watchlistIds);
@@ -240,6 +245,8 @@ function setTab(nextTab: CoupleTab): void {
   if (nextTab === 'recommend' && couple.recommendationState === 'idle') void loadRecommendations(false);
 }
 
+watch(() => props.activeTab, nextTab => setTab(nextTab), { immediate: true });
+
 function setChartMode(nextMode: 'score' | 'type'): void {
   chartMode.value = nextMode;
 }
@@ -293,6 +300,7 @@ async function moveQueue(item: CoupleQueueItem, direction: number): Promise<void
   const index = couple.queue.findIndex(row => String(row.id) === String(item.id));
   const nextIndex = index + direction;
   if (index < 0 || nextIndex < 0 || nextIndex >= couple.queue.length) return;
+  movingQueueId.value = item.id;
   const next = [...couple.queue];
   [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
   const normalized = next.map((row, rowIndex) => ({ ...row, position: rowIndex + 1 }));
@@ -306,6 +314,8 @@ async function moveQueue(item: CoupleQueueItem, direction: number): Promise<void
   } catch (error) {
     ui.showToast(`调整顺序失败: ${error instanceof Error ? error.message : String(error)}`);
     await refreshVueData();
+  } finally {
+    window.setTimeout(() => { movingQueueId.value = null; }, ui.motionReduced ? 0 : 260);
   }
 }
 
@@ -473,18 +483,23 @@ function scoreQueueItem(item: CoupleQueueItem): number {
 }
 
 function spinWheel(): void {
-  if (!couple.queue.length) return;
+  if (!couple.queue.length || wheelSpinning.value) return;
+  wheelSpinning.value = true;
   const weighted = couple.queue.map(item => ({ item, weight: scoreQueueItem(item) }));
   const total = weighted.reduce((sum, item) => sum + item.weight, 0);
   let needle = Math.random() * total;
+  let picked = weighted[0]?.item.id || null;
   for (const item of weighted) {
     needle -= item.weight;
     if (needle <= 0) {
-      wheelPickId.value = item.item.id;
-      return;
+      picked = item.item.id;
+      break;
     }
   }
-  wheelPickId.value = weighted[0]?.item.id || null;
+  window.setTimeout(() => {
+    wheelPickId.value = picked;
+    wheelSpinning.value = false;
+  }, ui.motionReduced ? 20 : 1000);
 }
 
 function ratingState(item: CoupleQueueItem): string {
@@ -505,15 +520,6 @@ onMounted(() => {
 
 <template>
   <section class="vue-couple-panel">
-    <div class="couple-sticky-controls">
-      <h2 class="section-title couple-title">Couple</h2>
-      <div v-if="activeCouple" class="discover-subtabs couple-subtabs">
-        <button type="button" :class="{ active: tab === 'archive' }" @click="setTab('archive')">档案</button>
-        <button type="button" :class="{ active: tab === 'recommend' }" @click="setTab('recommend')">双人推荐</button>
-        <button type="button" :class="{ active: tab === 'queue' }" @click="setTab('queue')">下次看</button>
-      </div>
-    </div>
-
     <EmptyState v-if="!couplesAvailable" title="Couple 表尚未创建，请先执行升级 SQL" />
 
     <div v-else-if="!activeCouple" class="couple-empty">
@@ -528,9 +534,16 @@ onMounted(() => {
       </div>
 
       <div v-if="tab === 'archive'" class="couple-archive">
+        <section class="couple-reveal" :class="{ revealed: ratingsRevealed }">
+          <div class="reveal-curtain left"></div><div class="reveal-curtain right"></div>
+          <div class="reveal-mark fd"><span>FD</span><strong>{{ archiveData.harmony?.mineScore.toFixed(1) || '—' }}</strong></div>
+          <button type="button" @click="ratingsRevealed = !ratingsRevealed">{{ ratingsRevealed ? '再次合幕' : '同时揭晓' }}</button>
+          <div class="reveal-mark ceci"><span>{{ partnerName }}</span><strong>{{ archiveData.harmony?.partnerScore.toFixed(1) || '—' }}</strong></div>
+          <p>{{ archiveData.harmony ? `共同高分差 ${archiveData.harmony.diff.toFixed(1)}` : '共同评分后生成揭晓' }}</p>
+        </section>
         <div class="couple-archive-top">
           <div class="couple-archive-card">
-            <div class="couple-poster-stack" :class="{ 'couple-poster-stack-empty': !posterStack(archiveData.pairs.map(pair => pair.mine)).length }">
+            <div class="couple-poster-stack interactive-stack" :class="{ 'couple-poster-stack-empty': !posterStack(archiveData.pairs.map(pair => pair.mine)).length, open: stackOpen }" role="button" tabindex="0" aria-label="展开共同观影海报" @click="stackOpen = !stackOpen" @keydown.enter="stackOpen = !stackOpen">
               <img v-for="poster in posterStack(archiveData.pairs.map(pair => pair.mine))" :key="poster" :src="poster" alt="">
             </div>
             <div class="couple-archive-card-body">
@@ -640,7 +653,7 @@ onMounted(() => {
               <div class="couple-section-title">下次看：转盘抽一部</div>
               <p class="couple-note">从队列按默契权重随机</p>
               <div class="couple-wheel-row">
-                <button class="couple-wheel" type="button" aria-label="抽一部" @click="spinWheel">
+                <button class="couple-wheel" :class="{ spinning: wheelSpinning }" type="button" aria-label="抽一部" :disabled="wheelSpinning" @click="spinWheel">
                   <span v-for="(label, index) in wheelLabels" :key="label" :style="{ '--i': index }">{{ label }}</span>
                   <b>抽</b>
                 </button>
@@ -649,7 +662,7 @@ onMounted(() => {
                   <span>安全选择</span><strong>{{ topTypeLabel }}</strong>
                 </div>
               </div>
-              <div v-if="wheelPick" class="couple-wheel-result" :data-queue-id="wheelPick.id" @click="openQueue(wheelPick)">
+              <div v-if="wheelPick" class="couple-wheel-result chosen" :data-queue-id="wheelPick.id" @click="openQueue(wheelPick)">
                 <img v-if="posterUrl(wheelPick.poster_path)" :src="posterUrl(wheelPick.poster_path)" alt="">
                 <div v-else></div>
                 <strong>{{ wheelPick.title }}</strong>
@@ -699,8 +712,8 @@ onMounted(() => {
           >
             <div class="dc-poster-wrap">
               <img v-if="posterUrl(movie.poster_path)" :src="posterUrl(movie.poster_path)" :alt="movieTitle(movie)" loading="lazy">
-              <div v-else class="dc-no-poster">🎬</div>
-              <span v-if="movie.vote_average" class="dc-tmdb-score">⭐ {{ Number(movie.vote_average).toFixed(1) }}</span>
+              <div v-else class="dc-no-poster">暂无海报</div>
+              <span v-if="movie.vote_average" class="dc-tmdb-score">TMDB {{ Number(movie.vote_average).toFixed(1) }}</span>
             </div>
             <div class="dc-info">
               <div class="dc-title">{{ movieTitle(movie) }}</div>
@@ -738,11 +751,12 @@ onMounted(() => {
       <div v-else class="couple-section">
         <div class="couple-section-title">下次看</div>
         <EmptyState v-if="!queueAvailable" title="下次看表尚未创建，请先执行升级 SQL" />
-        <div v-else-if="couple.queue.length" class="queue-list">
+        <TransitionGroup v-else-if="couple.queue.length" name="queue-shift" tag="div" class="queue-list">
           <div
             v-for="(item, index) in couple.queue"
             :key="item.id"
             class="queue-row"
+            :class="{ lifting: String(movingQueueId) === String(item.id) }"
             :data-queue-id="item.id"
             :data-media-type="item.media_type"
             @click="openQueue(item)"
@@ -762,7 +776,7 @@ onMounted(() => {
               <button class="btn btn-xs btn-danger" type="button" @click.stop="removeQueue(item)">移除</button>
             </div>
           </div>
-        </div>
+        </TransitionGroup>
         <EmptyState v-else title="还没有下次看的电影/剧集" detail="可从发现页或搜索结果加入。" />
       </div>
     </template>

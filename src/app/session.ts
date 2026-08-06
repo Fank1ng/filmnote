@@ -255,6 +255,6 @@ export async function logoutCurrentUser(signOut = true): Promise<void> {
   browserSessionStorage.remove(SESSION_KEY);
   useSessionStore().clearSession();
   clearDataStores();
-  useUiStore().setActiveTab('rate');
+  useUiStore().navigate('discover', true);
   await refreshVueData();
 }

@@ -227,7 +227,7 @@ watch(() => modals.entryDetailRequest?.seq, () => {
       </div>
 
       <div style="display:flex;gap:16px;align-items:flex-start;margin-bottom:16px">
-        <img v-if="entry.poster_path" :src="posterUrl(entry.poster_path)" style="width:80px;border-radius:8px" alt="">
+        <img v-if="entry.poster_path" :src="posterUrl(entry.poster_path)" :style="{ width: '80px', borderRadius: '8px', viewTransitionName: `entry-poster-${entry.id}` }" :alt="entry.title">
         <div>
           <p v-if="entry.director" style="color:var(--text2);font-size:0.85rem">{{ entry.director }}</p>
           <p style="color:var(--text2);font-size:0.8rem">{{ ownerName }} · {{ formatDate(entry.created_at) }} <span v-if="isSeries">· 剧集</span></p>

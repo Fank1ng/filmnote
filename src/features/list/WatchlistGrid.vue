@@ -65,7 +65,7 @@ function changePage(nextPage: number): void {
     </div>
 
     <template v-else>
-      <div class="discover-grid">
+      <TransitionGroup name="library-grid" tag="div" class="discover-grid">
         <article
           v-for="item in pageItems"
           :key="`${item.media_type}:${item.tmdb_id}`"
@@ -89,7 +89,7 @@ function changePage(nextPage: number): void {
             </div>
           </div>
         </article>
-      </div>
+      </TransitionGroup>
 
       <PaginationControls :page="watchlistPage" :total-pages="totalPages" kind="watchlist" @change="changePage" />
     </template>

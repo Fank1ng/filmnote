@@ -1,25 +1,38 @@
 /* ── Discover ── */
-  .discover-sticky-controls {
-    position: sticky; top: var(--page-sticky-top); z-index: 30;
-    background: var(--bg); padding-bottom: 12px; margin-bottom: 16px;
-  }
-  .discover-title { margin-bottom: 20px; }
+  .discover-sticky-controls { display:flex; align-items:center; gap:18px; flex-wrap:wrap; margin-bottom:22px; }
+  .discover-title { margin:0 auto 0 0; font-size:.86rem; letter-spacing:.16em; text-transform:uppercase; }
   .discover-subtabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
   .discover-subtabs button {
     background: none; border: 1px solid var(--border); color: var(--text2);
-    padding: 6px 16px; cursor: pointer; font-size: 0.85rem; border-radius: 20px; transition: var(--t);
+    min-height:44px; padding:6px 16px; cursor:pointer; font-size:.85rem; border-radius:20px; transition:var(--t);
   }
   .discover-subtabs button:hover { border-color: var(--gold); color: var(--text); }
   .discover-subtabs button.active { color: var(--gold); background: var(--gold-dim); border-color: var(--gold); }
   .discover-subtabs button.active.ceci-tab { color: var(--ceci); background: var(--ceci-dim); border-color: var(--ceci); }
   .discover-subtabs button.active.fd-tab { color: var(--gold); background: var(--gold-dim); border-color: var(--gold); }
-  .discover-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+  .discover-hero { --hero-poster:none; position:relative; isolation:isolate; display:grid; grid-template-columns:minmax(0,1.1fr) minmax(260px,.55fr); align-items:center; min-height:500px; overflow:hidden; margin:0 calc(50% - 50vw) 34px; padding:clamp(36px,7vw,90px) max(24px,calc((100vw - 1180px)/2)); border-block:1px solid rgba(255,255,255,.08); background:#08090e; }
+  .discover-hero::before { content:""; position:absolute; z-index:-2; inset:-8%; opacity:.5; background-image:var(--hero-poster); background-position:center 28%; background-size:cover; filter:blur(28px) saturate(.75); transform:scale(1.08); animation:hero-cross var(--immersive) var(--ease); }
+  .discover-hero::after { content:""; position:absolute; z-index:-1; inset:0; background:linear-gradient(90deg,#05060a 2%,rgba(5,6,10,.93) 38%,rgba(5,6,10,.36) 75%,#05060a),linear-gradient(0deg,#05060a,transparent 55%); }
+  .discover-hero-copy { max-width:670px; }
+  .discover-hero h1 { max-width:11ch; margin:14px 0 16px; font:500 clamp(3rem,7vw,6.4rem)/.94 Georgia,"Songti SC",serif; letter-spacing:-.055em; }
+  .discover-hero-copy > p:not(.eyebrow) { max-width:58ch; margin:18px 0 22px; color:#d6d3ce; line-height:1.75; }
+  .discover-hero-meta,.discover-hero-actions { display:flex; flex-wrap:wrap; gap:10px; }
+  .discover-hero-meta { color:var(--text2); font-size:.84rem; }
+  .discover-hero-poster { justify-self:center; width:min(240px,80%); aspect-ratio:2/3; min-height:0; overflow:hidden; padding:0; border:1px solid rgba(255,255,255,.18); border-radius:16px; background:var(--surface); color:var(--text2); box-shadow:0 32px 80px rgba(0,0,0,.55); cursor:pointer; transform:perspective(900px) rotateY(-5deg); transition:transform var(--immersive) var(--ease),filter var(--immersive) var(--ease); }
+  .discover-hero-poster:hover,.discover-hero-poster:focus-visible { transform:perspective(900px) rotateY(0) translateY(-8px) scale(1.015); filter:brightness(1.08); }
+  .discover-hero-poster img { width:100%; height:100%; object-fit:cover; }
+  .discover-section-heading { margin:0 0 16px; }
+  .discover-section-heading h2 { margin-top:4px; font:500 clamp(1.5rem,3vw,2.2rem) Georgia,"Songti SC",serif; }
+  @keyframes hero-cross { from { opacity:0; transform:scale(1.14); } }
+  .discover-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:20px; }
   .discover-card {
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); overflow: hidden; transition: var(--t);
-    display: flex; flex-direction: column;
+    border-radius:var(--radius); overflow:hidden; transition:transform var(--immersive) var(--ease),filter var(--immersive),border-color var(--fast);
+    display:flex; flex-direction:column; animation:card-land var(--page) var(--ease) both;
   }
-  .discover-card:hover { border-color: var(--gold); transform: translateY(-2px); }
+  .discover-card:nth-child(2){animation-delay:30ms}.discover-card:nth-child(3){animation-delay:60ms}.discover-card:nth-child(4){animation-delay:90ms}.discover-card:nth-child(5){animation-delay:120ms}.discover-card:nth-child(6){animation-delay:150ms}
+  .discover-card:hover { border-color:var(--gold); transform:translateY(-7px) scale(1.01); filter:brightness(1.08); }
+  @keyframes card-land { from { opacity:0; transform:translateY(18px); } }
   .dc-poster-wrap { position: relative; width: 100%; padding-top: 150%; overflow: hidden; background: var(--border); }
   .dc-poster-wrap img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
   .dc-no-poster { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; font-size: 2rem; color: var(--text2); }
@@ -97,6 +110,11 @@
   .discover-topbar .topbar-count { font-size: 0.8rem; color: var(--text2); }
 
   @media (max-width: 640px) {
+    .discover-sticky-controls { align-items:flex-start; }
+    .discover-title { width:100%; }
+    .discover-hero { grid-template-columns:1fr; min-height:0; margin-bottom:28px; padding-top:42px; }
+    .discover-hero h1 { font-size:3.3rem; }
+    .discover-hero-poster { display:none; }
     .discover-grid { grid-template-columns: repeat(2, 1fr); }
     .dc-poster-wrap { padding-top: 120%; }
   }

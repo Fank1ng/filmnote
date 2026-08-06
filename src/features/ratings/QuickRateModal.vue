@@ -88,6 +88,7 @@ const dims = Object.keys(WEIGHTS) as RatingDim[];
 const open = ref(false);
 const busy = ref(false);
 const errorMessage = ref('');
+const saved = ref(false);
 const editEntryId = ref<Entry['id'] | null>(null);
 const mode = ref<Mode>('total');
 const media = ref<MediaLike | null>(null);
@@ -383,6 +384,7 @@ function openQuickRate(input: unknown): boolean {
     }
     void refreshSeasonDetail(normalized.fillSeasonPlaceholders === true);
   }
+  saved.value = false;
   open.value = true;
   return true;
 }
@@ -418,6 +420,7 @@ function openQuickEdit(id: Entry['id'], rawOpts?: unknown): boolean {
     const target = seasons.value.find(season => Number(season.season_number) === Number(opts.targetSeasonNumber));
     if (target) enableSeason(target);
   }
+  saved.value = false;
   open.value = true;
   if (normalizedType === 'series') void refreshSeasonDetail(true, opts.targetSeasonNumber);
   return true;
@@ -447,7 +450,7 @@ async function refreshAfterSave(entryId: Entry['id'] | null, wasNew: boolean, sa
   if (wasNew && entryId) {
     listControls.showEntry(savedMediaType);
     ui.setHighlightEntry(entryId);
-    ui.setActiveTab('list');
+    ui.navigate('library/ratings');
   }
 }
 
@@ -526,7 +529,9 @@ async function submit(): Promise<void> {
       if (error) throw error;
     }
 
+    saved.value = true;
     ui.showToast(isEdit.value ? '评价已更新！' : '评价已保存！');
+    if (!ui.motionReduced) await new Promise(resolve => window.setTimeout(resolve, 420));
     close();
     await refreshAfterSave(savedEntryId, !isEdit.value, mediaType.value);
   } catch (error) {
@@ -549,7 +554,8 @@ watch(() => modals.quickRateRequest?.seq, () => {
 
 <template>
   <BaseModal :open="open" max-width="640px" labelled-by="quick-rate-title" @close="close">
-    <div class="quick-rate-vue">
+    <div class="quick-rate-vue" :class="{ saved }">
+      <div class="rating-stamp" aria-hidden="true"><b>FD</b><span>&amp;</span><i>Ceci</i><small>已落印</small></div>
       <div class="quick-rate-head">
         <img v-if="media?.poster_path" :src="posterUrl(media.poster_path)" :alt="title">
         <div v-else class="qr-poster-empty">No poster</div>

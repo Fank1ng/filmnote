@@ -53,15 +53,16 @@ function updateDim(dim: RatingDim, value: string): void {
             aria-valuemin="1"
             aria-valuemax="10"
             :disabled="readonly"
+            :style="{ '--fill': `${((Number(modelValue[dim] || 5) - 1) / 9) * 100}%` }"
             @input="updateDim(dim, ($event.target as HTMLInputElement).value)"
           >
-          <span class="dim-score" :data-prefix="prefix" :data-dim="dim">{{ modelValue[dim] || 5 }}</span>
+          <span :key="`${dim}-${modelValue[dim] || 5}`" class="dim-score" :data-prefix="prefix" :data-dim="dim">{{ modelValue[dim] || 5 }}</span>
         </div>
       </div>
     </div>
     <div v-if="showTotal" class="total-preview">
       <span class="total-label">加权总分</span>
-      <span class="total-value">{{ total.toFixed(1) }}</span>
+      <span :key="total.toFixed(1)" class="total-value">{{ total.toFixed(1) }}</span>
     </div>
   </div>
 </template>

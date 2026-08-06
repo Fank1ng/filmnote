@@ -1,10 +1,11 @@
 /* ── Modal ── */
-  .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 100; align-items: center; justify-content: center; }
+  .modal-open { overflow:hidden; }
+  .modal-overlay { display:none; position:fixed; inset:0; padding:20px; background:rgba(0,0,0,.72); z-index:100; align-items:center; justify-content:center; backdrop-filter:blur(12px); }
   .modal-overlay.open { display: flex; }
   .modal {
-    background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--radius); padding: 28px; max-width: 600px; width: 92%;
-    max-height: 80vh; overflow-y: auto;
+    background:linear-gradient(145deg,var(--surface-raised),var(--surface)); border:1px solid var(--border);
+    border-radius:var(--radius-lg); padding:28px; max-width:600px; width:92%;
+    max-height:min(86dvh,820px); overflow-y:auto; box-shadow:var(--shadow); animation:modal-in var(--page) var(--ease);
   }
   .modal h3 { margin-bottom: 12px; color: var(--gold); }
   .modal input {
@@ -36,6 +37,16 @@
   .invite-row code { font-size: 1rem; color: var(--gold); font-weight: 700; letter-spacing: 1px; }
   .invite-row span { font-size: 0.7rem; color: var(--text2); margin-left: 8px; }
   .quick-rate-vue { display: flex; flex-direction: column; gap: 14px; }
+  .quick-rate-vue { position:relative; }
+  .quick-rate-vue::after { content:""; position:absolute; z-index:8; inset:-12px; border:1px solid transparent; border-radius:18px; pointer-events:none; }
+  .quick-rate-vue.saved::after { animation:panel-run-light var(--immersive) var(--ease); }
+  .rating-stamp { position:absolute; z-index:10; top:50%; left:50%; display:grid; grid-template-columns:auto auto auto; align-items:center; gap:4px; padding:14px 18px; border:2px solid var(--gold); border-radius:50%; color:var(--gold); background:rgba(5,6,10,.92); opacity:0; pointer-events:none; transform:translate(-50%,-50%) scale(1.5) rotate(-8deg); }
+  .rating-stamp b,.rating-stamp i { font:700 1rem Georgia,serif; }
+  .rating-stamp i { color:var(--ceci); font-style:normal; }
+  .rating-stamp small { grid-column:1/-1; text-align:center; font-size:.58rem; letter-spacing:.14em; }
+  .quick-rate-vue.saved .rating-stamp { animation:stamp-land var(--immersive) var(--ease) both; }
+  @keyframes panel-run-light { 0% { border-color:transparent; box-shadow:none } 45% { border-color:var(--gold); box-shadow:0 0 36px rgba(224,180,92,.3) } }
+  @keyframes stamp-land { 35% { opacity:0; transform:translate(-50%,-50%) scale(1.5) rotate(-8deg) } 100% { opacity:1; transform:translate(-50%,-50%) scale(1) rotate(-8deg) } }
   .quick-rate-head { display: flex; align-items: center; gap: 12px; }
   .quick-rate-head img, .qr-poster-empty {
     width: 46px; height: 68px; border-radius: 6px; object-fit: cover;
@@ -64,3 +75,9 @@
   .friend-rating .fr-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
   .friend-rating .fr-name { font-size: 0.8rem; color: var(--gold); }
   .friend-rating .fr-score { font-weight: 700; color: var(--gold); }
+  @keyframes modal-in { from { opacity:0; transform:scale(.96) translateY(12px); } }
+  @media (max-width:640px) {
+    .modal-overlay { align-items:flex-end; padding:0; }
+    .modal { width:100%; max-width:none!important; max-height:92dvh; padding:22px 18px calc(22px + env(safe-area-inset-bottom)); border-radius:22px 22px 0 0; animation:sheet-in var(--immersive) var(--ease); }
+    @keyframes sheet-in { from { opacity:0; transform:translateY(28px); } }
+  }

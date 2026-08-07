@@ -21,6 +21,9 @@
   .discover-hero-poster { justify-self:center; width:min(240px,80%); aspect-ratio:2/3; min-height:0; overflow:hidden; padding:0; border:1px solid rgba(255,255,255,.18); border-radius:16px; background:var(--surface); color:var(--text2); box-shadow:0 32px 80px rgba(0,0,0,.55); cursor:pointer; transform:perspective(900px) rotateY(-5deg); transition:transform var(--immersive) var(--ease),filter var(--immersive) var(--ease); }
   .discover-hero-poster:hover,.discover-hero-poster:focus-visible { transform:perspective(900px) rotateY(0) translateY(-8px) scale(1.015); filter:brightness(1.08); }
   .discover-hero-poster img { width:100%; height:100%; object-fit:cover; }
+  .discover-hero-empty { grid-template-columns:1fr; min-height:360px; }
+  .discover-hero-empty::before { opacity:.2; background-image:radial-gradient(circle at 68% 42%,var(--gold-dim),transparent 36%); filter:none; transform:none; }
+  .discover-hero-empty h1 { max-width:12ch; }
   .discover-section-heading { margin:0 0 16px; }
   .discover-section-heading h2 { margin-top:4px; font:500 clamp(1.5rem,3vw,2.2rem) Georgia,"Songti SC",serif; }
   @keyframes hero-cross { from { opacity:0; transform:scale(1.14); } }

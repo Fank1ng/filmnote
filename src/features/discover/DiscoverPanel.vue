@@ -87,7 +87,7 @@ const pageMovies = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value;
   return filteredMovies.value.slice(start, start + pageSize.value);
 });
-const heroMovie = computed(() => pageMovies.value[0] || null);
+const heroMovie = computed(() => filteredMovies.value.find(movie => !isRated(movie)) || null);
 function mediaType(movie: { media_type?: unknown; type?: unknown }): MediaType {
   return normalizeMediaType(movie.media_type || movie.type || 'movie');
 }
@@ -337,6 +337,13 @@ onMounted(() => {
           <span v-else>暂无海报</span>
         </button>
       </article>
+      <section v-else class="discover-hero discover-hero-empty" aria-labelledby="discover-hero-empty-title">
+        <div class="discover-hero-copy">
+          <p class="eyebrow">SCREENING COMPLETE</p>
+          <h1 id="discover-hero-empty-title">这一栏都已评分</h1>
+          <p>主舞台只放映还没评价的电影；已评分影片仍保留在下方片架中。</p>
+        </div>
+      </section>
 
       <div class="discover-section-heading"><p class="eyebrow">FILMS ON THE SHELF</p><h2>{{ tabLabel(activeTab) }}</h2></div>
       <div class="discover-grid">

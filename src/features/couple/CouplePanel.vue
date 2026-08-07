@@ -155,6 +155,17 @@ const archiveData = computed(() => {
     time: calcArchiveTime(pairs),
   };
 });
+const archiveTimeline = computed(() => archiveData.value.pairs.map(pair => {
+  const mineDate = entryRecordDate(pair.mine);
+  const partnerDate = entryRecordDate(pair.partner);
+  const recordDate = !mineDate ? partnerDate : !partnerDate ? mineDate : mineDate > partnerDate ? mineDate : partnerDate;
+  return {
+    ...pair,
+    recordDate,
+    isHarmony: archiveData.value.harmony?.tmdbId === pair.tmdbId,
+    isSplit: archiveData.value.split?.tmdbId === pair.tmdbId,
+  };
+}).sort((a, b) => Number(b.recordDate || 0) - Number(a.recordDate || 0)));
 const overviewHero = computed(() => archiveData.value.harmony?.mine || archiveData.value.split?.mine || commonPairs.value[0]?.mine || null);
 const overviewHeroPoster = computed(() => overviewHero.value ? posterUrl(posterFor(overviewHero.value)) : '');
 const overviewRecommendation = computed(() => couple.recommendations[0] || null);
@@ -394,6 +405,10 @@ async function openRecommendation(movie: TmdbMedia): Promise<void> {
   mediaActions.openMediaDetail({ ...movie, id: tmdbId(movie), tmdb_id: tmdbId(movie), media_type: mediaType(movie.media_type || movie.type) });
 }
 
+function openArchiveMovie(item: typeof archiveTimeline.value[number]): void {
+  mediaActions.openMediaDetail({ ...item.mine, id: item.tmdbId, tmdb_id: item.tmdbId, media_type: 'movie' });
+}
+
 function averageDims(source: Entry[]): Record<RatingDim, number> {
   const result = {} as Record<RatingDim, number>;
   (Object.keys(WEIGHTS) as RatingDim[]).forEach(dim => {
@@ -432,14 +447,24 @@ function calcTypeDistribution(source: Entry[]): Record<string, number> {
   return result;
 }
 
+function entryRecordDate(entry: Entry): Date | null {
+  const date = new Date(entry.created_at || entry.updated_at || 0);
+  return Number.isNaN(date.getTime()) || date.getTime() <= 0 ? null : date;
+}
+
+function formatRecordDate(date: Date | null): string {
+  return date ? new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'short', day: 'numeric' }).format(date) : '日期未记录';
+}
+
 function calcArchiveTime(pairs: Array<{ mine: Entry; partner: Entry; avg: number }>): { monthCount: number; daysAgo: number | null; streak: number } {
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const datedPairs = pairs.map(pair => {
-    const mineDate = new Date(pair.mine.created_at || pair.mine.updated_at || 0);
-    const partnerDate = new Date(pair.partner.created_at || pair.partner.updated_at || 0);
-    return { ...pair, latestDate: mineDate > partnerDate ? mineDate : partnerDate };
-  }).filter(pair => !Number.isNaN(pair.latestDate.getTime()));
+    const mineDate = entryRecordDate(pair.mine);
+    const partnerDate = entryRecordDate(pair.partner);
+    const latestDate = !mineDate ? partnerDate : !partnerDate ? mineDate : mineDate > partnerDate ? mineDate : partnerDate;
+    return { ...pair, latestDate };
+  }).filter((pair): pair is typeof pair & { latestDate: Date } => !!pair.latestDate);
   const monthCount = datedPairs.filter(pair => pair.latestDate >= monthStart).length;
   const recentHigh = datedPairs.filter(pair => pair.avg >= 7).sort((a, b) => Number(b.latestDate) - Number(a.latestDate))[0] || null;
   const daysAgo = recentHigh ? Math.max(0, Math.floor((Date.now() - Number(recentHigh.latestDate)) / 86400000)) : null;
@@ -639,7 +664,35 @@ onMounted(() => {
         </nav>
       </section>
 
-      <div v-else-if="tab === 'archive'" class="couple-archive">
+      <div
+        v-else-if="tab === 'archive'"
+        class="couple-archive couple-memory-page"
+        :style="{ '--memory-hero': archiveData.harmony ? `url(${posterUrl(posterFor(archiveData.harmony.mine))})` : 'none' }"
+      >
+        <section class="memory-prologue" aria-labelledby="memory-prologue-title">
+          <div class="memory-prologue-copy">
+            <p class="couple-kicker">OUR SHARED CUT</p>
+            <h2 id="memory-prologue-title">两个人，一条电影时间线</h2>
+            <p>{{ archiveData.harmony ? `${archiveData.harmony.mine.title} 是目前最接近的一次共鸣。` : '共同评价同一部电影后，这里会开始记录你们的关系片段。' }}</p>
+          </div>
+          <button
+            class="memory-poster-stack interactive-stack"
+            :class="{ open: stackOpen, empty: !posterStack(archiveData.pairs.map(pair => pair.mine)).length }"
+            type="button"
+            :aria-expanded="stackOpen"
+            aria-label="展开共同观影海报"
+            @click="stackOpen = !stackOpen"
+          >
+            <img v-for="poster in posterStack(archiveData.pairs.map(pair => pair.mine))" :key="poster" :src="posterUrl(poster)" alt="">
+            <span v-if="!posterStack(archiveData.pairs.map(pair => pair.mine)).length">等待共同海报</span>
+          </button>
+          <div class="memory-prologue-stats" aria-label="关系摘要">
+            <span><b>{{ compatibility.overall }}</b>默契指数</span>
+            <span><b>{{ compatibility.sample }}</b>共同样本</span>
+            <span><b>{{ archiveData.time.monthCount }}</b>本月记录</span>
+            <span><b>{{ archiveData.time.streak }}</b>连续周数</span>
+          </div>
+        </section>
         <section class="couple-reveal" :class="{ revealed: ratingsRevealed }">
           <div class="reveal-curtain left"></div><div class="reveal-curtain right"></div>
           <div class="reveal-mark fd"><span>FD</span><strong>{{ archiveData.harmony?.mineScore.toFixed(1) || '—' }}</strong></div>
@@ -647,52 +700,49 @@ onMounted(() => {
           <div class="reveal-mark ceci"><span>{{ partnerName }}</span><strong>{{ archiveData.harmony?.partnerScore.toFixed(1) || '—' }}</strong></div>
           <p>{{ archiveData.harmony ? `共同高分差 ${archiveData.harmony.diff.toFixed(1)}` : '共同评分后生成揭晓' }}</p>
         </section>
-        <div class="couple-archive-top">
-          <div class="couple-archive-card">
-            <div class="couple-poster-stack interactive-stack" :class="{ 'couple-poster-stack-empty': !posterStack(archiveData.pairs.map(pair => pair.mine)).length, open: stackOpen }" role="button" tabindex="0" aria-label="展开共同观影海报" @click="stackOpen = !stackOpen" @keydown.enter="stackOpen = !stackOpen">
-              <img v-for="poster in posterStack(archiveData.pairs.map(pair => pair.mine))" :key="poster" :src="poster" alt="">
-            </div>
-            <div class="couple-archive-card-body">
-              <span>关系仪表盘</span>
-              <strong style="color:var(--gold)">{{ compatibility.overall }}</strong>
-              <p>默契指数 · 共同样本 {{ compatibility.sample }} 部</p>
-            </div>
-          </div>
-          <div class="couple-archive-card">
-            <div class="couple-poster-stack" :class="{ 'couple-poster-stack-empty': !posterStack([archiveData.harmony?.mine]).length }">
-              <img v-for="poster in posterStack([archiveData.harmony?.mine])" :key="poster" :src="poster" alt="">
-            </div>
-            <div class="couple-archive-card-body">
-              <span>共同封神</span>
-              <strong :style="{ color: partnerColor.main }">{{ archiveData.harmony?.mine.title || '暂无共同电影' }}</strong>
-              <p>{{ archiveData.harmony ? `你 ${archiveData.harmony.mineScore.toFixed(1)} / ${partnerName} ${archiveData.harmony.partnerScore.toFixed(1)}` : '共同评分后生成' }}</p>
-            </div>
-          </div>
-          <div class="couple-archive-card">
-            <div class="couple-poster-stack" :class="{ 'couple-poster-stack-empty': !posterStack(couple.queue).length }">
-              <img v-for="poster in posterStack(couple.queue)" :key="poster" :src="poster" alt="">
-            </div>
-            <div class="couple-archive-card-body">
-              <span>下次看决策</span>
-              <strong style="color:var(--friend)">{{ couple.queue.length }} 部</strong>
-              <p>点击转盘抽一部</p>
-            </div>
-          </div>
-          <div class="couple-archive-card">
-            <div class="couple-poster-stack couple-poster-stack-empty"></div>
-            <div class="couple-archive-card-body">
-              <span>时间节奏</span>
-              <strong style="color:#63c79d">{{ archiveData.time.monthCount }} 部</strong>
-              <p>本月共同评分 · 连续 {{ archiveData.time.streak || 0 }} 周</p>
-            </div>
-          </div>
-        </div>
+        <section class="memory-timeline" aria-labelledby="memory-timeline-title">
+          <header class="memory-section-head">
+            <div><p class="couple-kicker">RECORD TIMELINE</p><h2 id="memory-timeline-title">共同影片记录</h2></div>
+            <p>按双方较晚的记录日期排列</p>
+          </header>
+          <EmptyState v-if="!archiveTimeline.length" title="还没有共同影片" detail="双方评价同一部电影后，会在这里形成第一条关系记录。" />
+          <ol v-else class="memory-timeline-list">
+            <li
+              v-for="(item, index) in archiveTimeline"
+              :key="item.tmdbId"
+              class="memory-timeline-item"
+              :class="{ harmony: item.isHarmony, split: item.isSplit }"
+              :style="{ '--timeline-delay': `${Math.min(index, 5) * 40}ms` }"
+            >
+              <div class="memory-timeline-marker" aria-hidden="true"><span>{{ String(index + 1).padStart(2, '0') }}</span></div>
+              <button type="button" class="memory-film" :aria-label="`查看 ${item.mine.title} 详情`" @click="openArchiveMovie(item)">
+                <span class="memory-film-poster">
+                  <img v-if="posterFor(item.mine)" :src="posterUrl(posterFor(item.mine))" :alt="item.mine.title" loading="lazy">
+                  <i v-else>暂无海报</i>
+                </span>
+                <span class="memory-film-copy">
+                  <span class="memory-film-date">记录日期 · {{ formatRecordDate(item.recordDate) }}</span>
+                  <span v-if="item.isHarmony || item.isSplit" class="memory-film-flags">
+                    <b v-if="item.isHarmony">最大共鸣</b><b v-if="item.isSplit" class="split">最大分歧</b>
+                  </span>
+                  <strong>{{ item.mine.title }}</strong>
+                  <span class="memory-film-meta">{{ item.mine.year || '年份未知' }} · 平均 {{ item.avg.toFixed(1) }} · 差值 {{ item.diff.toFixed(1) }}</span>
+                  <span class="memory-score-pair">
+                    <i><small>我</small><b>{{ item.mineScore.toFixed(1) }}</b></i>
+                    <em aria-hidden="true"></em>
+                    <i class="partner"><small>{{ partnerName }}</small><b>{{ item.partnerScore.toFixed(1) }}</b></i>
+                  </span>
+                </span>
+              </button>
+            </li>
+          </ol>
+        </section>
 
-        <div class="couple-archive-layout">
-          <div class="couple-archive-main">
+        <section class="memory-analysis" aria-labelledby="memory-analysis-title">
+          <div class="memory-radar-stage">
             <div class="couple-section-head">
               <div>
-                <div class="couple-section-title">主图切换区</div>
+                <div id="memory-analysis-title" class="couple-section-title">关系分析</div>
                 <p class="couple-note">同一位置切换评分默契与 12 维类型分布</p>
               </div>
               <div class="couple-chart-toggle">
@@ -727,76 +777,51 @@ onMounted(() => {
             </div>
           </div>
 
-          <div class="couple-archive-left">
-            <div class="couple-story-card">
-              <div class="couple-poster-stack" :class="{ 'couple-poster-stack-empty': !posterStack([archiveData.harmony?.mine]).length }">
-                <img v-for="poster in posterStack([archiveData.harmony?.mine])" :key="poster" :src="poster" alt="">
-              </div>
-              <span>最大共鸣</span>
-              <strong>{{ archiveData.harmony?.mine.title || '暂无共同电影' }}</strong>
-              <em>{{ archiveData.harmony ? `共同高分 · 差 ${archiveData.harmony.diff.toFixed(1)}` : '共同样本越多越准' }}</em>
-              <p>统计像故事，不只是数字</p>
+          <aside class="memory-diff-stage" aria-label="六维评分分歧">
+            <p class="couple-kicker">SCORE DISTANCE</p>
+            <h3>六维分歧</h3>
+            <p class="couple-note">数值越高，双方评分差异越明显。</p>
+            <div v-for="row in diffRows" :key="row.dim" class="couple-diff-row">
+              <span>{{ row.label }}</span>
+              <i><b :style="{ width: `${Math.min(row.diff / 2, 1) * 100}%`, background: row.color }"></b></i>
+              <em>{{ row.diff.toFixed(1) }}</em>
             </div>
-            <div class="couple-story-card">
-              <div class="couple-poster-stack" :class="{ 'couple-poster-stack-empty': !posterStack([archiveData.split?.mine]).length }">
-                <img v-for="poster in posterStack([archiveData.split?.mine])" :key="poster" :src="poster" alt="">
-              </div>
-              <span>最大分歧</span>
-              <strong>{{ archiveData.split?.mine.title || '暂无共同电影' }}</strong>
-              <em>{{ archiveData.split ? `总分差 ${archiveData.split.diff.toFixed(1)}` : '共同样本越多越准' }}</em>
-              <p>保留一点饭后讨论的趣味</p>
-            </div>
-            <div class="couple-story-card no-poster">
-              <span>Couple 成就</span>
-              <div class="couple-achievement"><strong style="color:var(--gold)">同步审美</strong><span>{{ archiveData.pairs.filter(pair => pair.diff < 1).length }} 部分差 &lt; 1</span></div>
-              <div class="couple-achievement"><strong style="color:var(--ceci)">分歧名场面</strong><span>{{ archiveData.pairs.filter(pair => pair.diff >= 3).length }} 部差距 >= 3</span></div>
-              <div class="couple-achievement"><strong style="color:var(--friend)">意见领袖</strong><span>{{ couple.queue.length }} 部待验证</span></div>
-            </div>
+          </aside>
+        </section>
+
+        <footer class="memory-finale" aria-labelledby="memory-finale-title">
+          <div class="memory-finale-copy">
+            <p class="couple-kicker">END CREDITS</p>
+            <h2 id="memory-finale-title">这一段关系的片尾数据</h2>
+            <strong>{{ archiveData.time.daysAgo === null ? '暂无同步高分' : `最近一次同步高分在 ${archiveData.time.daysAgo} 天前` }}</strong>
+            <p>本月共同记录 {{ archiveData.time.monthCount }} 部 · 连续 {{ archiveData.time.streak || 0 }} 周留下共同记录</p>
           </div>
-
-          <div class="couple-archive-right">
-            <div class="couple-archive-side-card">
-              <div class="couple-section-title">下次看：转盘抽一部</div>
-              <p class="couple-note">从队列按默契权重随机</p>
-              <div class="couple-wheel-row">
-                <button class="couple-wheel" :class="{ spinning: wheelSpinning }" type="button" aria-label="抽一部" :disabled="wheelSpinning" @click="spinWheel">
-                  <span v-for="(label, index) in wheelLabels" :key="label" :style="{ '--i': index }">{{ label }}</span>
-                  <b>抽</b>
-                </button>
-                <div class="couple-wheel-stats">
-                  <span>今晚命中率</span><strong>{{ wheelHitCount }}/{{ couple.queue.length || 0 }}</strong>
-                  <span>安全选择</span><strong>{{ topTypeLabel }}</strong>
-                </div>
-              </div>
-              <div v-if="wheelPick" class="couple-wheel-result chosen" :data-queue-id="wheelPick.id" @click="openQueue(wheelPick)">
-                <img v-if="posterUrl(wheelPick.poster_path)" :src="posterUrl(wheelPick.poster_path)" alt="">
-                <div v-else></div>
-                <strong>{{ wheelPick.title }}</strong>
-                <span>{{ wheelPick.year || '未知' }} · {{ mediaTypeLabel(wheelPick.media_type) }}</span>
-                <button class="btn btn-xs btn-secondary" type="button" @click.stop="rateQueue(wheelPick)">评分</button>
-                <button class="btn btn-xs btn-danger" type="button" @click.stop="removeQueue(wheelPick); wheelPickId = null">移除</button>
-              </div>
-              <p v-else class="couple-muted">{{ couple.queue.length ? '点击转盘抽一部' : '下次看队列为空' }}</p>
-            </div>
-
-            <div class="couple-archive-side-card">
-              <div class="couple-section-title">分歧雷达</div>
-              <p class="couple-note">辅助评分默契图</p>
-              <div v-for="row in diffRows" :key="row.dim" class="couple-diff-row">
-                <span>{{ row.label }}</span>
-                <i><b :style="{ width: `${Math.min(row.diff / 2, 1) * 100}%`, background: row.color }"></b></i>
-                <em>{{ row.diff.toFixed(1) }}</em>
-              </div>
-            </div>
-
-            <div class="couple-archive-side-card">
-              <div class="couple-section-title">时间动态</div>
-              <strong class="couple-time-highlight">{{ archiveData.time.daysAgo === null ? '暂无同步高分' : `最近一次同步高分：${archiveData.time.daysAgo} 天前` }}</strong>
-              <p>本月共同评分 {{ archiveData.time.monthCount }} 部</p>
-              <p>连续 {{ archiveData.time.streak || 0 }} 周都有共同观影记录</p>
-            </div>
+          <div class="memory-achievement-strip" aria-label="Couple 成就">
+            <span><b>同步审美</b>{{ archiveData.pairs.filter(pair => pair.diff < 1).length }} 部分差小于 1</span>
+            <span><b>分歧名场面</b>{{ archiveData.pairs.filter(pair => pair.diff >= 3).length }} 部分差至少 3</span>
+            <span><b>待验证</b>{{ couple.queue.length }} 部留在下次看片单</span>
           </div>
-        </div>
+          <div class="memory-wheel-console">
+            <div><p class="couple-kicker">NEXT SCREENING</p><h3>转盘抽一部</h3><p>从队列按默契权重随机</p></div>
+            <button class="couple-wheel" :class="{ spinning: wheelSpinning }" type="button" aria-label="从下次看队列抽一部" :disabled="wheelSpinning || !couple.queue.length" @click="spinWheel">
+              <span v-for="(label, index) in wheelLabels" :key="label" :style="{ '--i': index }">{{ label }}</span>
+              <b>抽</b>
+            </button>
+            <div class="couple-wheel-stats">
+              <span>今晚命中率</span><strong>{{ wheelHitCount }}/{{ couple.queue.length || 0 }}</strong>
+              <span>安全选择</span><strong>{{ topTypeLabel }}</strong>
+            </div>
+            <div v-if="wheelPick" class="couple-wheel-result chosen" :data-queue-id="wheelPick.id" @click="openQueue(wheelPick)">
+              <img v-if="posterUrl(wheelPick.poster_path)" :src="posterUrl(wheelPick.poster_path)" alt="">
+              <div v-else></div>
+              <strong>{{ wheelPick.title }}</strong>
+              <span>{{ wheelPick.year || '未知' }} · {{ mediaTypeLabel(wheelPick.media_type) }}</span>
+              <button class="btn btn-xs btn-secondary" type="button" @click.stop="rateQueue(wheelPick)">评分</button>
+              <button class="btn btn-xs btn-danger" type="button" @click.stop="removeQueue(wheelPick); wheelPickId = null">移除</button>
+            </div>
+            <p v-else class="couple-muted">{{ couple.queue.length ? '点击转盘抽一部' : '下次看队列为空' }}</p>
+          </div>
+        </footer>
       </div>
 
       <div v-else-if="tab === 'recommend'" class="couple-section couple-recommend-stage">

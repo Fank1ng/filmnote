@@ -45,7 +45,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 button:disabled { cursor:not-allowed; opacity:.45; }
 ::selection { color:#07080b; background:var(--gold); }
 @media (prefers-reduced-motion:reduce) {
-  *,*::before,*::after { scroll-behavior:auto!important; animation-duration:120ms!important; animation-delay:0ms!important; animation-iteration-count:1!important; transition-duration:120ms!important; }
+  *,*::before,*::after { scroll-behavior:auto!important; animation-name:fade-only!important; animation-duration:120ms!important; animation-delay:0ms!important; animation-iteration-count:1!important; transition-property:opacity!important; transition-duration:120ms!important; }
 }
 .reduce-motion *, .reduce-motion *::before, .reduce-motion *::after { scroll-behavior:auto!important; animation-name:fade-only!important; animation-duration:120ms!important; animation-delay:0ms!important; animation-iteration-count:1!important; transition-property:opacity!important; transition-duration:120ms!important; }
 @keyframes fade-only { from { opacity:0; } }

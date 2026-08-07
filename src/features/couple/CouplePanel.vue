@@ -19,8 +19,8 @@ import type { CoupleQueueItem, Entry, MediaType, TmdbMedia } from '../../types/d
 
 defineOptions({ name: 'CouplePanel' });
 
-type CoupleTab = 'archive' | 'recommend' | 'queue';
-const props = withDefaults(defineProps<{ activeTab?: CoupleTab }>(), { activeTab: 'archive' });
+type CoupleTab = 'overview' | 'archive' | 'recommend' | 'queue';
+const props = withDefaults(defineProps<{ activeTab?: CoupleTab }>(), { activeTab: 'overview' });
 type CoupleControls = {
   tab?: CoupleTab;
   queueAvailable?: boolean;
@@ -88,6 +88,7 @@ const ratingsRevealed = ref(false);
 const stackOpen = ref(false);
 const movingQueueId = ref<string | number | null>(null);
 const detailCache = ref<Record<string, CacheDetail>>({});
+const stageReplay = ref(0);
 
 const watchlistIds = computed(() => lists.watchlistIds);
 const queueIds = computed(() => new Set(couple.queue.map(item => `${mediaType(item.media_type)}:${item.tmdb_id}`)));
@@ -154,6 +155,15 @@ const archiveData = computed(() => {
     time: calcArchiveTime(pairs),
   };
 });
+const overviewHero = computed(() => archiveData.value.harmony?.mine || archiveData.value.split?.mine || commonPairs.value[0]?.mine || null);
+const overviewHeroPoster = computed(() => overviewHero.value ? posterUrl(posterFor(overviewHero.value)) : '');
+const overviewRecommendation = computed(() => couple.recommendations[0] || null);
+const stageMeta: Record<Exclude<CoupleTab, 'overview'>, { eyebrow: string; title: string; detail: string }> = {
+  archive: { eyebrow: 'SHARED MEMORY', title: '共同记忆', detail: '默契、分歧和时间在同一块银幕上展开。' },
+  recommend: { eyebrow: 'TONIGHT\'S PROGRAM', title: '今晚推荐', detail: '同时命中两个人偏好的候选片单。' },
+  queue: { eyebrow: 'PROJECTION QUEUE', title: '下次看', detail: '排序、抽片和评分都在放映控制台完成。' },
+};
+const currentStageMeta = computed(() => tab.value === 'overview' ? null : stageMeta[tab.value]);
 const radarAxes = computed<ArchiveAxis[]>(() => {
   if (chartMode.value === 'type') {
     return coupleTypeDimensions.map(dim => ({
@@ -196,7 +206,7 @@ const diffRows = computed(() => (Object.keys(WEIGHTS) as RatingDim[]).map(dim =>
 }));
 
 function applyControls(controls: CoupleControls): void {
-  if (controls.tab === 'archive' || controls.tab === 'recommend' || controls.tab === 'queue') tab.value = controls.tab;
+  if (controls.tab === 'overview' || controls.tab === 'archive' || controls.tab === 'recommend' || controls.tab === 'queue') tab.value = controls.tab;
   if ((controls as { archiveChart?: string }).archiveChart) chartMode.value = (controls as { archiveChart?: string }).archiveChart === 'type' ? 'type' : 'score';
   if ('queueAvailable' in controls) queueAvailable.value = !!controls.queueAvailable;
   if ('couplesAvailable' in controls) couplesAvailable.value = !!controls.couplesAvailable;
@@ -245,7 +255,19 @@ function setTab(nextTab: CoupleTab): void {
   if (nextTab === 'recommend' && couple.recommendationState === 'idle') void loadRecommendations(false);
 }
 
-watch(() => props.activeTab, nextTab => setTab(nextTab), { immediate: true });
+function navigateStage(nextTab: CoupleTab): void {
+  const update = () => ui.navigate(`together/${nextTab}`);
+  if (!ui.motionReduced && document.startViewTransition) document.startViewTransition(update).finished.catch(() => undefined);
+  else update();
+}
+
+watch(() => props.activeTab, nextTab => {
+  setTab(nextTab);
+  stageReplay.value += 1;
+}, { immediate: true });
+watch(() => ui.activeTab, activeTab => {
+  if (activeTab === 'together') stageReplay.value += 1;
+});
 
 function setChartMode(nextMode: 'score' | 'type'): void {
   chartMode.value = nextMode;
@@ -529,11 +551,95 @@ onMounted(() => {
     </div>
 
     <template v-else>
+      <div :key="stageReplay" class="couple-dashboard" :data-stage="tab">
+        <header v-if="tab === 'overview'" class="couple-overview-heading">
+          <p class="couple-kicker">A CINEMA FOR TWO</p>
+          <h1 id="couple-overview-title">我们的放映厅</h1>
+          <p>共同记忆、今晚推荐和下一部电影，都从这一块银幕开始。</p>
+        </header>
+        <header v-else class="couple-console-head">
+          <button class="couple-back" type="button" @click="navigateStage('overview')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6" /></svg>
+            返回总览
+          </button>
+          <div class="couple-console-title">
+            <p class="couple-kicker">{{ currentStageMeta?.eyebrow }}</p>
+            <h1>{{ currentStageMeta?.title }}</h1>
+            <p>{{ currentStageMeta?.detail }}</p>
+          </div>
+          <nav class="couple-console-nav" aria-label="双人放映厅场景">
+            <button type="button" :class="{ active: tab === 'archive' }" :aria-current="tab === 'archive' ? 'page' : undefined" @click="navigateStage('archive')"><span>01</span>共同记忆</button>
+            <button type="button" :class="{ active: tab === 'recommend' }" :aria-current="tab === 'recommend' ? 'page' : undefined" @click="navigateStage('recommend')"><span>02</span>今晚推荐</button>
+            <button type="button" :class="{ active: tab === 'queue' }" :aria-current="tab === 'queue' ? 'page' : undefined" @click="navigateStage('queue')"><span>03</span>下次看</button>
+          </nav>
+        </header>
+
       <div v-if="disconnectRequester" class="couple-section couple-disconnect-notice">
         <p>{{ disconnectByMe ? '已发送解除申请，等待对方同意。' : `${partnerName} 请求解除 Couple，同意后共享下次看队列会一起删除。` }}</p>
       </div>
 
-      <div v-if="tab === 'archive'" class="couple-archive">
+      <section
+        v-if="tab === 'overview'"
+        class="couple-overview"
+        aria-labelledby="couple-overview-title"
+        :style="{ '--couple-hero': overviewHeroPoster ? `url(${overviewHeroPoster})` : 'none' }"
+      >
+        <div class="couple-projector-stage">
+          <div class="couple-stage-backdrop" aria-hidden="true"></div>
+          <div class="couple-curtain left" aria-hidden="true"></div>
+          <div class="couple-curtain right" aria-hidden="true"></div>
+          <div class="couple-stage-copy">
+            <p class="couple-kicker">FD × {{ partnerName }}</p>
+            <h2>{{ overviewHero?.title || '等待第一部共同记忆' }}</h2>
+            <p v-if="archiveData.harmony">共同评分 {{ archiveData.harmony.mineScore.toFixed(1) }} / {{ archiveData.harmony.partnerScore.toFixed(1) }}，差值 {{ archiveData.harmony.diff.toFixed(1) }}</p>
+            <p v-else>共同评价同一部电影后，这里会成为你们的主舞台。</p>
+          </div>
+          <div class="couple-stage-marks" aria-label="双方关系摘要">
+            <span><b>FD</b><strong>{{ archiveData.harmony?.mineScore.toFixed(1) || '—' }}</strong></span>
+            <i aria-hidden="true">×</i>
+            <span class="ceci"><b>{{ partnerName }}</b><strong>{{ archiveData.harmony?.partnerScore.toFixed(1) || '—' }}</strong></span>
+          </div>
+          <div class="couple-stage-stats">
+            <span><b>{{ compatibility.overall }}</b>默契指数</span>
+            <span><b>{{ compatibility.sample }}</b>共同样本</span>
+            <span><b>{{ archiveData.time.daysAgo ?? '—' }}</b>最近同步高分 / 天</span>
+            <span><b>{{ couple.queue.length }}</b>下次看</span>
+          </div>
+        </div>
+
+        <nav class="couple-gateway-grid" aria-label="进入双人放映厅场景">
+          <button class="couple-gateway memory" type="button" @click="navigateStage('archive')">
+            <span class="gateway-number">01 / ARCHIVE</span>
+            <span class="gateway-poster-stack" aria-hidden="true">
+              <img v-for="poster in posterStack(archiveData.pairs.map(pair => pair.mine))" :key="poster" :src="posterUrl(poster)" alt="">
+            </span>
+            <strong>共同记忆</strong>
+            <small>{{ compatibility.sample }} 部共同电影 · 最大分歧 {{ archiveData.split?.diff.toFixed(1) || '—' }}</small>
+            <em>进入档案</em>
+          </button>
+          <button class="couple-gateway recommend" type="button" @click="navigateStage('recommend')">
+            <span class="gateway-number">02 / PROGRAM</span>
+            <span class="gateway-feature-poster" aria-hidden="true">
+              <img v-if="overviewRecommendation?.poster_path" :src="posterUrl(overviewRecommendation.poster_path)" alt="">
+              <b v-else>FD<br>&amp;<br>{{ partnerName }}</b>
+            </span>
+            <strong>今晚推荐</strong>
+            <small>{{ overviewRecommendation ? movieTitle(overviewRecommendation) : '进入后生成双人推荐片单' }}</small>
+            <em>打开节目单</em>
+          </button>
+          <button class="couple-gateway queue" type="button" @click="navigateStage('queue')">
+            <span class="gateway-number">03 / QUEUE</span>
+            <span class="gateway-queue-posters" aria-hidden="true">
+              <img v-for="poster in posterStack(couple.queue)" :key="poster" :src="posterUrl(poster)" alt="">
+            </span>
+            <strong>下次看</strong>
+            <small>{{ couple.queue.length ? `${couple.queue.length} 部待决定 · 安全选择 ${topTypeLabel}` : '队列还是空的' }}</small>
+            <em>进入放映控制台</em>
+          </button>
+        </nav>
+      </section>
+
+      <div v-else-if="tab === 'archive'" class="couple-archive">
         <section class="couple-reveal" :class="{ revealed: ratingsRevealed }">
           <div class="reveal-curtain left"></div><div class="reveal-curtain right"></div>
           <div class="reveal-mark fd"><span>FD</span><strong>{{ archiveData.harmony?.mineScore.toFixed(1) || '—' }}</strong></div>
@@ -693,7 +799,7 @@ onMounted(() => {
         </div>
       </div>
 
-      <div v-else-if="tab === 'recommend'" class="couple-section">
+      <div v-else-if="tab === 'recommend'" class="couple-section couple-recommend-stage">
         <div class="couple-section-head">
           <div class="couple-section-title">双人推荐</div>
           <button class="btn btn-xs btn-secondary" type="button" :disabled="recommendationLoading" @click.stop="loadRecommendations(true)">换一批</button>
@@ -701,11 +807,12 @@ onMounted(() => {
         <div v-if="recommendationLoading" class="discover-spinner"><div class="spinner"></div></div>
         <EmptyState v-else-if="couple.recommendationState === 'insufficient'" title="双方各评价 5 部、合计 25 部电影后生成双人推荐" />
         <EmptyState v-else-if="couple.recommendationState === 'error'" title="双人推荐加载失败" detail="稍后可再换一批。" />
-        <div v-else-if="couple.recommendations.length" class="discover-grid">
+        <div v-else-if="couple.recommendations.length" class="discover-grid couple-program-grid">
           <article
-            v-for="movie in couple.recommendations.slice(0, 8)"
+            v-for="(movie, index) in couple.recommendations.slice(0, 8)"
             :key="tmdbId(movie)"
             class="discover-card"
+            :class="{ 'program-spotlight': index === 0 }"
             :data-tmdb-id="tmdbId(movie)"
             :data-media-type="mediaType(movie.media_type || movie.type)"
             @click="openRecommendation(movie)"
@@ -716,8 +823,10 @@ onMounted(() => {
               <span v-if="movie.vote_average" class="dc-tmdb-score">TMDB {{ Number(movie.vote_average).toFixed(1) }}</span>
             </div>
             <div class="dc-info">
+              <p v-if="index === 0" class="program-kicker">TONIGHT'S FIRST CHOICE</p>
               <div class="dc-title">{{ movieTitle(movie) }}</div>
               <div class="dc-meta">{{ movieYear(movie) }}{{ movie.original_language ? ` · ${movie.original_language.toUpperCase()}` : '' }}</div>
+              <p v-if="index === 0 && movie.reasons?.length" class="program-reason">{{ movie.reasons.slice(0, 2).join(' · ') }}</p>
               <div class="dc-action" @click.stop>
                 <div v-if="isRated(movie)" class="dc-rated-badge">已评价 ✓</div>
                 <div v-else class="dc-action-row">
@@ -748,36 +857,64 @@ onMounted(() => {
         <EmptyState v-else title="暂时没有可用的双人推荐" />
       </div>
 
-      <div v-else class="couple-section">
-        <div class="couple-section-title">下次看</div>
-        <EmptyState v-if="!queueAvailable" title="下次看表尚未创建，请先执行升级 SQL" />
-        <TransitionGroup v-else-if="couple.queue.length" name="queue-shift" tag="div" class="queue-list">
-          <div
-            v-for="(item, index) in couple.queue"
-            :key="item.id"
-            class="queue-row"
-            :class="{ lifting: String(movingQueueId) === String(item.id) }"
-            :data-queue-id="item.id"
-            :data-media-type="item.media_type"
-            @click="openQueue(item)"
-          >
-            <div class="queue-rank">{{ index + 1 }}</div>
-            <img v-if="posterUrl(item.poster_path)" :src="posterUrl(item.poster_path)" :alt="item.title || ''" loading="lazy">
-            <div v-else class="queue-poster"></div>
-            <div class="queue-info">
-              <strong>{{ item.title || `TMDB #${item.tmdb_id}` }}</strong>
-              <span>{{ item.year || '未知' }} · {{ mediaTypeLabel(item.media_type) }} · <em :style="{ color: userColor(item.added_by || '').main }">{{ displayName(item.added_by, '未知') }}</em> 加入</span>
+      <div v-else class="couple-section couple-queue-stage">
+        <div class="queue-console-grid">
+          <section class="queue-program-list" aria-labelledby="queue-list-title">
+            <div class="couple-section-head">
+              <div><div id="queue-list-title" class="couple-section-title">待映片单</div><p class="couple-note">上下调整顺序，第一部会优先进入今晚的选择。</p></div>
+              <span class="queue-count">{{ couple.queue.length }} 部</span>
             </div>
-            <div class="queue-actions" @click.stop>
-              <button class="btn btn-xs btn-secondary" type="button" :disabled="index === 0" @click.stop="moveQueue(item, -1)">上移</button>
-              <button class="btn btn-xs btn-secondary" type="button" :disabled="index === couple.queue.length - 1" @click.stop="moveQueue(item, 1)">下移</button>
-              <span v-if="ratingState(item) && ratingState(item) !== '对方已评分 · 等你评分'" class="queue-rating-state">{{ ratingState(item) }}</span>
-              <button v-else class="btn btn-xs btn-secondary" type="button" @click.stop="rateQueue(item)">评分</button>
-              <button class="btn btn-xs btn-danger" type="button" @click.stop="removeQueue(item)">移除</button>
+            <EmptyState v-if="!queueAvailable" title="下次看表尚未创建，请先执行升级 SQL" />
+            <TransitionGroup v-else-if="couple.queue.length" name="queue-shift" tag="div" class="queue-list">
+              <div
+                v-for="(item, index) in couple.queue"
+                :key="item.id"
+                class="queue-row"
+                :class="{ lifting: String(movingQueueId) === String(item.id) }"
+                :data-queue-id="item.id"
+                :data-media-type="item.media_type"
+                @click="openQueue(item)"
+              >
+                <div class="queue-rank">{{ String(index + 1).padStart(2, '0') }}</div>
+                <img v-if="posterUrl(item.poster_path)" :src="posterUrl(item.poster_path)" :alt="item.title || ''" loading="lazy">
+                <div v-else class="queue-poster"></div>
+                <div class="queue-info">
+                  <strong>{{ item.title || `TMDB #${item.tmdb_id}` }}</strong>
+                  <span>{{ item.year || '未知' }} · {{ mediaTypeLabel(item.media_type) }} · <em :style="{ color: userColor(item.added_by || '').main }">{{ displayName(item.added_by, '未知') }}</em> 加入</span>
+                </div>
+                <div class="queue-actions" @click.stop>
+                  <button class="btn btn-xs btn-secondary" type="button" :disabled="index === 0" @click.stop="moveQueue(item, -1)">上移</button>
+                  <button class="btn btn-xs btn-secondary" type="button" :disabled="index === couple.queue.length - 1" @click.stop="moveQueue(item, 1)">下移</button>
+                  <span v-if="ratingState(item) && ratingState(item) !== '对方已评分 · 等你评分'" class="queue-rating-state">{{ ratingState(item) }}</span>
+                  <button v-else class="btn btn-xs btn-secondary" type="button" @click.stop="rateQueue(item)">评分</button>
+                  <button class="btn btn-xs btn-danger" type="button" @click.stop="removeQueue(item)">移除</button>
+                </div>
+              </div>
+            </TransitionGroup>
+            <EmptyState v-else title="还没有下次看的电影/剧集" detail="可从发现页或搜索结果加入。" />
+          </section>
+
+          <aside class="queue-projection-console" aria-label="抽片转盘">
+            <p class="couple-kicker">PROJECTION CONTROL</p>
+            <h2>今晚放哪一部？</h2>
+            <p>按双方类型偏好加权抽取，结果仍可继续评分或移出队列。</p>
+            <button class="couple-wheel queue-wheel" :class="{ spinning: wheelSpinning }" type="button" aria-label="从下次看队列抽一部" :disabled="wheelSpinning || !couple.queue.length" @click="spinWheel">
+              <span v-for="(label, index) in wheelLabels" :key="label" :style="{ '--i': index }">{{ label }}</span>
+              <b>{{ wheelSpinning ? '…' : '抽' }}</b>
+            </button>
+            <div class="queue-console-stats"><span>今晚命中率 <b>{{ wheelHitCount }}/{{ couple.queue.length || 0 }}</b></span><span>安全选择 <b>{{ topTypeLabel }}</b></span></div>
+            <div v-if="wheelPick" class="couple-wheel-result chosen queue-pick" :data-queue-id="wheelPick.id" @click="openQueue(wheelPick)">
+              <img v-if="posterUrl(wheelPick.poster_path)" :src="posterUrl(wheelPick.poster_path)" :alt="wheelPick.title || ''">
+              <div v-else></div>
+              <strong>{{ wheelPick.title }}</strong>
+              <span>{{ wheelPick.year || '未知' }} · {{ mediaTypeLabel(wheelPick.media_type) }}</span>
+              <button class="btn btn-xs btn-secondary" type="button" @click.stop="rateQueue(wheelPick)">评分</button>
+              <button class="btn btn-xs btn-danger" type="button" @click.stop="removeQueue(wheelPick); wheelPickId = null">移除</button>
             </div>
-          </div>
-        </TransitionGroup>
-        <EmptyState v-else title="还没有下次看的电影/剧集" detail="可从发现页或搜索结果加入。" />
+            <p v-else class="couple-muted">{{ couple.queue.length ? '点击转盘，让放映机替你们决定。' : '先从发现页加入候选电影。' }}</p>
+          </aside>
+        </div>
+      </div>
       </div>
     </template>
   </section>

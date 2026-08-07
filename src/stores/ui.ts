@@ -3,7 +3,7 @@ import { clearBrowserTimeout, scheduleBrowserTimeout } from '../shared/browser.j
 
 type MainTab = 'discover' | 'library' | 'record' | 'together' | 'profile';
 type LibraryTab = 'ratings' | 'watchlist' | 'stats';
-type TogetherTab = 'archive' | 'recommend' | 'queue';
+type TogetherTab = 'overview' | 'archive' | 'recommend' | 'queue';
 type AppRoute =
   | 'discover'
   | `library/${LibraryTab}`
@@ -20,6 +20,7 @@ const validRoutes = new Set<AppRoute>([
   'library/watchlist',
   'library/stats',
   'record',
+  'together/overview',
   'together/archive',
   'together/recommend',
   'together/queue',
@@ -62,7 +63,7 @@ export const mainTabs: Array<{ name: MainTab; label: string; href: `#${AppRoute}
   { name: 'discover', label: '发现', href: '#discover', icon: 'discover' },
   { name: 'library', label: '影库', href: '#library/ratings', icon: 'library' },
   { name: 'record', label: '记录', href: '#record', icon: 'record' },
-  { name: 'together', label: '我们', href: '#together/archive', icon: 'together' },
+  { name: 'together', label: '我们', href: '#together/overview', icon: 'together' },
   { name: 'profile', label: '我的', href: '#profile', icon: 'profile' },
 ];
 
@@ -84,13 +85,13 @@ export const useUiStore = defineStore('ui', {
   getters: {
     motionReduced: state => state.reducedMotion || state.systemReducedMotion,
     libraryTab: state => (state.route.startsWith('library/') ? state.route.split('/')[1] : 'ratings') as LibraryTab,
-    togetherTab: state => (state.route.startsWith('together/') ? state.route.split('/')[1] : 'archive') as TogetherTab,
+    togetherTab: state => (state.route.startsWith('together/') ? state.route.split('/')[1] : 'overview') as TogetherTab,
   },
   actions: {
     syncRoute(hash = window.location.hash) {
       const next = normalizeAppRoute(hash);
       const order: AppRoute[] = [
-        'discover', 'library/ratings', 'library/watchlist', 'library/stats', 'record',
+        'discover', 'library/ratings', 'library/watchlist', 'library/stats', 'record', 'together/overview',
         'together/archive', 'together/recommend', 'together/queue', 'profile',
       ];
       const previousIndex = order.indexOf(this.route);
@@ -111,7 +112,7 @@ export const useUiStore = defineStore('ui', {
         discover: 'discover',
         library: 'library/ratings',
         record: 'record',
-        together: 'together/archive',
+        together: 'together/overview',
         profile: 'profile',
       };
       this.navigate(destination[activeTab]);

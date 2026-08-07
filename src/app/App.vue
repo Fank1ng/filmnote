@@ -50,7 +50,7 @@ function observeStickyOffsets(): void {
 
 function routeForTab(tab: MainTab): AppRoute {
   if (tab === 'library') return `library/${ui.libraryTab}`;
-  if (tab === 'together') return `together/${ui.togetherTab}`;
+  if (tab === 'together') return 'together/overview';
   return tab;
 }
 
@@ -67,14 +67,6 @@ function changeTab(tab: MainTab): void {
 
 function setLibraryTab(tab: 'ratings' | 'watchlist' | 'stats'): void {
   navigate(`library/${tab}`);
-}
-
-function setTogetherTab(tab: 'archive' | 'recommend' | 'queue'): void {
-  if (!authenticated.value) {
-    ui.openAuthModal('login');
-    return;
-  }
-  navigate(`together/${tab}`);
 }
 
 function onHashChange(): void {
@@ -215,13 +207,10 @@ onBeforeUnmount(() => {
       </section>
 
       <section v-show="ui.activeTab === 'together'" id="panel-together" class="app-screen" :class="{ active: ui.activeTab === 'together' }">
-        <header class="page-heading compact-heading"><p class="eyebrow">TWO SEATS, ONE SCREEN</p><h1>我们的放映厅</h1><p>双人档案、共同推荐和下一部电影。</p></header>
-        <div class="route-subtabs" role="tablist" aria-label="我们的视图">
-          <button type="button" :class="{ active: ui.togetherTab === 'archive' }" @click="setTogetherTab('archive')">双人档案</button>
-          <button type="button" :class="{ active: ui.togetherTab === 'recommend' }" @click="setTogetherTab('recommend')">共同推荐</button>
-          <button type="button" :class="{ active: ui.togetherTab === 'queue' }" @click="setTogetherTab('queue')">下次看</button>
+        <div v-if="!authenticated">
+          <header class="page-heading compact-heading"><p class="eyebrow">TWO SEATS, ONE SCREEN</p><h1>我们的放映厅</h1><p>双人档案、共同推荐和下一部电影。</p></header>
+          <div class="auth-gate midnight-card"><h2>登录后进入双人放映厅</h2><p>登录不会改变当前入口，完成后可继续查看 Couple 档案。</p><button class="btn btn-primary" type="button" @click="ui.openAuthModal('login')">登录</button></div>
         </div>
-        <div v-if="!authenticated" class="auth-gate midnight-card"><h2>登录后进入双人放映厅</h2><p>登录不会改变当前入口，完成后可继续查看 Couple 档案。</p><button class="btn btn-primary" type="button" @click="ui.openAuthModal('login')">登录</button></div>
         <CouplePanel v-else :active-tab="ui.togetherTab" />
       </section>
 
